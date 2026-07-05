@@ -136,12 +136,25 @@ export interface CharacterCreationInput {
   abilityScores: Record<"strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma", number>;
 }
 
+/** Optional world/tone fields the player can set at creation time (issue #48).
+ * Omitted fields keep the standard-fantasy defaults and stay editable later in
+ * Settings. */
+export interface CampaignCreationSettings {
+  worldSetting?: string;
+  toneWhimsy?: number;
+  contentIntensity?: "standard" | "low";
+}
+
 /** Creates a new campaign from a character-creation form (ADR-0010); the
  * server derives the authoritative sheet and returns the new campaign id. */
-export async function createCampaign(connection: Connection, character: CharacterCreationInput): Promise<string> {
+export async function createCampaign(
+  connection: Connection,
+  character: CharacterCreationInput,
+  settings?: CampaignCreationSettings
+): Promise<string> {
   const result = (await apiFetch(connection, "/campaigns", {
     method: "POST",
-    body: JSON.stringify({ character }),
+    body: JSON.stringify(settings ? { character, settings } : { character }),
   })) as { campaignId: string };
   return result.campaignId;
 }

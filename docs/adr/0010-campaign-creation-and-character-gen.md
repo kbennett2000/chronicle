@@ -68,3 +68,14 @@ abilities and shows derived HP/AC/modifiers live before creating.
 - Creating a campaign is now a network-exposed write. It stays behind the same
   shared-secret auth as every other route (ADR-0003); ids are slugified and
   pattern-checked, so a create can't escape `campaigns/`.
+
+## Amendment (issue #48) — describe the world at creation
+Field feedback: players expected to describe the world *while* creating a
+character, not only afterward in Settings. `POST /campaigns` now accepts an
+optional `settings` object (`worldSetting`, `toneWhimsy`, `contentIntensity`)
+alongside `character`, validated with the same rules as `POST
+/campaigns/:id/settings` and persisted via `persistCampaignSettings` right after
+`scaffoldCampaign`. The creation form (`NewCharacter.tsx`) gains an optional
+"THE WORLD" section mirroring the Settings vocabulary; omitted fields keep the
+standard-fantasy defaults and stay editable later. New campaigns also scaffold
+`autoRollDice: true` (ADR-0011). No change to the derivation or id rules above.

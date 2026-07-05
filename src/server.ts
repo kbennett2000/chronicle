@@ -34,6 +34,7 @@ import {
   CampaignNotFoundError,
   CampaignExistsError,
   type ContentIntensity,
+  type CampaignSettings,
 } from "./campaign-store.js";
 import { generateImage } from "./image-generator.js";
 import { buildCharacterSheet, deriveCampaignId, CharacterValidationError } from "./character-gen.js";
@@ -136,7 +137,7 @@ const ROUTES: Array<{
     method: "POST",
     pattern: /^\/campaigns$/,
     async handler(req, res) {
-      const body = (await readJsonBody(req)) as { character?: unknown };
+      const body = (await readJsonBody(req)) as { character?: unknown; settings?: unknown };
       let sheet: Record<string, unknown>;
       try {
         sheet = buildCharacterSheet(body.character as never);
@@ -147,10 +148,44 @@ const ROUTES: Array<{
         }
         throw err;
       }
+
+      // Issue #48: the world can now be described at creation, not only later
+      // in Settings. Same fields and validation as POST /settings; anything
+      // omitted keeps the standard-fantasy defaults.
+      const creation = (body.settings ?? {}) as Record<string, unknown>;
+      const creationSettings: Partial<Omit<CampaignSettings, "model">> = {};
+      if (creation.worldSetting !== undefined) {
+        if (typeof creation.worldSetting !== "string") {
+          sendJson(res, 400, { error: "worldSetting must be a string" });
+          return;
+        }
+        creationSettings.worldSetting = creation.worldSetting;
+      }
+      if (creation.toneWhimsy !== undefined) {
+        if (typeof creation.toneWhimsy !== "number" || creation.toneWhimsy < 0 || creation.toneWhimsy > 1) {
+          sendJson(res, 400, { error: "toneWhimsy must be a number between 0 and 1" });
+          return;
+        }
+        creationSettings.toneWhimsy = creation.toneWhimsy;
+      }
+      if (creation.contentIntensity !== undefined) {
+        if (
+          typeof creation.contentIntensity !== "string" ||
+          !CONTENT_INTENSITIES.includes(creation.contentIntensity as ContentIntensity)
+        ) {
+          sendJson(res, 400, { error: `contentIntensity must be one of ${CONTENT_INTENSITIES.join(", ")}` });
+          return;
+        }
+        creationSettings.contentIntensity = creation.contentIntensity as ContentIntensity;
+      }
+
       const campaignId = deriveCampaignId(String(sheet.name), (id) =>
         fs.existsSync(path.join(CAMPAIGNS_ROOT, id))
       );
-      scaffoldCampaign(campaignId, sheet);
+      const dir = scaffoldCampaign(campaignId, sheet);
+      if (Object.keys(creationSettings).length > 0) {
+        persistCampaignSettings(dir, creationSettings);
+      }
       sendJson(res, 201, { campaignId });
     },
   },
