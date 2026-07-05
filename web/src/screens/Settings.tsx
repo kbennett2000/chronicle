@@ -9,8 +9,7 @@ import {
   type CampaignSettings,
   type ModelOption,
 } from "../lib/campaign";
-import { savePreferredModel } from "../lib/modelPref";
-import { saveLookPref, type LookPrefs } from "../lib/lookPrefs";
+import { ToggleRow, ArtStylePicker } from "../components/LookControls";
 
 interface SettingsProps {
   onBack: () => void;
@@ -29,8 +28,6 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   unreachable: "Could not reach that address — check the IP and that both devices are on the same network",
   "origin-mismatch": "This page was loaded from a different address — reload the app from the address above",
 };
-
-const ART_PRESETS = ["comic book", "Lego-style", "pencil sketch", "watercolour", "anime", "pixel art", "noir", "oil painting"];
 
 const INTENSITY_OPTIONS: Array<{ id: "standard" | "low"; label: string; note: string }> = [
   { id: "standard", label: "Standard", note: "Full range of humour and description." },
@@ -94,7 +91,6 @@ export function Settings({
 
   const [models, setModels] = useState<ModelOption[]>([]);
   const [settings, setSettings] = useState<CampaignSettings | null>(null);
-  const [customArtStyle, setCustomArtStyle] = useState("");
   const [whimsyDraft, setWhimsyDraft] = useState(0);
 
   const [modelSave, setModelSave] = useState<SaveState>("idle");
@@ -109,9 +105,6 @@ export function Settings({
         setModels(modelsResult.models);
         setSettings(settingsResult);
         setWhimsyDraft(settingsResult.toneWhimsy ?? 0);
-        if (settingsResult.artStyle && !ART_PRESETS.includes(settingsResult.artStyle)) {
-          setCustomArtStyle(settingsResult.artStyle);
-        }
       })
       .catch(() => {
         // Settings are best-effort display — a failed fetch here just
@@ -129,8 +122,6 @@ export function Settings({
     try {
       await startSession(connection, campaignId, modelId);
       setSettings((prev) => (prev ? { ...prev, model: modelId } : prev));
-      // Issue #57: remember the choice so the next new game defaults to it.
-      savePreferredModel(modelId);
       setModelSave("saved");
     } catch {
       setModelSave("error");
@@ -143,21 +134,6 @@ export function Settings({
       const next = await updateCampaignSettings(connection, campaignId, patch);
       setSettings(next);
       setState("saved");
-      // Issue #60: remember these look/play choices so the next NEW game
-      // defaults to them instead of reverting to images-off. Same pattern as
-      // savePreferredModel (#57). Only the keys we persist as new-game defaults.
-      const REMEMBERED: (keyof LookPrefs)[] = [
-        "generateImages",
-        "autoIllustrateTurns",
-        "artStyle",
-        "autoRollDice",
-        "contentIntensity",
-      ];
-      for (const key of REMEMBERED) {
-        if (key in patch && patch[key] !== undefined) {
-          saveLookPref(key, patch[key] as LookPrefs[typeof key]);
-        }
-      }
     } catch {
       setState("error");
     }
@@ -246,159 +222,30 @@ export function Settings({
         <div style={sectionHeadingStyle}>THE LOOK</div>
         {settings && (
           <>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "11px 14px",
-                borderRadius: 4,
-                background: "rgba(28,20,12,.55)",
-                border: "1px solid rgba(109,90,56,.36)",
-              }}
-            >
-              <div>
-                <div style={{ fontFamily: "var(--font-display)", fontSize: 13.5, color: "var(--ink)" }}>Generate scene art</div>
-                <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 2 }}>Off by default · needs Grok Build configured</div>
-              </div>
-              <button
-                data-testid="images-toggle"
-                aria-pressed={!!settings.generateImages}
-                onClick={() => patchSettings({ generateImages: !settings.generateImages }, setLookSave)}
-                style={{
-                  width: 46,
-                  height: 26,
-                  borderRadius: 20,
-                  cursor: "pointer",
-                  border: `1px solid ${settings.generateImages ? "rgba(211,112,60,.9)" : "rgba(109,90,56,.4)"}`,
-                  background: settings.generateImages ? "rgba(211,112,60,.85)" : "rgba(12,8,5,.6)",
-                  position: "relative",
-                  transition: "background 0.2s, border-color 0.2s",
-                }}
-              >
-                <span
-                  style={{
-                    position: "absolute",
-                    top: 2,
-                    left: settings.generateImages ? 24 : 2,
-                    width: 20,
-                    height: 20,
-                    borderRadius: "50%",
-                    background: settings.generateImages ? "#fbeede" : "#8c7c62",
-                    transition: "left 0.2s, background 0.2s",
-                  }}
-                />
-              </button>
-            </div>
+            <ToggleRow
+              testId="images-toggle"
+              title="Generate scene art"
+              description="Off by default · needs Grok Build configured"
+              checked={!!settings.generateImages}
+              onChange={(next) => patchSettings({ generateImages: next }, setLookSave)}
+            />
 
             {/* Issue #56: auto-illustrate each turn — only meaningful (and only
                 shown) when scene art is on, since it needs Grok Build too. */}
             {settings.generateImages && (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "11px 14px",
-                  borderRadius: 4,
-                  background: "rgba(28,20,12,.55)",
-                  border: "1px solid rgba(109,90,56,.36)",
-                  marginTop: 8,
-                }}
-              >
-                <div>
-                  <div style={{ fontFamily: "var(--font-display)", fontSize: 13.5, color: "var(--ink)" }}>
-                    Auto-illustrate each turn
-                  </div>
-                  <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 2 }}>
-                    Draws every DM reply · the image appears a moment after the text
-                  </div>
-                </div>
-                <button
-                  data-testid="auto-illustrate-toggle"
-                  aria-pressed={!!settings.autoIllustrateTurns}
-                  onClick={() => patchSettings({ autoIllustrateTurns: !settings.autoIllustrateTurns }, setLookSave)}
-                  style={{
-                    width: 46,
-                    height: 26,
-                    borderRadius: 20,
-                    cursor: "pointer",
-                    border: `1px solid ${settings.autoIllustrateTurns ? "rgba(211,112,60,.9)" : "rgba(109,90,56,.4)"}`,
-                    background: settings.autoIllustrateTurns ? "rgba(211,112,60,.85)" : "rgba(12,8,5,.6)",
-                    position: "relative",
-                    transition: "background 0.2s, border-color 0.2s",
-                    flexShrink: 0,
-                  }}
-                >
-                  <span
-                    style={{
-                      position: "absolute",
-                      top: 2,
-                      left: settings.autoIllustrateTurns ? 24 : 2,
-                      width: 20,
-                      height: 20,
-                      borderRadius: "50%",
-                      background: settings.autoIllustrateTurns ? "#fbeede" : "#8c7c62",
-                      transition: "left 0.2s, background 0.2s",
-                    }}
-                  />
-                </button>
-              </div>
+              <ToggleRow
+                testId="auto-illustrate-toggle"
+                title="Auto-illustrate each turn"
+                description="Draws every DM reply · the image appears a moment after the text"
+                checked={!!settings.autoIllustrateTurns}
+                onChange={(next) => patchSettings({ autoIllustrateTurns: next }, setLookSave)}
+                containerStyle={{ marginTop: 8 }}
+              />
             )}
 
-            <div style={{ fontSize: 12, color: "var(--ink-dim)", margin: "12px 0 7px" }}>
-              Art style <span style={{ color: "var(--ink-faint)" }}>— appended to every image prompt</span>
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {ART_PRESETS.map((preset) => {
-                const selected = settings.artStyle === preset && !customArtStyle;
-                return (
-                  <button
-                    key={preset}
-                    data-testid="art-preset"
-                    data-selected={selected}
-                    onClick={() => {
-                      setCustomArtStyle("");
-                      patchSettings({ artStyle: preset }, setLookSave);
-                    }}
-                    style={{
-                      cursor: "pointer",
-                      padding: "7px 12px",
-                      borderRadius: 20,
-                      fontFamily: "var(--font-body)",
-                      fontSize: 12.5,
-                      background: selected ? "rgba(211,112,60,.9)" : "rgba(28,20,12,.5)",
-                      border: `1px solid ${selected ? "rgba(211,112,60,.9)" : "rgba(109,90,56,.36)"}`,
-                      color: selected ? "#fbeede" : "var(--ink-dim)",
-                    }}
-                  >
-                    {preset}
-                  </button>
-                );
-              })}
-            </div>
-            <input
-              value={customArtStyle}
-              onChange={(e) => setCustomArtStyle(e.target.value)}
-              onBlur={() => {
-                if (customArtStyle.trim()) patchSettings({ artStyle: customArtStyle.trim() }, setLookSave);
-              }}
-              placeholder="or describe your own — stained glass, ukiyo-e, storybook…"
-              data-testid="art-custom-input"
-              style={{
-                marginTop: 8,
-                width: "100%",
-                boxSizing: "border-box",
-                background: customArtStyle ? "rgba(124,61,32,.2)" : "rgba(12,8,5,.5)",
-                border: `1px solid ${customArtStyle ? "rgba(211,112,60,.7)" : "rgba(109,90,56,.4)"}`,
-                borderRadius: 20,
-                padding: "8px 14px",
-                color: "var(--ink)",
-                fontFamily: "var(--font-body)",
-                fontStyle: "italic",
-                fontSize: 13,
-                outline: "none",
-              }}
+            <ArtStylePicker
+              artStyle={settings.artStyle ?? ""}
+              onChange={(style) => patchSettings({ artStyle: style }, setLookSave)}
             />
             <div data-testid="look-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 6 }}>
               {lookSave === "saving" && "Saving…"}
@@ -493,58 +340,14 @@ export function Settings({
             </div>
 
             {/* Issue #44: engine rolls dice by default; off = you provide values. */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "11px 14px",
-                borderRadius: 4,
-                background: "rgba(28,20,12,.55)",
-                border: "1px solid rgba(109,90,56,.36)",
-                margin: "18px 0 0",
-              }}
-            >
-              <div>
-                <div style={{ fontFamily: "var(--font-display)", fontSize: 13.5, color: "var(--ink)" }}>Auto-roll dice</div>
-                <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 2 }}>
-                  On: the DM rolls for you · Off: you supply your own roll values
-                </div>
-              </div>
-              {(() => {
-                const on = settings.autoRollDice !== false; // absent === on
-                return (
-                  <button
-                    data-testid="dice-toggle"
-                    aria-pressed={on}
-                    onClick={() => patchSettings({ autoRollDice: !on }, setWorldSave)}
-                    style={{
-                      width: 46,
-                      height: 26,
-                      borderRadius: 20,
-                      cursor: "pointer",
-                      border: `1px solid ${on ? "rgba(211,112,60,.9)" : "rgba(109,90,56,.4)"}`,
-                      background: on ? "rgba(211,112,60,.85)" : "rgba(12,8,5,.6)",
-                      position: "relative",
-                      transition: "background 0.2s, border-color 0.2s",
-                    }}
-                  >
-                    <span
-                      style={{
-                        position: "absolute",
-                        top: 2,
-                        left: on ? 24 : 2,
-                        width: 20,
-                        height: 20,
-                        borderRadius: "50%",
-                        background: on ? "#fbeede" : "#8c7c62",
-                        transition: "left 0.2s, background 0.2s",
-                      }}
-                    />
-                  </button>
-                );
-              })()}
-            </div>
+            <ToggleRow
+              testId="dice-toggle"
+              title="Auto-roll dice"
+              description="On: the DM rolls for you · Off: you supply your own roll values"
+              checked={settings.autoRollDice !== false} // absent === on
+              onChange={(next) => patchSettings({ autoRollDice: next }, setWorldSave)}
+              containerStyle={{ margin: "18px 0 0" }}
+            />
 
             <div data-testid="world-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 6 }}>
               {worldSave === "saving" && "Saving…"}

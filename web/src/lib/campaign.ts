@@ -116,6 +116,15 @@ export async function getModels(connection: Connection): Promise<{ models: Model
   return (await apiFetch(connection, "/models")) as { models: ModelOption[]; default: string };
 }
 
+/** Issue #64: the look/play/model settings a new game should pre-fill from —
+ * copied server-side from the most recently played campaign. `worldSetting` is
+ * never included (each game's premise is typed fresh). Empty object when there's
+ * no prior campaign, so the New Chronicle screen falls back to neutral defaults. */
+export async function getNewGameDefaults(connection: Connection): Promise<Partial<CampaignSettings>> {
+  const result = (await apiFetch(connection, "/new-game-defaults")) as { settings: Partial<CampaignSettings> };
+  return result.settings;
+}
+
 /** Mirrors src/campaign-store.ts's CampaignSummary — the Home chronicle list
  * (ADR-0010). */
 export interface CampaignSummary {
@@ -149,9 +158,10 @@ export interface CampaignCreationSettings {
   /** Issue #57: the model the new campaign should start on. Omitted keeps the
    * server default (Sonnet). */
   model?: string;
-  /** Issue #60: look/play defaults carried from the player's last game
-   * (lib/lookPrefs.ts) so a new campaign doesn't revert to images-off. Omitted
-   * fields keep the server defaults. */
+  /** Issue #64: look/play defaults, pre-filled on the New Chronicle screen from
+   * the most recently played campaign (GET /new-game-defaults) so a new game
+   * doesn't revert to images-off. The create screen sends these explicitly;
+   * omitted fields keep the server defaults. */
   generateImages?: boolean;
   artStyle?: string;
   autoIllustrateTurns?: boolean;
