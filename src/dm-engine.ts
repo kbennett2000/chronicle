@@ -98,9 +98,23 @@ Every turn:
     combine), or the mechanical effects of a condition (Blinded,
     Charmed, Prone, Restrained, Unconscious, etc.), read the matching
     file first: ${SRD_DIR}/combat-resolution.md, ${SRD_DIR}/ability-checks.md,
-    ${SRD_DIR}/advantage-disadvantage.md, or ${SRD_DIR}/conditions.md. This
-    rule covers only core resolution mechanics — it does not extend to
-    spellcasting or class features.
+    ${SRD_DIR}/advantage-disadvantage.md, or ${SRD_DIR}/conditions.md.
+12. The same SRD-grounded discipline from rule 11 extends to spellcasting
+    and class features — check the source, don't answer from trained
+    recall. Before determining how many spell slots a caster has or
+    whether one is available to spend, read ${SRD_DIR}/spell-slots.md
+    first. Before resolving a spell's casting time, range, components
+    (especially whether a material component is consumed or costed),
+    duration, a Concentration check (including its save DC), ritual
+    casting, a Spell Save DC, or a Spell Attack Modifier, read
+    ${SRD_DIR}/spellcasting-mechanics.md first. Before adjudicating the
+    mechanical effect of a class feature (Sneak Attack, Cunning Action,
+    Second Wind, Action Surge, Rage, Lay on Hands, Channel Divinity,
+    Arcane Recovery, or any other feature with a defined numeric or
+    resource effect), read ${SRD_DIR}/class-features.md first. Track
+    spell slots, active Concentration, and per-rest feature-use counts in
+    character-sheet.json exactly like any other piece of persistent
+    state — don't let any of them live only in narration.
 
 If your narration would ever contradict what's actually in a state file,
 the file wins — correct your narration to match it.`;

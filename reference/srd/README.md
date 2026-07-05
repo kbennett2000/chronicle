@@ -1,11 +1,11 @@
-# SRD Reference — Core Resolution Mechanics
+# SRD Reference — Rules Adjudication
 
 This directory holds excerpted/paraphrased rules text from the *Dungeons &
 Dragons System Reference Document 5.2* ("SRD 5.2", 2024 rules), used as
-DM-engine reference material for adjudicating core resolution mechanics —
-not stuffed into every prompt, but read on demand via the model's existing
-file-read access. See ADR-0006 for why this slice (Slice 10) chose SRD 5.2
-over SRD 5.1, and `docs/design/chronicle-design-doc.md` §5.
+DM-engine reference material for adjudicating 5e mechanics — not stuffed
+into every prompt, but read on demand via the model's existing file-read
+access. See ADR-0006 for why this slice (Slice 10) chose SRD 5.2 over SRD
+5.1, and `docs/design/chronicle-design-doc.md` §5.
 
 ## License and attribution
 
@@ -18,9 +18,8 @@ modifications to that text (excerpting, reformatting into per-topic
 Markdown files, occasional paraphrase for brevity) are its own; the
 underlying rules text is © Wizards of the Coast LLC, used under CC-BY-4.0.
 
-## Scope (Slice 10)
+## Scope (Slice 10 — core resolution)
 
-Core resolution only:
 - `ability-checks.md` — ability checks, skills, DC guidance
 - `combat-resolution.md` — D20 Tests, attack rolls, AC, saving throw
   target numbers, critical hits
@@ -29,6 +28,24 @@ Core resolution only:
 - `conditions.md` — all standard conditions (Blinded, Charmed, ... through
   Unconscious)
 
-Spellcasting and class-feature grounding are explicitly **out of scope**
-for this slice — a follow-up slice will add reference files for those
-topics once this core-mechanics grounding is proven out.
+## Scope (Slice 11 — spellcasting and class features)
+
+- `spell-slots.md` — slot progression tables (full/half/third casters,
+  Warlock Pact Magic), recharge timing, multiclass slot totals
+- `spellcasting-mechanics.md` — casting time/range/components/duration
+  resolution, Concentration (including the save-DC formula and what
+  breaks it), ritual casting, cantrips
+- `class-features.md` — a curated subset of class features with a
+  defined mechanical effect (Rogue Sneak Attack/Cunning Action, Fighter
+  Second Wind/Action Surge, Barbarian Rage, Paladin Lay on Hands, Cleric
+  Channel Divinity: Turn Undead, Wizard Arcane Recovery), not a full
+  per-class reprint — see that file's own scope note for why and how to
+  extend it
+
+Split into three topic files rather than one large spellcasting blob, or
+one file per class, for the same reason Slice 10 split by mechanic: each
+stays focused enough to read (and correct, if Kris spot-checks a number
+against actual play) independently, and `class-features.md` in particular
+is deliberately a curated subset rather than exhaustive — attempting all
+twelve classes' full feature lists in one slice would trade accuracy for
+completionism the campaign doesn't need yet.
