@@ -74,6 +74,15 @@ interface ActiveSession {
   sessionId: string | undefined;
   sessionLogPath: string;
   model: string;
+  // Issue #57: the model the current Agent SDK `sessionId` was created under.
+  // When it diverges from `model` (the player switched models mid-campaign),
+  // resuming that SDK session would keep running the *original* model — the SDK
+  // pins a resumed session to its own model. So when they differ we start a
+  // fresh SDK session instead of resuming, which is safe here because Chronicle
+  // is file-backed by design (ADR-0001): campaign state lives in files, not the
+  // SDK's conversation history, so dropping the session loses nothing that
+  // matters and is the correct trade for honoring the model choice.
+  sessionModel?: string;
   // Per issue #31: single-flight marker. Two turns submitted concurrently
   // for the same campaign (two tabs, a cross-tab double-submit the in-page
   // `sending` guard can't see) would otherwise both run `runTurn` in
@@ -211,6 +220,9 @@ const ROUTES: Array<{
 
       const body = await readJsonBody(req);
       const requestedModel = (body as { model?: unknown }).model;
+      // The model the campaign was running under before this call — i.e. the
+      // model any persisted SDK session was created with (issue #57).
+      const priorModel = readCampaignModel(campaignDir);
       let model: string;
       if (requestedModel !== undefined) {
         if (typeof requestedModel !== "string" || !isValidModelId(requestedModel)) {
@@ -222,12 +234,15 @@ const ROUTES: Array<{
         persistCampaignModel(campaignDir, requestedModel);
         model = requestedModel;
       } else {
-        model = readCampaignModel(campaignDir);
+        model = priorModel;
       }
 
       const persisted = readPersistedSessionId(campaignDir);
       const sessionLogPath = resolveSessionLog(campaignDir, Boolean(persisted));
-      activeSessions.set(campaignId, { sessionId: persisted, sessionLogPath, model });
+      // sessionModel = the model the persisted session ran under. If the player
+      // just switched models, this differs from `model`, so the first turn will
+      // start a fresh SDK session rather than resume the old-model one (#57).
+      activeSessions.set(campaignId, { sessionId: persisted, sessionLogPath, model, sessionModel: priorModel });
       sendJson(res, 200, {
         campaignId,
         sessionId: persisted ?? null,
@@ -271,11 +286,16 @@ const ROUTES: Array<{
       try {
         console.log(`[${campaignId}] turn on model ${active.model}`);
         const settings = readCampaignSettings(campaignDir);
+        // Issue #57: only resume the SDK session when it was created under the
+        // same model. If the player switched models mid-campaign, resuming would
+        // keep running the old model, so we drop `resume` and start fresh.
+        const resumeSessionId =
+          active.sessionId && active.sessionModel === active.model ? active.sessionId : undefined;
         const result = await runTurn(
           campaignDir,
           active.sessionLogPath,
           message,
-          active.sessionId,
+          resumeSessionId,
           active.model,
           settings,
           () => {}
@@ -283,7 +303,13 @@ const ROUTES: Array<{
 
         if (result.sessionId) {
           active.sessionId = result.sessionId;
+          active.sessionModel = active.model;
           persistSessionId(campaignDir, result.sessionId);
+        }
+        if (result.model !== result.requestedModel) {
+          console.warn(
+            `[${campaignId}] model NOT obeyed: requested ${result.requestedModel}, ran ${result.model}`
+          );
         }
 
         // Per ADR-0007: the deterministic speaker-attribution record, written
@@ -354,7 +380,7 @@ const ROUTES: Array<{
           campaignDir,
           active.sessionLogPath,
           openingDirective(campaignDir),
-          active.sessionId,
+          active.sessionModel === active.model ? active.sessionId : undefined,
           active.model,
           settings,
           () => {}
@@ -362,6 +388,7 @@ const ROUTES: Array<{
 
         if (result.sessionId) {
           active.sessionId = result.sessionId;
+          active.sessionModel = active.model;
           persistSessionId(campaignDir, result.sessionId);
         }
 
@@ -415,6 +442,7 @@ const ROUTES: Array<{
         contentIntensity?: ContentIntensity;
         generateImages?: boolean;
         autoRollDice?: boolean;
+        autoIllustrateTurns?: boolean;
       } = {};
 
       if (body.artStyle !== undefined) {
@@ -463,6 +491,13 @@ const ROUTES: Array<{
           return;
         }
         updates.autoRollDice = body.autoRollDice;
+      }
+      if (body.autoIllustrateTurns !== undefined) {
+        if (typeof body.autoIllustrateTurns !== "boolean") {
+          sendJson(res, 400, { error: "autoIllustrateTurns must be a boolean" });
+          return;
+        }
+        updates.autoIllustrateTurns = body.autoIllustrateTurns;
       }
 
       sendJson(res, 200, persistCampaignSettings(campaignDir, updates));
@@ -578,6 +613,10 @@ const STATIC_CONTENT_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  // Issue #53: the ambient bed is served from here. Without an audio MIME type
+  // it fell through to application/octet-stream, which can hurt playback/seek.
+  ".ogg": "audio/ogg",
+  ".mp3": "audio/mpeg",
 };
 
 /** Serves the static mobile-first UI from public/. Falls through to
@@ -597,7 +636,17 @@ function serveStatic(req: IncomingMessage, res: ServerResponse): boolean {
       : path.join(PUBLIC_ROOT, "index.html");
 
   const ext = path.extname(target);
-  res.writeHead(200, { "Content-Type": STATIC_CONTENT_TYPES[ext] ?? "application/octet-stream" });
+  const headers: Record<string, string> = {
+    "Content-Type": STATIC_CONTENT_TYPES[ext] ?? "application/octet-stream",
+  };
+  // Issue #53: the ambient audio has a fixed (non-content-hashed) filename, so a
+  // stale copy can be served from cache indefinitely after a re-record. Ask the
+  // browser to revalidate media on each load so a `?v=` bump (or even a same-URL
+  // swap) actually takes effect. Hashed JS/CSS bundles don't need this.
+  if (ext === ".ogg" || ext === ".mp3") {
+    headers["Cache-Control"] = "no-cache";
+  }
+  res.writeHead(200, headers);
   res.end(fs.readFileSync(target));
   return true;
 }
@@ -682,4 +731,40 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Chronicle DM engine HTTP API listening on http://${HOST}:${PORT}`);
+});
+
+// Issue #55: a turn holds one HTTP connection open for the whole (minutes-long)
+// Agent-SDK run. Before this the process had no lifecycle handling at all, so a
+// SIGTERM (`Terminated npm run serve`), an OOM kill, or a stray async rejection
+// tore the socket down mid-turn and the browser painted the raw
+// "Failed to fetch" into the turn. These guards make the server drain in-flight
+// requests on a clean signal and survive a background rejection instead of
+// silently dying, so the client sees a real result far more often.
+let shuttingDown = false;
+function gracefulShutdown(signal: string): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[server] ${signal} received — draining in-flight requests before exit`);
+  server.close(() => {
+    console.log("[server] closed cleanly");
+    process.exit(0);
+  });
+  // Don't hang forever if a turn is genuinely stuck; give it a grace window.
+  setTimeout(() => {
+    console.warn("[server] drain timed out — forcing exit");
+    process.exit(0);
+  }, 30_000).unref();
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
+// A rejection or throw escaping the Agent-SDK loop must not take the whole
+// server down mid-turn — log it loudly and keep serving. (The per-request
+// try/catch already maps awaited throws to a 500; this is the backstop for
+// anything that escapes the awaited path.)
+process.on("unhandledRejection", (reason) => {
+  console.error("[server] unhandledRejection (kept alive):", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[server] uncaughtException (kept alive):", err);
 });

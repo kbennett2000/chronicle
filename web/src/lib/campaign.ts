@@ -85,6 +85,9 @@ export interface CampaignSettings {
   /** Issue #44: absent === on. When explicitly false, the player supplies
    * their own dice values instead of the engine rolling. */
   autoRollDice?: boolean;
+  /** Issue #56: absent === off. When on, the app illustrates every DM response
+   * automatically. Only meaningful when generateImages is on. */
+  autoIllustrateTurns?: boolean;
 }
 
 export type CampaignSettingsPatch = Partial<Omit<CampaignSettings, "model">>;
