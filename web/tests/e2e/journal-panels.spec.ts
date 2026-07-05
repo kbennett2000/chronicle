@@ -11,13 +11,10 @@ test.describe("Journal tab bar + bottom-sheet mechanics", () => {
     await page.getByTestId("continue-button").click();
     await expect(page.getByText("ACTIVE PLAY")).toBeVisible();
 
-    // Self (Slice 20) and Folk (Slice 21) got real content — see
-    // self-panel.spec.ts / folk-panel.spec.ts; Quest/Views are still
-    // Slice 19's stubs, per plan.
-    const stubTabs: Array<{ testId: string; label: string }> = [
-      { testId: "tab-quest", label: "Quest" },
-      { testId: "tab-views", label: "Views" },
-    ];
+    // Self (Slice 20), Folk (Slice 21), and Quest (Slice 22) got real
+    // content — see self-panel.spec.ts / folk-panel.spec.ts /
+    // quest-panel.spec.ts; Views is still Slice 19's stub, per plan.
+    const stubTabs: Array<{ testId: string; label: string }> = [{ testId: "tab-views", label: "Views" }];
 
     await page.getByTestId("tab-self").click();
     await expect(page.getByTestId("self-name")).toBeVisible();
@@ -33,6 +30,14 @@ test.describe("Journal tab bar + bottom-sheet mechanics", () => {
     await page.getByTestId("sheet-close").click();
     await expect(page.getByText("No one worth naming has crossed your path yet.")).toBeHidden();
 
+    // Quest on a fresh scratch campaign (zero quests logged) shows its own
+    // empty state, not the "coming soon" stub copy.
+    await page.getByTestId("tab-quest").click();
+    await expect(page.getByText("No thread worth tracking has begun yet.")).toBeVisible();
+    await expect(page.getByText("QUEST", { exact: true })).toBeVisible();
+    await page.getByTestId("sheet-close").click();
+    await expect(page.getByText("No thread worth tracking has begun yet.")).toBeHidden();
+
     for (const tab of stubTabs) {
       await page.getByTestId(tab.testId).click();
       await expect(page.getByText(`${tab.label} panel — coming soon`)).toBeVisible();
@@ -43,9 +48,9 @@ test.describe("Journal tab bar + bottom-sheet mechanics", () => {
 
     // Grabber closes too.
     await page.getByTestId("tab-quest").click();
-    await expect(page.getByText("Quest panel — coming soon")).toBeVisible();
+    await expect(page.getByText("No thread worth tracking has begun yet.")).toBeVisible();
     await page.getByTestId("sheet-grabber").click();
-    await expect(page.getByText("Quest panel — coming soon")).toBeHidden();
+    await expect(page.getByText("No thread worth tracking has begun yet.")).toBeHidden();
 
     // Tapping the scrim (outside the sheet) closes it too.
     await page.getByTestId("tab-views").click();
