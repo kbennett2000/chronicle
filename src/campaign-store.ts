@@ -326,11 +326,32 @@ export function startSessionLog(campaignDir: string): string {
 
 function latestSessionLogPath(campaignDir: string): string | undefined {
   const dir = path.join(campaignDir, "session-log");
+  if (!fs.existsSync(dir)) return undefined;
   const files = fs
     .readdirSync(dir)
     .filter((f) => f.endsWith(".md"))
     .sort();
   return files.length > 0 ? `session-log/${files[files.length - 1]}` : undefined;
+}
+
+/** Most recent session log that actually holds turns (a non-empty
+ * .transcript.jsonl), or undefined if none do yet. Resume and the /state
+ * fallback both want "the log holding the story," not merely the newest .md:
+ * a stray empty log from an earlier session/start would otherwise shadow the
+ * real one and surface as "the tale hasn't begun" even for a campaign with
+ * rich history (issue #49). */
+function latestSessionLogWithTurns(campaignDir: string): string | undefined {
+  const dir = path.join(campaignDir, "session-log");
+  if (!fs.existsSync(dir)) return undefined;
+  const files = fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith(".md"))
+    .sort();
+  for (let i = files.length - 1; i >= 0; i--) {
+    const rel = `session-log/${files[i]}`;
+    if (readTurnTranscript(campaignDir, rel).length > 0) return rel;
+  }
+  return undefined;
 }
 
 /** One log file per session-log/§3's actual "session," not per API call:
@@ -342,8 +363,19 @@ function latestSessionLogPath(campaignDir: string): string | undefined {
  * from earlier in the resumed conversation, not the newest one. */
 export function resolveSessionLog(campaignDir: string, resuming: boolean): string {
   if (resuming) {
+    // Continue the existing story: append to the log that actually holds
+    // turns, not merely the newest .md — a stray empty log from an earlier
+    // start would otherwise become the "current" log and hide the history (#49).
+    const withTurns = latestSessionLogWithTurns(campaignDir);
+    if (withTurns) return withTurns;
     const existing = latestSessionLogPath(campaignDir);
     if (existing) return existing;
+  } else {
+    // Starting fresh: if the newest log is still empty (a prior session/start
+    // that never took a turn), reuse it rather than piling up another empty
+    // file — the empty-.md accumulation seen in real campaign data (#49).
+    const existing = latestSessionLogPath(campaignDir);
+    if (existing && readTurnTranscript(campaignDir, existing).length === 0) return existing;
   }
   return startSessionLog(campaignDir);
 }
@@ -586,13 +618,21 @@ export function readStateSnapshot(
     model: readCampaignModel(campaignDir),
   };
 
-  if (currentSessionLogRelPath) {
-    const abs = path.join(campaignDir, currentSessionLogRelPath);
+  // Prefer the caller's active session log, but fall back to the latest log
+  // that has turns when there's no active session (server restart / deep link
+  // into Play) or when the active log is still empty — otherwise a resumed
+  // campaign with real history renders as "the tale hasn't begun" (#49).
+  let logRel = currentSessionLogRelPath;
+  if (!logRel || readTurnTranscript(campaignDir, logRel).length === 0) {
+    logRel = latestSessionLogWithTurns(campaignDir) ?? logRel;
+  }
+  if (logRel) {
+    const abs = path.join(campaignDir, logRel);
     if (fs.existsSync(abs)) {
       snapshot.currentSessionLog = {
-        path: currentSessionLogRelPath,
+        path: logRel,
         content: fs.readFileSync(abs, "utf8"),
-        transcript: readTurnTranscript(campaignDir, currentSessionLogRelPath),
+        transcript: readTurnTranscript(campaignDir, logRel),
       };
     }
   }
