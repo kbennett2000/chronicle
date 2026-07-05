@@ -1,4 +1,4 @@
-import { apiFetch, apiFetchRaw } from "./api";
+import { ApiError, apiFetch, apiFetchRaw } from "./api";
 import type { Connection } from "./connection";
 
 /** No "list campaigns" endpoint exists (per the Slice 14 plan) — the old
@@ -140,9 +140,17 @@ export interface TurnResult {
  * with a valid { narration, isError: true } body (see server.ts) — that's
  * a domain result to render, not a fetch failure to throw on. */
 export async function sendTurn(connection: Connection, campaignId: string, message: string): Promise<TurnResult> {
-  const { body } = await apiFetchRaw(connection, `/campaigns/${encodeURIComponent(campaignId)}/turns`, {
+  const { status, body } = await apiFetchRaw(connection, `/campaigns/${encodeURIComponent(campaignId)}/turns`, {
     method: "POST",
     body: JSON.stringify({ message }),
   });
+  // 200 (success) and 502 (engine error) are domain turn results with a
+  // { narration, isError } body to render. Any other status — notably the
+  // 409 single-flight rejection (issue #31) or a 400 validation error —
+  // carries only { error } and is not a turn result; throw it so Play's
+  // catch renders the optimistic turn as an error with the server's message.
+  if (status !== 200 && status !== 502) {
+    throw new ApiError((body as { error?: string }).error ?? `request failed (${status})`);
+  }
   return body as TurnResult;
 }

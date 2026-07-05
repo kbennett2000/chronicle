@@ -48,6 +48,12 @@ interface ActiveSession {
   sessionId: string | undefined;
   sessionLogPath: string;
   model: string;
+  // Per issue #31: single-flight marker. Two turns submitted concurrently
+  // for the same campaign (two tabs, a cross-tab double-submit the in-page
+  // `sending` guard can't see) would otherwise both run `runTurn` in
+  // parallel and race on the same state files, silently clobbering one
+  // turn's edits. Set true for the duration of a turn, cleared in a finally.
+  busy?: boolean;
 }
 
 // In-memory only: which campaign's Agent SDK session/log is "active" for
@@ -146,34 +152,52 @@ const ROUTES: Array<{
         return;
       }
 
-      console.log(`[${campaignId}] turn on model ${active.model}`);
-      const settings = readCampaignSettings(campaignDir);
-      const result = await runTurn(
-        campaignDir,
-        active.sessionLogPath,
-        message,
-        active.sessionId,
-        active.model,
-        settings,
-        () => {}
-      );
-
-      if (result.sessionId) {
-        active.sessionId = result.sessionId;
-        persistSessionId(campaignDir, result.sessionId);
+      // Per issue #31: reject a second turn while one is already in flight
+      // for this campaign, rather than letting two `runTurn` calls race on
+      // the same state files. Same 409 + { error } convention as above.
+      if (active.busy) {
+        sendJson(res, 409, {
+          error: `a turn is already in progress for campaign '${campaignId}' — wait for it to finish before submitting another`,
+        });
+        return;
       }
+      active.busy = true;
 
-      // Per ADR-0007: the deterministic speaker-attribution record, written
-      // here (not inferred from prose afterward) at the one point both
-      // strings are already in hand — for every turn, error or not.
-      appendTurnTranscript(campaignDir, active.sessionLogPath, message, result.text);
+      try {
+        console.log(`[${campaignId}] turn on model ${active.model}`);
+        const settings = readCampaignSettings(campaignDir);
+        const result = await runTurn(
+          campaignDir,
+          active.sessionLogPath,
+          message,
+          active.sessionId,
+          active.model,
+          settings,
+          () => {}
+        );
 
-      sendJson(res, result.isError ? 502 : 200, {
-        narration: result.text,
-        sessionId: result.sessionId ?? null,
-        model: result.model,
-        isError: result.isError,
-      });
+        if (result.sessionId) {
+          active.sessionId = result.sessionId;
+          persistSessionId(campaignDir, result.sessionId);
+        }
+
+        // Per ADR-0007: the deterministic speaker-attribution record, written
+        // here (not inferred from prose afterward) at the one point both
+        // strings are already in hand — for every turn, error or not.
+        appendTurnTranscript(campaignDir, active.sessionLogPath, message, result.text);
+
+        sendJson(res, result.isError ? 502 : 200, {
+          narration: result.text,
+          sessionId: result.sessionId ?? null,
+          model: result.model,
+          isError: result.isError,
+        });
+      } finally {
+        // Always clear the single-flight lock — on success, on a 502 engine
+        // error, and on a thrown exception (which propagates to the top-level
+        // catch → 500). The lock must never stick.
+        active.busy = false;
+      }
     },
   },
   {
