@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Connection } from "../lib/connection";
 import { getState, sendTurn } from "../lib/campaign";
 import { parseChapterHeadings } from "../lib/session-log";
+import { BottomSheet } from "../components/BottomSheet";
 
 interface PlayProps {
   connection: Connection;
@@ -21,7 +22,8 @@ interface DisplayTurn {
   isError?: boolean;
 }
 
-const TABS = ["Self", "Folk", "Quest", "Views"];
+const TABS = ["Self", "Folk", "Quest", "Views"] as const;
+type Tab = (typeof TABS)[number];
 
 function ChapterHeading({ text }: { text: string }) {
   return (
@@ -109,6 +111,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   const [turns, setTurns] = useState<DisplayTurn[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [openTab, setOpenTab] = useState<Tab | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -273,9 +276,11 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
         {TABS.map((label) => (
           <button
             key={label}
-            disabled
+            onClick={() => setOpenTab(label)}
+            data-testid={`tab-${label.toLowerCase()}`}
             style={{
               flex: 1,
+              cursor: "pointer",
               border: "none",
               background: "linear-gradient(180deg,var(--leather-hi),#120c07)",
               borderRadius: "9px 9px 0 0",
@@ -288,6 +293,14 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
           </button>
         ))}
       </div>
+
+      {openTab && (
+        <BottomSheet title={openTab.toUpperCase()} onClose={() => setOpenTab(null)}>
+          <p style={{ fontStyle: "italic", color: "var(--ink-dim)", fontSize: 15, textAlign: "center", marginTop: 40 }}>
+            {openTab} panel — coming soon
+          </p>
+        </BottomSheet>
+      )}
     </div>
   );
 }

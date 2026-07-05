@@ -188,3 +188,36 @@ body {
   transform: rotate(45deg);
   margin-left: 3px;
 }
+
+/* Bottom-sheet journal panels — scrim + sheet per the handoff's
+   "Navigation" motion spec: sheetUp .34s cubic-bezier(.2,.8,.2,1), scrim
+   fadeIn .25s. Sheet corners are 16px top only (torn-parchment pages
+   elsewhere in the app use 2px, see .parchment-fill) since a sheet reads
+   as a drawn-up drawer, not a torn page. */
+.sheet-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(6, 4, 2, 0.62);
+  animation: fadeIn 0.25s ease;
+}
+
+.sheet-panel {
+  position: relative;
+  height: 90%;
+  display: flex;
+  flex-direction: column;
+  animation: sheetUp 0.34s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.sheet-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: 16px 16px 0 0;
+  background:
+    radial-gradient(ellipse 72% 44% at 50% 3%, rgba(158, 116, 60, 0.3), transparent 60%),
+    url("/textures/parchment-warm.png") center/cover;
+  box-shadow:
+    inset 0 0 0 1.5px rgba(20, 13, 6, 0.5),
+    inset 0 0 42px rgba(14, 9, 4, 0.62);
+  filter: url(#deckle);
+}
