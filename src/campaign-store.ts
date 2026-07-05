@@ -124,6 +124,34 @@ function currentSituation(worldStateMd: string): string {
   return text;
 }
 
+export interface CharacterIdentity {
+  name: string;
+  race: string;
+  class: string;
+}
+
+/** The player character's name/race/class straight off character-sheet.json,
+ * for the DM system prompt (issues #51/#48 — the prompt used to hardcode
+ * "Kira Emberfall", so every other campaign was addressed by the wrong name
+ * and the model would drift into "this isn't my campaign" refusals). Falls
+ * back to a neutral identity if the sheet is missing/unreadable rather than
+ * throwing — a turn must still run. */
+export function readCharacterIdentity(campaignDir: string): CharacterIdentity {
+  const fallback: CharacterIdentity = { name: "the player character", race: "", class: "" };
+  const sheetPath = path.join(campaignDir, "character-sheet.json");
+  if (!fs.existsSync(sheetPath)) return fallback;
+  try {
+    const sheet = JSON.parse(fs.readFileSync(sheetPath, "utf8")) as Record<string, unknown>;
+    return {
+      name: typeof sheet.name === "string" && sheet.name.trim() ? sheet.name.trim() : fallback.name,
+      race: typeof sheet.race === "string" ? sheet.race : "",
+      class: typeof sheet.class === "string" ? sheet.class : "",
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 /** Every campaign under CAMPAIGNS_ROOT (skipping the _registry helper dir and
  * any dir without a character-sheet.json), for the Home list (ADR-0010). */
 export function listCampaigns(): CampaignSummary[] {
