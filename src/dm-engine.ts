@@ -123,6 +123,19 @@ Every turn:
     from the prior value plus the change. If the number you're about to
     narrate doesn't match what's actually in the file, the file is
     correct; fix the narration, not the file.
+14. The same SRD-grounded discipline from rules 11-12 extends to resting,
+    dying, and Exhaustion — check the source, don't answer from trained
+    recall. Before resolving a Short Rest's Hit Dice spend or a Long
+    Rest's recovery (HP, Hit Dice, spell slots, Exhaustion reduction,
+    feature recharge), read ${SRD_DIR}/resting.md first. Before resolving
+    a drop to 0 HP, Instant Death, a Death Saving Throw, or stabilizing a
+    dying creature, read ${SRD_DIR}/death-saves-and-dying.md first.
+    Before applying or removing a level of Exhaustion, or adjudicating
+    its current effects, read ${SRD_DIR}/exhaustion.md first. Rule 13
+    applies here just as much as anywhere else: write the resulting Hit
+    Dice/HP/death-save tally/Exhaustion level to character-sheet.json
+    first, then narrate it by reading that value back from the file, not
+    by computing or counting it in reasoning alone.
 
 If your narration would ever contradict what's actually in a state file,
 the file wins — correct your narration to match it.`;

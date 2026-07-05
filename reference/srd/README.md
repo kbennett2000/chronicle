@@ -49,3 +49,20 @@ against actual play) independently, and `class-features.md` in particular
 is deliberately a curated subset rather than exhaustive — attempting all
 twelve classes' full feature lists in one slice would trade accuracy for
 completionism the campaign doesn't need yet.
+
+## Scope (Slice 12 — rest mechanics, death saves, exhaustion)
+
+- `resting.md` — Short Rest Hit Dice recovery, Long Rest recovery (HP,
+  Hit Dice, spell slots, Exhaustion reduction, feature recharge)
+- `death-saves-and-dying.md` — dropping to 0 HP, Instant Death, Death
+  Saving Throws, stabilizing
+- `exhaustion.md` — the six-level Exhaustion track, its cumulative
+  effects, and how it's removed
+
+Same one-file-per-mechanic split as Slices 10-11, for the same reason:
+each stays independently readable/spot-checkable. These three were kept
+separate rather than folded into one "downtime/dying" file because
+they're adjudicated at different moments in play (end of a rest vs. a
+hit that drops HP to 0 vs. an environmental/forced-march effect) and a
+DM mid-turn benefits from being able to name the exact file for the
+exact situation, same rationale as the Slice 10 core-resolution split.
