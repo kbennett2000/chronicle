@@ -24,14 +24,19 @@ import {
   persistCampaignModel,
   readCampaignSettings,
   persistCampaignSettings,
+  scaffoldCampaign,
+  listCampaigns,
+  CAMPAIGNS_ROOT,
   CONTENT_INTENSITIES,
   isValidModelId,
   MODEL_OPTIONS,
   InvalidCampaignIdError,
   CampaignNotFoundError,
+  CampaignExistsError,
   type ContentIntensity,
 } from "./campaign-store.js";
 import { generateImage } from "./image-generator.js";
+import { buildCharacterSheet, deriveCampaignId, CharacterValidationError } from "./character-gen.js";
 
 const dotenvResult = loadDotenv();
 if (dotenvResult.error) {
@@ -114,6 +119,39 @@ const ROUTES: Array<{
     pattern: /^\/models$/,
     async handler(_req, res) {
       sendJson(res, 200, { models: MODEL_OPTIONS, default: "claude-sonnet-5" });
+    },
+  },
+  {
+    // ADR-0010: list every campaign for Home's chronicle picker.
+    method: "GET",
+    pattern: /^\/campaigns$/,
+    async handler(_req, res) {
+      sendJson(res, 200, { campaigns: listCampaigns() });
+    },
+  },
+  {
+    // ADR-0010: create a new campaign from a character-creation form. The
+    // character sheet is derived server-side (buildCharacterSheet) so HP/AC
+    // are authoritative, not trusted from the client.
+    method: "POST",
+    pattern: /^\/campaigns$/,
+    async handler(req, res) {
+      const body = (await readJsonBody(req)) as { character?: unknown };
+      let sheet: Record<string, unknown>;
+      try {
+        sheet = buildCharacterSheet(body.character as never);
+      } catch (err) {
+        if (err instanceof CharacterValidationError) {
+          sendJson(res, 400, { error: err.message });
+          return;
+        }
+        throw err;
+      }
+      const campaignId = deriveCampaignId(String(sheet.name), (id) =>
+        fs.existsSync(path.join(CAMPAIGNS_ROOT, id))
+      );
+      scaffoldCampaign(campaignId, sheet);
+      sendJson(res, 201, { campaignId });
     },
   },
   {
@@ -496,6 +534,8 @@ const server = createServer(async (req, res) => {
       sendJson(res, 400, { error: err.message });
     } else if (err instanceof CampaignNotFoundError) {
       sendJson(res, 404, { error: err.message });
+    } else if (err instanceof CampaignExistsError) {
+      sendJson(res, 409, { error: err.message });
     } else {
       const message = err instanceof Error ? err.message : String(err);
       sendJson(res, 500, { error: message });

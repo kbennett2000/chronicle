@@ -12,7 +12,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { CAMPAIGNS_ROOT } from "../src/campaign-store.js";
+import { CAMPAIGNS_ROOT, scaffoldCampaign } from "../src/campaign-store.js";
 
 const SCRATCH_PREFIX = "scratch-";
 
@@ -38,63 +38,12 @@ const EMPTY_CHARACTER_SHEET = {
   spellSlots: {},
 };
 
-const EMPTY_WORLD_STATE = `# World State
-
-## Current Situation
-_(not yet started)_
-
-## Locations Visited
-_(none yet)_
-
-## Factions
-_(none established yet)_
-`;
-
-const EMPTY_NPC_ROSTER = `# NPC Roster
-
-_(No named NPCs met yet. Add an entry per NPC on first meaningful
-introduction, in this format:)_
-
-<!--
-## <Name>
-- **Description:** appearance, role
-- **Disposition:** attitude toward the player, current relationship
-- **Knows:** information they can share
-- **Portrait asset ID:** (none yet)
--->
-`;
-
-const EMPTY_QUEST_LOG = `# Quest Log
-
-## Active
-_(none yet)_
-
-## Completed
-_(none yet)_
-`;
-
 function createScratchCampaign(): string {
   // Lowercased: campaign-store.ts's CAMPAIGN_ID_PATTERN only allows
   // lowercase letters, and toISOString()'s literal "T"/"Z" would otherwise
   // produce an id that resolveCampaignDir() rejects.
   const id = `${SCRATCH_PREFIX}${new Date().toISOString().replace(/[:.]/g, "-")}`.toLowerCase();
-  const dir = path.join(CAMPAIGNS_ROOT, id);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.mkdirSync(path.join(dir, "session-log"));
-  fs.writeFileSync(path.join(dir, "session-log", ".gitkeep"), "");
-
-  fs.writeFileSync(
-    path.join(dir, "character-sheet.json"),
-    JSON.stringify(EMPTY_CHARACTER_SHEET, null, 2) + "\n"
-  );
-  fs.writeFileSync(path.join(dir, "world-state.md"), EMPTY_WORLD_STATE);
-  fs.writeFileSync(path.join(dir, "npc-roster.md"), EMPTY_NPC_ROSTER);
-  fs.writeFileSync(path.join(dir, "quest-log.md"), EMPTY_QUEST_LOG);
-  fs.writeFileSync(
-    path.join(dir, "campaign-settings.json"),
-    JSON.stringify({ model: "claude-sonnet-5" }, null, 2) + "\n"
-  );
-
+  scaffoldCampaign(id, EMPTY_CHARACTER_SHEET, { model: "claude-sonnet-5" });
   console.log(id);
   return id;
 }

@@ -26,9 +26,12 @@ test.describe("markdown heading consistency (frontend parser vs. backend source 
     expect(dmEngine).toContain(`"${CURRENT_SITUATION_HEADING}"`);
   });
 
-  test("scratch-campaign.ts's world-state template still uses the Locations Visited heading", () => {
-    const scratch = fs.readFileSync(path.join(REPO_ROOT, "scripts/scratch-campaign.ts"), "utf8");
-    expect(scratch).toContain(`## ${LOCATIONS_VISITED_HEADING}`);
+  test("campaign-store.ts's world-state template still uses the Locations Visited heading", () => {
+    // The blank state-file templates moved from scratch-campaign.ts into
+    // campaign-store.ts's scaffoldCampaign primitive (ADR-0010); both scratch
+    // and real character-creation campaigns are scaffolded from them now.
+    const store = fs.readFileSync(path.join(REPO_ROOT, "src/campaign-store.ts"), "utf8");
+    expect(store).toContain(`## ${LOCATIONS_VISITED_HEADING}`);
   });
 
   test("image-generator.ts's tool instructions still tell the model to record a location's image as an 'Image' line", () => {
@@ -36,18 +39,18 @@ test.describe("markdown heading consistency (frontend parser vs. backend source 
     expect(imageGenerator).toContain(`an "Image" line under the location's world-state.md bullet`);
   });
 
-  test("scratch-campaign.ts's quest-log template still uses the Active/Completed headings", () => {
-    const scratch = fs.readFileSync(path.join(REPO_ROOT, "scripts/scratch-campaign.ts"), "utf8");
-    expect(scratch).toContain(`## ${QUEST_ACTIVE_HEADING}`);
-    expect(scratch).toContain(`## ${QUEST_COMPLETED_HEADING}`);
+  test("campaign-store.ts's quest-log template still uses the Active/Completed headings", () => {
+    const store = fs.readFileSync(path.join(REPO_ROOT, "src/campaign-store.ts"), "utf8");
+    expect(store).toContain(`## ${QUEST_ACTIVE_HEADING}`);
+    expect(store).toContain(`## ${QUEST_COMPLETED_HEADING}`);
   });
 
-  test("scratch-campaign.ts's npc-roster template still uses the Description/Disposition/Knows/Portrait bullet names", () => {
-    const scratch = fs.readFileSync(path.join(REPO_ROOT, "scripts/scratch-campaign.ts"), "utf8");
-    expect(scratch).toContain(`**${NPC_DESCRIPTION_FIELD}:**`);
-    expect(scratch).toContain(`**${NPC_DISPOSITION_FIELD}:**`);
-    expect(scratch).toContain(`**${NPC_KNOWS_FIELD}:**`);
-    expect(scratch).toContain(`**${NPC_PORTRAIT_FIELD}:**`);
+  test("campaign-store.ts's npc-roster template still uses the Description/Disposition/Knows/Portrait bullet names", () => {
+    const store = fs.readFileSync(path.join(REPO_ROOT, "src/campaign-store.ts"), "utf8");
+    expect(store).toContain(`**${NPC_DESCRIPTION_FIELD}:**`);
+    expect(store).toContain(`**${NPC_DISPOSITION_FIELD}:**`);
+    expect(store).toContain(`**${NPC_KNOWS_FIELD}:**`);
+    expect(store).toContain(`**${NPC_PORTRAIT_FIELD}:**`);
   });
 
   test("image-generator.ts's tool instructions still tell the model to record the image path in the 'Portrait asset ID' field", () => {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ConnectionStatus } from "../lib/api";
 import type { Connection } from "../lib/connection";
-import { getState, startSession, type StateSnapshot } from "../lib/campaign";
+import { getState, listCampaigns, startSession, type CampaignSummary, type StateSnapshot } from "../lib/campaign";
 import { findMarkdownSection } from "../lib/markdown";
 import { CURRENT_SITUATION_HEADING } from "../lib/state-headings";
 
@@ -10,15 +10,28 @@ interface HomeProps {
   campaignId: string;
   connectionStatus: ConnectionStatus;
   onContinue: () => void;
+  /** Switch the active campaign to `id` and enter Play (ADR-0010). */
+  onEnterCampaign: (id: string) => void;
+  onNewChronicle: () => void;
   onOpenSettings: () => void;
 }
 
 type LoadState = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; snapshot: StateSnapshot };
 
-export function Home({ connection, campaignId, connectionStatus, onContinue, onOpenSettings }: HomeProps) {
+export function Home({
+  connection,
+  campaignId,
+  connectionStatus,
+  onContinue,
+  onEnterCampaign,
+  onNewChronicle,
+  onOpenSettings,
+}: HomeProps) {
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [others, setOthers] = useState<CampaignSummary[]>([]);
+  const [enteringId, setEnteringId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,6 +47,32 @@ export function Home({ connection, campaignId, connectionStatus, onContinue, onO
       cancelled = true;
     };
   }, [connection, campaignId]);
+
+  // The other chronicles to switch to (ADR-0010). Best-effort: a failure just
+  // leaves the list empty, since the primary card above still works.
+  useEffect(() => {
+    let cancelled = false;
+    listCampaigns(connection)
+      .then((all) => {
+        if (!cancelled) setOthers(all.filter((c) => c.id !== campaignId));
+      })
+      .catch(() => {
+        if (!cancelled) setOthers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connection, campaignId]);
+
+  async function handleEnter(id: string) {
+    setEnteringId(id);
+    try {
+      await startSession(connection, id);
+      onEnterCampaign(id);
+    } catch {
+      setEnteringId(null);
+    }
+  }
 
   async function handleContinue() {
     setStarting(true);
@@ -173,6 +212,71 @@ export function Home({ connection, campaignId, connectionStatus, onContinue, onO
             )}
           </div>
         </div>
+
+        <button
+          onClick={onNewChronicle}
+          data-testid="new-chronicle"
+          style={{
+            marginTop: 12,
+            width: "100%",
+            cursor: "pointer",
+            padding: 12,
+            borderRadius: 3,
+            background: "rgba(28,20,12,.5)",
+            border: "1px dashed var(--brass-dim)",
+            color: "var(--brass)",
+            fontFamily: "var(--font-display)",
+            fontSize: 13,
+            letterSpacing: 1.5,
+          }}
+        >
+          ＋ Begin a New Chronicle
+        </button>
+
+        {others.length > 0 && (
+          <div style={{ marginTop: 22 }}>
+            <div
+              style={{
+                fontFamily: "var(--font-display)",
+                fontWeight: 600,
+                fontSize: 11,
+                letterSpacing: 2,
+                color: "var(--brass-dim)",
+                paddingLeft: 2,
+                marginBottom: 8,
+              }}
+            >
+              OTHER CHRONICLES
+            </div>
+            {others.map((c) => (
+              <button
+                key={c.id}
+                data-testid="other-chronicle"
+                onClick={() => handleEnter(c.id)}
+                disabled={enteringId !== null}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  cursor: enteringId !== null ? "default" : "pointer",
+                  opacity: enteringId !== null && enteringId !== c.id ? 0.6 : 1,
+                  marginBottom: 7,
+                  padding: "11px 14px",
+                  borderRadius: 4,
+                  background: "rgba(28,20,12,.5)",
+                  border: "1px solid rgba(109,90,56,.32)",
+                }}
+              >
+                <div style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>
+                  {c.name || c.id}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 1 }}>
+                  {enteringId === c.id ? "Entering…" : `${c.race} ${c.class} · Level ${c.level}`}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div

@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { Home } from "./screens/Home";
 import { Play } from "./screens/Play";
 import { Settings } from "./screens/Settings";
+import { NewCharacter } from "./screens/NewCharacter";
 import { checkConnection, type ConnectionStatus } from "./lib/api";
 import { hasConnection, loadConnection, saveConnection, type Connection } from "./lib/connection";
 import { getCampaignId } from "./lib/campaign";
 
-type Screen = "home" | "play" | "settings";
+type Screen = "home" | "play" | "settings" | "newcharacter";
 
 /** The one-off SVG filter every parchment surface references via
  * filter:url(#deckle) — ported verbatim from the handoff. */
@@ -31,7 +32,10 @@ export function App() {
   const [screen, setScreen] = useState<Screen>("home");
   const [connection, setConnection] = useState<Connection>(() => loadConnection());
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("unchecked");
-  const campaignId = getCampaignId();
+  // Now stateful (ADR-0010): seeded from ?campaign= (still wins when present,
+  // keeping existing links + the e2e harness working) but switchable in-app by
+  // picking a chronicle on Home or creating a new one.
+  const [campaignId, setCampaignId] = useState(getCampaignId());
 
   // Set by "Save & Reconnect" (issue #35): a deliberate reconnect from
   // Settings should, on success, drop the player back on Home rather than
@@ -90,11 +94,26 @@ export function App() {
           campaignId={campaignId}
           connectionStatus={connectionStatus}
           onContinue={() => setScreen("play")}
+          onEnterCampaign={(id) => {
+            setCampaignId(id);
+            setScreen("play");
+          }}
+          onNewChronicle={() => setScreen("newcharacter")}
           onOpenSettings={() => setScreen("settings")}
         />
       )}
       {screen === "play" && (
         <Play connection={connection} campaignId={campaignId} onGoHome={() => setScreen("home")} />
+      )}
+      {screen === "newcharacter" && (
+        <NewCharacter
+          connection={connection}
+          onCreated={(id) => {
+            setCampaignId(id);
+            setScreen("play");
+          }}
+          onCancel={() => setScreen("home")}
+        />
       )}
       {screen === "settings" && (
         <Settings

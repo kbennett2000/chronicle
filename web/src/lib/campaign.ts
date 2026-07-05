@@ -110,6 +110,39 @@ export async function getModels(connection: Connection): Promise<{ models: Model
   return (await apiFetch(connection, "/models")) as { models: ModelOption[]; default: string };
 }
 
+/** Mirrors src/campaign-store.ts's CampaignSummary — the Home chronicle list
+ * (ADR-0010). */
+export interface CampaignSummary {
+  id: string;
+  name: string;
+  race: string;
+  class: string;
+  level: number;
+  situation: string;
+}
+
+export async function listCampaigns(connection: Connection): Promise<CampaignSummary[]> {
+  const result = (await apiFetch(connection, "/campaigns")) as { campaigns: CampaignSummary[] };
+  return result.campaigns;
+}
+
+export interface CharacterCreationInput {
+  name: string;
+  race: string;
+  class: string;
+  abilityScores: Record<"strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma", number>;
+}
+
+/** Creates a new campaign from a character-creation form (ADR-0010); the
+ * server derives the authoritative sheet and returns the new campaign id. */
+export async function createCampaign(connection: Connection, character: CharacterCreationInput): Promise<string> {
+  const result = (await apiFetch(connection, "/campaigns", {
+    method: "POST",
+    body: JSON.stringify({ character }),
+  })) as { campaignId: string };
+  return result.campaignId;
+}
+
 export async function getState(connection: Connection, campaignId: string): Promise<StateSnapshot> {
   return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/state`)) as StateSnapshot;
 }

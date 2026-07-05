@@ -9,6 +9,7 @@ const CAMPAIGN_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 export class InvalidCampaignIdError extends Error {}
 export class CampaignNotFoundError extends Error {}
+export class CampaignExistsError extends Error {}
 
 /** Resolves a campaign id to its working directory, rejecting anything
  * that isn't a plain directory name directly under CAMPAIGNS_ROOT (no
@@ -25,6 +26,134 @@ export function resolveCampaignDir(campaignId: string): string {
     throw new CampaignNotFoundError(`campaign not found: ${campaignId}`);
   }
   return dir;
+}
+
+// The blank state-file templates a new campaign starts from — moved here from
+// scripts/scratch-campaign.ts so scratch and real (character-creation)
+// campaigns are scaffolded by one primitive (ADR-0010). The headings/bullet
+// shapes must match web/src/lib/state-headings.ts (checked by
+// web/tests/heading-consistency.spec.ts).
+export const EMPTY_WORLD_STATE = `# World State
+
+## Current Situation
+_(not yet started)_
+
+## Locations Visited
+_(none yet)_
+
+## Factions
+_(none established yet)_
+`;
+
+export const EMPTY_NPC_ROSTER = `# NPC Roster
+
+_(No named NPCs met yet. Add an entry per NPC on first meaningful
+introduction, in this format:)_
+
+<!--
+## <Name>
+- **Description:** appearance, role
+- **Disposition:** attitude toward the player, current relationship
+- **Knows:** information they can share
+- **Portrait asset ID:** (none yet)
+-->
+`;
+
+export const EMPTY_QUEST_LOG = `# Quest Log
+
+## Active
+_(none yet)_
+
+## Completed
+_(none yet)_
+`;
+
+/** Creates a new campaign directory and its blank state files. Rejects an id
+ * that fails the pattern or already exists — this is the one primitive used by
+ * both scripts/scratch-campaign.ts and POST /campaigns (ADR-0010). */
+export function scaffoldCampaign(
+  campaignId: string,
+  characterSheet: unknown,
+  settings: Record<string, unknown> = { model: DEFAULT_MODEL }
+): string {
+  if (!CAMPAIGN_ID_PATTERN.test(campaignId)) {
+    throw new InvalidCampaignIdError(`invalid campaign id: ${campaignId}`);
+  }
+  const dir = path.resolve(CAMPAIGNS_ROOT, campaignId);
+  if (path.dirname(dir) !== CAMPAIGNS_ROOT) {
+    throw new InvalidCampaignIdError(`invalid campaign id: ${campaignId}`);
+  }
+  if (fs.existsSync(dir)) {
+    throw new CampaignExistsError(`campaign already exists: ${campaignId}`);
+  }
+
+  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.join(dir, "session-log"));
+  fs.writeFileSync(path.join(dir, "session-log", ".gitkeep"), "");
+  fs.writeFileSync(path.join(dir, "character-sheet.json"), JSON.stringify(characterSheet, null, 2) + "\n");
+  fs.writeFileSync(path.join(dir, "world-state.md"), EMPTY_WORLD_STATE);
+  fs.writeFileSync(path.join(dir, "npc-roster.md"), EMPTY_NPC_ROSTER);
+  fs.writeFileSync(path.join(dir, "quest-log.md"), EMPTY_QUEST_LOG);
+  fs.writeFileSync(path.join(dir, "campaign-settings.json"), JSON.stringify(settings, null, 2) + "\n");
+  return dir;
+}
+
+export interface CampaignSummary {
+  id: string;
+  name: string;
+  race: string;
+  class: string;
+  level: number;
+  situation: string;
+}
+
+/** Pulls the trimmed body of the "## Current Situation" section out of a
+ * world-state.md, for the Home campaign list — a tiny standalone extractor so
+ * the server needn't carry the client's full markdown parser. */
+function currentSituation(worldStateMd: string): string {
+  const lines = worldStateMd.split(/\r?\n/);
+  const start = lines.findIndex((l) => /^##\s+Current Situation\s*$/i.test(l));
+  if (start === -1) return "";
+  const body: string[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^#{1,6}\s/.test(lines[i])) break;
+    body.push(lines[i]);
+  }
+  const text = body.join(" ").replace(/\s+/g, " ").trim();
+  if (!text || /^_\(.*\)_$/.test(text)) return "";
+  return text;
+}
+
+/** Every campaign under CAMPAIGNS_ROOT (skipping the _registry helper dir and
+ * any dir without a character-sheet.json), for the Home list (ADR-0010). */
+export function listCampaigns(): CampaignSummary[] {
+  if (!fs.existsSync(CAMPAIGNS_ROOT)) return [];
+  const out: CampaignSummary[] = [];
+  for (const entry of fs.readdirSync(CAMPAIGNS_ROOT, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name === "_registry") continue;
+    if (!CAMPAIGN_ID_PATTERN.test(entry.name)) continue;
+    const dir = path.join(CAMPAIGNS_ROOT, entry.name);
+    const sheetPath = path.join(dir, "character-sheet.json");
+    if (!fs.existsSync(sheetPath)) continue;
+    let sheet: Record<string, unknown> = {};
+    try {
+      sheet = JSON.parse(fs.readFileSync(sheetPath, "utf8"));
+    } catch {
+      continue;
+    }
+    let situation = "";
+    const worldPath = path.join(dir, "world-state.md");
+    if (fs.existsSync(worldPath)) situation = currentSituation(fs.readFileSync(worldPath, "utf8"));
+    out.push({
+      id: entry.name,
+      name: typeof sheet.name === "string" ? sheet.name : "",
+      race: typeof sheet.race === "string" ? sheet.race : "",
+      class: typeof sheet.class === "string" ? sheet.class : "",
+      level: typeof sheet.level === "number" ? sheet.level : 1,
+      situation,
+    });
+  }
+  return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** Per design doc §8: player-facing model choices, each labeled with its
