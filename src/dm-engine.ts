@@ -21,6 +21,88 @@ const STATE_FILES = [
   "quest-log.md",
 ];
 
+/** A pure allow/deny decision, mirroring the SDK's PermissionResult shape
+ * but with no SDK import so it stays trivially unit-testable. */
+export type PermissionDecision = { behavior: "allow" } | { behavior: "deny"; message: string };
+
+/** True when `targetPath` (absolute, or relative to the engine's cwd —
+ * which is always the campaign dir) resolves to `parentDir` itself or
+ * something inside it. Used to confirm a file tool's target is actually
+ * within the grant it claims, rather than trusting a glob string. */
+function isInside(parentDir: string, targetPath: string, cwd: string): boolean {
+  const resolved = path.isAbsolute(targetPath) ? path.resolve(targetPath) : path.resolve(cwd, targetPath);
+  const rel = path.relative(path.resolve(parentDir), resolved);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+/** Per issue #29 and ADR-0008: the deterministic, host-side permission
+ * decision for a DM turn. This is the same known-safe set `allowedTools`
+ * names, but evaluated in our own code from the resolved tool input rather
+ * than delegated entirely to the SDK's `dontAsk` + glob-string matching
+ * (the path the intermittent permission-break bug was traced toward). It is
+ * a pure function so it can be unit-tested without spinning up the SDK; the
+ * PreToolUse hook in runTurn wraps it with logging and enforcement.
+ *
+ * Enforced from PreToolUse, not canUseTool: the SDK auto-approves bare
+ * `allowedTools` entries *before* canUseTool is consulted (it emits a
+ * CLAUDE_SDK_CAN_USE_TOOL_SHADOWED warning and never invokes the callback),
+ * so canUseTool can't gate the campaign/SRD/MCP tools we actually care
+ * about. A PreToolUse hook fires for every tool call regardless — verified
+ * empirically against a real turn — so that is the enforcement point.
+ *
+ * Allows: campaign-cwd Read/Write/Edit/Glob, SRD-dir Read (read-only,
+ * outside cwd per ADR-0006), and the seed/texture host MCP tools (plus the
+ * image MCP tool only when the campaign opted into image generation).
+ * Everything else — Bash, out-of-tree paths, unknown tools — is denied. */
+export function decidePermission(
+  toolName: string,
+  input: Record<string, unknown>,
+  campaignDir: string,
+  generateImages: boolean
+): PermissionDecision {
+  // Host MCP tools are granted by name. Match on the server segment so the
+  // decision is robust to a server exposing more than one tool, or to any
+  // future rename of a single tool within it.
+  if (toolName.startsWith("mcp__seed-tables__") || toolName.startsWith("mcp__texture-tables__")) {
+    return { behavior: "allow" };
+  }
+  if (toolName.startsWith("mcp__image-tools__")) {
+    return generateImages
+      ? { behavior: "allow" }
+      : { behavior: "deny", message: "image generation is not enabled for this campaign" };
+  }
+
+  const filePath = typeof input.file_path === "string" ? input.file_path : undefined;
+  const deny = (what: string): PermissionDecision => ({
+    behavior: "deny",
+    message: `${what} — only this campaign's own files (and read-only SRD reference) are permitted in a DM turn`,
+  });
+
+  switch (toolName) {
+    case "Read":
+      if (filePath && (isInside(campaignDir, filePath, campaignDir) || isInside(SRD_DIR, filePath, campaignDir))) {
+        return { behavior: "allow" };
+      }
+      return deny(`Read of '${filePath ?? "(no path)"}' is outside the campaign and SRD directories`);
+    case "Write":
+    case "Edit":
+      // SRD is read-only: writes/edits are confined to the campaign dir.
+      if (filePath && isInside(campaignDir, filePath, campaignDir)) {
+        return { behavior: "allow" };
+      }
+      return deny(`${toolName} of '${filePath ?? "(no path)"}' is outside the campaign directory`);
+    case "Glob": {
+      const globPath = typeof input.path === "string" ? input.path : campaignDir;
+      if (isInside(campaignDir, globPath, campaignDir)) {
+        return { behavior: "allow" };
+      }
+      return deny(`Glob under '${globPath}' is outside the campaign directory`);
+    }
+    default:
+      return { behavior: "deny", message: `tool '${toolName}' is not permitted in a DM turn` };
+  }
+}
+
 /** Per ADR-0004: setting reskin must never let a configured world setting's
  * source property leak actual copyrighted content into play. Kept as its
  * own standalone constant, not woven into a longer prompt string, so Kris
@@ -266,14 +348,38 @@ export async function runTurn(
     // why the permission-break bug was invisible until a played session hit
     // it. Cheap enough (console.error only) to leave in permanently.
     hooks: {
+      // Per ADR-0008 (issue #29): the PreToolUse hook is now the deterministic,
+      // host-side permission gate as well as the logger. Unlike canUseTool
+      // (which the SDK shadows for bare allowedTools entries), this fires for
+      // every tool call, so decidePermission — not the SDK's glob matching —
+      // decides and logs each one. allowedTools/disallowedTools/dontAsk stay
+      // as defense-in-depth.
       PreToolUse: [
         {
           hooks: [
             async (input: { tool_name?: string; tool_input?: unknown }) => {
-              console.error(
-                `[dm-engine] PreToolUse: ${input.tool_name} ${JSON.stringify(input.tool_input)}`
+              const toolName = input.tool_name ?? "";
+              const toolInput = (input.tool_input ?? {}) as Record<string, unknown>;
+              const decision = decidePermission(
+                toolName,
+                toolInput,
+                campaignDir,
+                Boolean(settings.generateImages)
               );
-              return { continue: true };
+              console.error(
+                `[dm-engine] PreToolUse ${decision.behavior === "allow" ? "ALLOW" : "DENY"}: ` +
+                  `${toolName} ${JSON.stringify(toolInput)}` +
+                  (decision.behavior === "deny" ? ` — ${decision.message}` : "")
+              );
+              return {
+                continue: true,
+                hookSpecificOutput: {
+                  hookEventName: "PreToolUse" as const,
+                  permissionDecision: decision.behavior,
+                  permissionDecisionReason:
+                    decision.behavior === "deny" ? decision.message : undefined,
+                },
+              };
             },
           ],
         },
