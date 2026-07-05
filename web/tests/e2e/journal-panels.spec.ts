@@ -14,6 +14,8 @@ test.describe("Journal tab bar + bottom-sheet mechanics", () => {
     await page.getByTestId("tab-self").click();
     await expect(page.getByTestId("self-name")).toBeVisible();
     await expect(page.getByText("SELF", { exact: true })).toBeVisible();
+    // Issues #38–#41: every drawer explains what it is under its title.
+    await expect(page.getByTestId("sheet-subtitle")).toContainText("Your character");
     await page.getByTestId("sheet-close").click();
     await expect(page.getByTestId("self-name")).toBeHidden();
 

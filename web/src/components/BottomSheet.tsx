@@ -2,6 +2,10 @@ import type { ReactNode } from "react";
 
 interface BottomSheetProps {
   title: string;
+  /** One-line explanation of what this panel is for — issues #38–#41 were
+   * "what is this screen / why does it exist," so every drawer now says so
+   * under its title. */
+  subtitle?: string;
   onClose: () => void;
   children: ReactNode;
 }
@@ -9,7 +13,7 @@ interface BottomSheetProps {
 /** Generic journal-panel chrome (grabber, title, ✕, scrim) per the
  * handoff's bottom-sheet spec — panel content is supplied by the caller.
  * Tapping the scrim, the grabber, or the ✕ all close it. */
-export function BottomSheet({ title, onClose, children }: BottomSheetProps) {
+export function BottomSheet({ title, subtitle, onClose, children }: BottomSheetProps) {
   return (
     <div style={{ position: "absolute", inset: 0, zIndex: 30, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
       <div className="sheet-scrim" data-testid="sheet-scrim" onClick={onClose} />
@@ -60,6 +64,23 @@ export function BottomSheet({ title, onClose, children }: BottomSheetProps) {
             ✕
           </button>
         </div>
+        {subtitle && (
+          <div
+            data-testid="sheet-subtitle"
+            style={{
+              position: "relative",
+              flexShrink: 0,
+              padding: "0 20px 6px",
+              fontFamily: "var(--font-body)",
+              fontStyle: "italic",
+              fontSize: 12.5,
+              lineHeight: 1.4,
+              color: "var(--ink-faint)",
+            }}
+          >
+            {subtitle}
+          </div>
+        )}
         <div className="cx-scroll" style={{ position: "relative", flex: 1, overflowY: "auto", padding: "8px 20px 30px" }}>
           {children}
         </div>

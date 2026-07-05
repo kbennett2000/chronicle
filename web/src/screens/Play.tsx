@@ -30,6 +30,15 @@ interface DisplayTurn {
 const TABS = ["Self", "Folk", "Quest", "Views"] as const;
 type Tab = (typeof TABS)[number];
 
+/** Issues #38–#41: each drawer opened with only a bare title, leaving
+ * players unsure what it was for. One plain-language line per panel. */
+const TAB_SUBTITLES: Record<Tab, string> = {
+  Self: "Your character — stats, gear, and coin.",
+  Folk: "People you've met, and what they know.",
+  Quest: "What you're chasing, and what you've resolved.",
+  Views: "Portraits and scenes from your tale. Tap “Draw this” to illustrate one.",
+};
+
 function ChapterHeading({ text }: { text: string }) {
   return (
     <div style={{ textAlign: "center", margin: "2px 0 20px" }}>
@@ -357,7 +366,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
       </div>
 
       {openTab && (
-        <BottomSheet title={openTab.toUpperCase()} onClose={() => setOpenTab(null)}>
+        <BottomSheet title={openTab.toUpperCase()} subtitle={TAB_SUBTITLES[openTab]} onClose={() => setOpenTab(null)}>
           {openTab === "Self" && characterSheet ? (
             <SelfPanel connection={connection} campaignId={campaignId} sheet={characterSheet} />
           ) : openTab === "Folk" ? (
