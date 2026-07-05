@@ -21,6 +21,34 @@ function runScratchScript(args: string[]): string {
   }).trim();
 }
 
+/** `npx tsx src/server.ts` is not one process but two: tsx's own CLI
+ * re-execs itself as a child to install its ESM loader hooks (confirmed
+ * via `ps aux` — one "node .../tsx" wrapper plus one "node --require
+ * .../loader.mjs" grandchild actually bound to the port), and npx may add
+ * a third layer on top of that. A plain `proc.kill()` only signals the
+ * immediate spawned process, never that grandchild — so every prior e2e
+ * run leaked its real server process forever (298 confirmed still running
+ * across old sessions before this fix), each one a live process quietly
+ * consuming CPU/memory/FDs indefinitely. That accumulating pressure is
+ * what made tests/e2e/turn.spec.ts — the one real, network-bound Agent
+ * SDK call in the whole suite — intermittently fail with a reset
+ * connection when run as part of a full suite (competing against however
+ * many leaked servers had piled up) while reliably passing in isolation.
+ * `detached: true` on spawn makes `proc` the leader of its own process
+ * group (pid === pgid); signalling the negative pid kills that whole
+ * group — wrapper, grandchild, and any layer in between — in one shot. */
+function killServerTree(proc: ChildProcess): void {
+  if (!proc.pid) {
+    proc.kill();
+    return;
+  }
+  try {
+    process.kill(-proc.pid, "SIGTERM");
+  } catch {
+    // Group may already be gone.
+  }
+}
+
 async function waitForReady(baseURL: string, token: string, timeoutMs = 20000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -96,10 +124,13 @@ export const test = base.extend<{ chronicleServer: ChronicleTestServer }, object
 
     const port = 4500 + Math.floor(Math.random() * 400);
     const baseURL = `http://127.0.0.1:${port}`;
+    // detached: true makes this process the leader of its own process
+    // group (pid === pgid) — see killServerTree below for why that matters.
     const proc: ChildProcess = spawn("npx", ["tsx", "src/server.ts"], {
       cwd: REPO_ROOT,
       env: { ...process.env, CHRONICLE_SHARED_SECRET: TOKEN, PORT: String(port), HOST: "127.0.0.1" },
       stdio: "pipe",
+      detached: true,
     });
 
     let stderr = "";
@@ -110,14 +141,14 @@ export const test = base.extend<{ chronicleServer: ChronicleTestServer }, object
     try {
       await waitForReady(baseURL, TOKEN);
     } catch (err) {
-      proc.kill();
+      killServerTree(proc);
       runScratchScript(["delete", campaignId]);
       throw new Error(`${(err as Error).message}\n${stderr}`);
     }
 
     await use({ baseURL, token: TOKEN, campaignId });
 
-    proc.kill();
+    killServerTree(proc);
     runScratchScript(["delete", campaignId]);
   },
 });

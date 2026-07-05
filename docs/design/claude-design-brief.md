@@ -206,7 +206,28 @@ design for, not an edge case.
   conceptually in the design doc but not yet built; fair game for Design
   to shape however makes sense against the API above.
 
-## 8. Known Constraints Worth Knowing
+## 8. Known Mockup-vs-Real-Schema Divergences
+
+Found during panel implementation (Slices 20, 22) — the design mockup
+invented structure the backend schema doesn't actually have. In both
+cases the real, un-fabricated shape was implemented instead of inventing
+data to match the mockup:
+
+- **Self panel:** mockup showed a Speed stat and an XP progress bar with
+  a next-level threshold. Neither exists — there's no `speed` field, and
+  computing XP-to-next-level requires the 5e leveling table, which is
+  SRD-grounding work not yet done. Rendered raw `xp` as plain text,
+  dropped Speed. (Revisit if/when advancement mechanics get their own
+  rules-grounding slice.)
+- **Quest panel:** mockup invented a three-tier model (Active-with-
+  boolean-steps, an open "Threads" middle tier, Closed) with per-step
+  `done: true/false` checkboxes. The real schema (per `dm-engine.ts`
+  rule 6 and the actual `quest-log.md` shape) is just two sections
+  (Active/Completed), each holding freeform prose bullets with nested
+  progress notes — no structured step-completion state exists anywhere.
+  Built around the real two-section freeform shape instead.
+
+## 9. Known Constraints Worth Knowing
 
 - Video generation is scoped but not implemented (/imagine-video wasn't
   working in testing) -- no video-related settings or endpoints exist.
@@ -215,3 +236,18 @@ design for, not an edge case.
 - SRD-grounded rules adjudication and the travel/rumor/encounter-twist
   narrative content are still pending backend work -- they don't change
   any API shape above, so Design doesn't need to wait on them.
+
+## 10. Known Test Debt
+
+- The `turn.spec.ts` flakiness flagged during Slice 22 was root-caused
+  and fixed in Slice 23: `tests/e2e/harness.ts`'s server-process teardown
+  used a plain `proc.kill()`, but `tsx`'s CLI always re-execs itself as a
+  child to install its ESM loader hooks — `proc.kill()` only ever
+  signalled that wrapper, never the grandchild actually bound to the
+  port. Every e2e run before this fix leaked its real server process
+  forever (298 confirmed still running from old sessions before cleanup).
+  That accumulating CPU/memory/FD pressure was what made the one real,
+  network-bound Agent SDK call in the suite intermittently fail under a
+  full run while passing reliably alone. Fixed by spawning detached and
+  killing the whole process group on teardown; confirmed clean (zero
+  leaked processes, 19/19 passing) across 4 consecutive full-suite runs.
