@@ -40,6 +40,29 @@ export async function apiFetchRaw(
   return { status: res.status, body };
 }
 
+/** For binary routes (currently just GET /campaigns/:id/images/:filename)
+ * — same auth header as every other route (server.ts's comment on that
+ * route: images are "always fetched by app.js, which already has the
+ * token," never a bare <img src>, since there's no way to attach a
+ * custom header to an <img> tag's own request). Throws on any failure
+ * (401, 404, network) — callers treat "couldn't get this image" as the
+ * same no-image-yet case as portraitImage being absent in the first
+ * place, per the backend contract's "design the no-image case as normal,
+ * not an error." */
+export async function fetchImageBlob(connection: Connection, path: string): Promise<Blob> {
+  let res: Response;
+  try {
+    res = await fetch(`${serverOrigin(connection)}${path}`, {
+      headers: { "X-Chronicle-Token": connection.passphrase },
+    });
+  } catch (err) {
+    throw new ApiError(err instanceof Error ? err.message : "could not reach the server");
+  }
+  if (res.status === 401) throw new AuthError();
+  if (!res.ok) throw new ApiError(`request failed (${res.status})`);
+  return res.blob();
+}
+
 export async function apiFetch(connection: Connection, path: string, options?: RequestInit): Promise<unknown> {
   const { status, body } = await apiFetchRaw(connection, path, options);
   if (status < 200 || status >= 300) {

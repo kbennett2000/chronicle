@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { Connection } from "../lib/connection";
-import { getState, sendTurn } from "../lib/campaign";
+import { getState, sendTurn, type CharacterSheet } from "../lib/campaign";
 import { parseChapterHeadings } from "../lib/session-log";
 import { BottomSheet } from "../components/BottomSheet";
+import { SelfPanel } from "../panels/SelfPanel";
 
 interface PlayProps {
   connection: Connection;
@@ -112,6 +113,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [openTab, setOpenTab] = useState<Tab | null>(null);
+  const [characterSheet, setCharacterSheet] = useState<CharacterSheet | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -119,6 +121,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
     getState(connection, campaignId)
       .then((snapshot) => {
         if (cancelled) return;
+        setCharacterSheet(snapshot.characterSheet);
         // A brand-new campaign has no currentSessionLog at all yet — a
         // real empty state (no turns taken), not an error.
         if (snapshot.currentSessionLog) {
@@ -296,9 +299,13 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
 
       {openTab && (
         <BottomSheet title={openTab.toUpperCase()} onClose={() => setOpenTab(null)}>
-          <p style={{ fontStyle: "italic", color: "var(--ink-dim)", fontSize: 15, textAlign: "center", marginTop: 40 }}>
-            {openTab} panel — coming soon
-          </p>
+          {openTab === "Self" && characterSheet ? (
+            <SelfPanel connection={connection} campaignId={campaignId} sheet={characterSheet} />
+          ) : (
+            <p style={{ fontStyle: "italic", color: "var(--ink-dim)", fontSize: 15, textAlign: "center", marginTop: 40 }}>
+              {openTab} panel — coming soon
+            </p>
+          )}
         </BottomSheet>
       )}
     </div>

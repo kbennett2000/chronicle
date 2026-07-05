@@ -8,15 +8,28 @@ export function getCampaignId(): string {
   return new URLSearchParams(window.location.search).get("campaign") || "test-campaign";
 }
 
-/** Subset of character-sheet.json actually used by the Home screen today
- * — see docs/design/handoff-2026-07/backend-contract.md §4 for the full
- * shape (inventory, conditions, spell slots, currency, etc.), which later
- * slices' Self panel will need in full. */
+/** character-sheet.json's shape per docs/design/handoff-2026-07/
+ * backend-contract.md §4. Everything past name/race/class/level is
+ * optional on purpose: this is plain JSON the DM engine writes, not a
+ * schema-validated record, and per the backend contract "an NPC met
+ * before image generation was enabled...simply won't have an image
+ * reference" — the same "field may just not be there yet" reasoning
+ * applies to a character sheet predating a later schema addition (e.g.
+ * `currency`, added by issue #4). Every consumer of these optional
+ * fields must degrade gracefully, not throw. */
 export interface CharacterSheet {
   name: string;
   race: string;
   class: string;
   level: number;
+  hp?: { current: number; max: number };
+  armorClass?: number;
+  abilityScores?: Partial<Record<"strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma", number>>;
+  conditions?: string[];
+  inventory?: Array<{ item: string; quantity: number }>;
+  xp?: number;
+  spellSlots?: Record<string, { total: number; used: number }>;
+  currency?: { cp: number; sp: number; ep: number; gp: number; pp: number };
   portraitImage?: string;
 }
 

@@ -11,14 +11,21 @@ test.describe("Journal tab bar + bottom-sheet mechanics", () => {
     await page.getByTestId("continue-button").click();
     await expect(page.getByText("ACTIVE PLAY")).toBeVisible();
 
-    const tabs: Array<{ testId: string; label: string }> = [
-      { testId: "tab-self", label: "Self" },
+    // Self got real content in Slice 20 (see self-panel.spec.ts); the
+    // other three are still Slice 19's stubs, per plan.
+    const stubTabs: Array<{ testId: string; label: string }> = [
       { testId: "tab-folk", label: "Folk" },
       { testId: "tab-quest", label: "Quest" },
       { testId: "tab-views", label: "Views" },
     ];
 
-    for (const tab of tabs) {
+    await page.getByTestId("tab-self").click();
+    await expect(page.getByTestId("self-name")).toBeVisible();
+    await expect(page.getByText("SELF", { exact: true })).toBeVisible();
+    await page.getByTestId("sheet-close").click();
+    await expect(page.getByTestId("self-name")).toBeHidden();
+
+    for (const tab of stubTabs) {
       await page.getByTestId(tab.testId).click();
       await expect(page.getByText(`${tab.label} panel — coming soon`)).toBeVisible();
       await expect(page.getByText(tab.label.toUpperCase(), { exact: true })).toBeVisible();
@@ -57,16 +64,16 @@ test.describe("Journal tab bar + bottom-sheet mechanics", () => {
     // the handoff reference), so switching tabs requires closing first —
     // there's no path to two sheets mounted at once.
     await page.getByTestId("tab-self").click();
-    await expect(page.getByText("Self panel — coming soon")).toBeVisible();
+    await expect(page.getByTestId("self-name")).toBeVisible();
     await expect(page.getByTestId("sheet-scrim")).toHaveCount(1);
 
     await page.getByTestId("sheet-close").click();
-    await expect(page.getByText("Self panel — coming soon")).toBeHidden();
+    await expect(page.getByTestId("self-name")).toBeHidden();
     await expect(page.getByTestId("sheet-scrim")).toHaveCount(0);
 
     await page.getByTestId("tab-views").click();
     await expect(page.getByText("Views panel — coming soon")).toBeVisible();
-    await expect(page.getByText("Self panel — coming soon")).toBeHidden();
+    await expect(page.getByTestId("self-name")).toBeHidden();
     await expect(page.getByTestId("sheet-scrim")).toHaveCount(1);
   });
 });
