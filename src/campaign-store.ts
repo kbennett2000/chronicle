@@ -337,6 +337,59 @@ export function persistCampaignSettings(
   return readCampaignSettings(campaignDir);
 }
 
+/** Recency signal for "most recently played" — the newest mtime among a
+ * campaign's turn transcripts (actual play), falling back to its settings file,
+ * then the directory itself. Turn transcripts are the truest "last played"
+ * marker; a campaign that was only ever configured (no turns) still ranks by
+ * when its settings were last written. */
+function campaignRecencyMs(campaignDir: string): number {
+  const logDir = path.join(campaignDir, "session-log");
+  let newest = 0;
+  if (fs.existsSync(logDir)) {
+    for (const f of fs.readdirSync(logDir)) {
+      if (!f.endsWith(".transcript.jsonl")) continue;
+      try {
+        newest = Math.max(newest, fs.statSync(path.join(logDir, f)).mtimeMs);
+      } catch {
+        // ignore an unreadable log — recency is best-effort ranking, not a hard read
+      }
+    }
+  }
+  if (newest > 0) return newest;
+  for (const rel of ["campaign-settings.json", ""]) {
+    try {
+      return fs.statSync(path.join(campaignDir, rel)).mtimeMs;
+    } catch {
+      // fall through to the next candidate
+    }
+  }
+  return 0;
+}
+
+/** Issue #64: the look/play/model settings a NEW game inherits — copied from the
+ * most recently *played* campaign so a new game starts like the last one, rather
+ * than reverting to the raw scaffold defaults (images off, auto-roll on, Sonnet).
+ * This replaces #60's per-device localStorage seeding, which only remembered
+ * fields the player happened to re-toggle after that fix shipped. `worldSetting`
+ * is deliberately excluded — it's the premise of each specific game, typed fresh
+ * on the New Chronicle screen. Returns {} when no eligible campaign exists yet,
+ * so the create screen falls back to neutral defaults. */
+export function newGameDefaultSettings(): Partial<CampaignSettings> {
+  if (!fs.existsSync(CAMPAIGNS_ROOT)) return {};
+  let best: { dir: string; recency: number } | undefined;
+  for (const entry of fs.readdirSync(CAMPAIGNS_ROOT, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name === "_registry") continue;
+    if (!CAMPAIGN_ID_PATTERN.test(entry.name)) continue;
+    const dir = path.join(CAMPAIGNS_ROOT, entry.name);
+    if (!fs.existsSync(path.join(dir, "character-sheet.json"))) continue;
+    const recency = campaignRecencyMs(dir);
+    if (!best || recency > best.recency) best = { dir, recency };
+  }
+  if (!best) return {};
+  const { worldSetting: _worldSetting, ...inheritable } = readCampaignSettings(best.dir);
+  return inheritable;
+}
+
 const sessionIdFile = (campaignDir: string) => path.join(campaignDir, ".session-id");
 
 export function readPersistedSessionId(campaignDir: string): string | undefined {

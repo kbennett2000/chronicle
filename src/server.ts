@@ -24,6 +24,7 @@ import {
   persistCampaignModel,
   readCampaignSettings,
   persistCampaignSettings,
+  newGameDefaultSettings,
   scaffoldCampaign,
   deleteCampaign,
   listCampaigns,
@@ -131,6 +132,18 @@ const ROUTES: Array<{
     pattern: /^\/models$/,
     async handler(_req, res) {
       sendJson(res, 200, { models: MODEL_OPTIONS, default: "claude-sonnet-5" });
+    },
+  },
+  {
+    // Issue #64: the look/play/model defaults a NEW game should start from —
+    // copied server-side from the most recently played campaign so the New
+    // Chronicle screen pre-fills to the player's usual settings instead of the
+    // raw scaffold defaults. Top-level path (not /campaigns/...) so it can't be
+    // shadowed by the /campaigns/:id matcher below. `{}` when no campaign exists.
+    method: "GET",
+    pattern: /^\/new-game-defaults$/,
+    async handler(_req, res) {
+      sendJson(res, 200, { settings: newGameDefaultSettings() });
     },
   },
   {

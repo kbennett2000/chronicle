@@ -4,12 +4,12 @@ import {
   createCampaign,
   startSession,
   getModels,
+  getNewGameDefaults,
   type CharacterCreationInput,
   type CampaignCreationSettings,
   type ModelOption,
 } from "../lib/campaign";
-import { loadPreferredModel, savePreferredModel } from "../lib/modelPref";
-import { loadLookPrefs } from "../lib/lookPrefs";
+import { ToggleRow, ArtStylePicker } from "../components/LookControls";
 
 interface NewCharacterProps {
   connection: Connection;
@@ -78,22 +78,36 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
   const [worldSetting, setWorldSetting] = useState("");
   const [toneWhimsy, setToneWhimsy] = useState(0);
   const [contentIntensity, setContentIntensity] = useState<"standard" | "low">("standard");
+  // Issue #64: look/play dials, surfaced here and pre-filled from the last game
+  // (GET /new-game-defaults) so a new game starts like the one you already play,
+  // instead of reverting to images-off / auto-roll-on and forcing a reconfigure.
+  const [generateImages, setGenerateImages] = useState(false);
+  const [autoIllustrateTurns, setAutoIllustrateTurns] = useState(false);
+  const [artStyle, setArtStyle] = useState("");
+  const [autoRollDice, setAutoRollDice] = useState(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Issue #57: pick the model at new-game time, defaulting to the last one the
-  // player chose (or the models-list default) — so a new game doesn't silently
-  // start on Sonnet after they set, say, Haiku.
+  // Issue #57/#64: pick the model at new-game time, pre-filled from the last
+  // game — so a new game doesn't silently start on Sonnet after you set Haiku.
   const [models, setModels] = useState<ModelOption[]>([]);
-  const [model, setModel] = useState<string | null>(loadPreferredModel() ?? null);
+  const [model, setModel] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    getModels(connection)
-      .then((result) => {
+    Promise.all([getModels(connection), getNewGameDefaults(connection)])
+      .then(([modelsResult, defaults]) => {
         if (cancelled) return;
-        setModels(result.models);
-        // Fall back to the server default only if nothing was remembered.
-        setModel((prev) => prev ?? result.default);
+        setModels(modelsResult.models);
+        // Pre-fill every dial from the last game's settings, falling back to the
+        // neutral scaffold defaults when a field — or the whole last game — is
+        // absent (a fresh install with no prior campaign).
+        setModel(defaults.model ?? modelsResult.default);
+        setGenerateImages(defaults.generateImages ?? false);
+        setAutoIllustrateTurns(defaults.autoIllustrateTurns ?? false);
+        setArtStyle(defaults.artStyle ?? "");
+        setAutoRollDice(defaults.autoRollDice ?? true);
+        if (defaults.contentIntensity) setContentIntensity(defaults.contentIntensity);
+        if (defaults.toneWhimsy !== undefined) setToneWhimsy(defaults.toneWhimsy);
       })
       .catch(() => {});
     return () => {
@@ -123,33 +137,23 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
     setCreating(true);
     setError(null);
     const character: CharacterCreationInput = { name: name.trim(), race, class: klass, abilityScores: scores };
-    // Only send the world fields the player actually changed — omitted fields
-    // keep the standard-fantasy defaults (issue #48).
-    const settings: CampaignCreationSettings = {};
-    // Issue #60: seed the new game with the player's remembered look/play
-    // defaults (images/art/auto-illustrate/auto-roll) so it doesn't revert to
-    // images-off. Explicit form fields below still take precedence.
-    const lookPrefs = loadLookPrefs();
-    if (lookPrefs.generateImages !== undefined) settings.generateImages = lookPrefs.generateImages;
-    if (lookPrefs.artStyle !== undefined) settings.artStyle = lookPrefs.artStyle;
-    if (lookPrefs.autoIllustrateTurns !== undefined) settings.autoIllustrateTurns = lookPrefs.autoIllustrateTurns;
-    if (lookPrefs.autoRollDice !== undefined) settings.autoRollDice = lookPrefs.autoRollDice;
-    if (lookPrefs.contentIntensity !== undefined) settings.contentIntensity = lookPrefs.contentIntensity;
+    // Issue #64: send every dial explicitly from the form so the new game stores
+    // its own complete copy of look/play/model (no reliance on a per-device
+    // cache, and no seed-then-override asymmetry that once let a stale
+    // contentIntensity beat the visible picker). worldSetting/artStyle are the
+    // only ones omitted when blank, keeping the standard-fantasy default.
+    const settings: CampaignCreationSettings = {
+      generateImages,
+      autoIllustrateTurns,
+      autoRollDice,
+      contentIntensity,
+      toneWhimsy,
+    };
+    if (artStyle.trim()) settings.artStyle = artStyle.trim();
     if (worldSetting.trim()) settings.worldSetting = worldSetting.trim();
-    if (toneWhimsy > 0) settings.toneWhimsy = toneWhimsy;
-    if (contentIntensity !== "standard") settings.contentIntensity = contentIntensity;
-    // Issue #57: seed the new campaign with the chosen model and remember it for
-    // next time.
-    if (model) {
-      settings.model = model;
-      savePreferredModel(model);
-    }
+    if (model) settings.model = model;
     try {
-      const campaignId = await createCampaign(
-        connection,
-        character,
-        Object.keys(settings).length ? settings : undefined
-      );
+      const campaignId = await createCampaign(connection, character, settings);
       await startSession(connection, campaignId);
       onCreated(campaignId);
     } catch (err) {
@@ -304,6 +308,39 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
             })}
           </>
         )}
+
+        {/* Issue #64: THE LOOK — surfaced at creation and pre-filled from the
+            last game, so images/art/dice are visible and adjustable up front
+            instead of discovered (and reverted) after the game begins. */}
+        <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2, color: "var(--brass)", margin: "26px 0 6px" }}>
+          THE LOOK
+        </div>
+        <ToggleRow
+          testId="newchar-images-toggle"
+          title="Generate scene art"
+          description="Off by default · needs Grok Build configured"
+          checked={generateImages}
+          onChange={setGenerateImages}
+        />
+        {generateImages && (
+          <ToggleRow
+            testId="newchar-auto-illustrate-toggle"
+            title="Auto-illustrate each turn"
+            description="Draws every DM reply · the image appears a moment after the text"
+            checked={autoIllustrateTurns}
+            onChange={setAutoIllustrateTurns}
+            containerStyle={{ marginTop: 8 }}
+          />
+        )}
+        <ArtStylePicker artStyle={artStyle} onChange={setArtStyle} />
+        <ToggleRow
+          testId="newchar-dice-toggle"
+          title="Auto-roll dice"
+          description="On: the DM rolls for you · Off: you supply your own roll values"
+          checked={autoRollDice}
+          onChange={setAutoRollDice}
+          containerStyle={{ marginTop: 12 }}
+        />
 
         {/* Issue #48: describe the world at creation, not only later in Settings. */}
         <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2, color: "var(--brass)", margin: "26px 0 2px" }}>

@@ -29,6 +29,11 @@ test.describe("New character / new campaign (issue #36)", () => {
       await page.getByTestId("new-chronicle").click();
       await expect(page.getByText("NEW CHRONICLE")).toBeVisible();
 
+      // Issue #64: the look/play dials are surfaced on the create screen (and
+      // pre-filled from the last game), not hidden until after the game begins.
+      await expect(page.getByTestId("newchar-images-toggle")).toBeVisible();
+      await expect(page.getByTestId("newchar-dice-toggle")).toBeVisible();
+
       await page.getByTestId("newchar-name").fill("E2E Newchar Fixture");
       await page.getByTestId("newchar-race").selectOption("Elf");
       await page.getByTestId("newchar-class").selectOption("Wizard");
@@ -70,6 +75,16 @@ test.describe("New character / new campaign (issue #36)", () => {
       expect(sheet.level).toBe(1);
       expect(sheet.hp).toEqual({ current: 6, max: 6 });
       expect(sheet.armorClass).toBe(10);
+
+      // Issue #64: the new game persisted its OWN explicit copy of the look/play
+      // dials (sent from the create form, inherited from the last game) — not a
+      // bare scaffold that would force a post-creation reconfigure.
+      const createdSettings = JSON.parse(
+        fs.readFileSync(path.join(REPO_ROOT, "campaigns", createdId!, "campaign-settings.json"), "utf8")
+      );
+      expect(typeof createdSettings.model).toBe("string");
+      expect(typeof createdSettings.generateImages).toBe("boolean");
+      expect(typeof createdSettings.autoRollDice).toBe("boolean");
     } finally {
       if (createdId) {
         fs.rmSync(path.join(REPO_ROOT, "campaigns", createdId), { recursive: true, force: true });
