@@ -179,6 +179,13 @@ body {
   justify-content: center;
 }
 
+/* Card entrance per the handoff's motion catalog (riseIn, .5s) — Home's
+   campaign card was the one card-shaped entrance in the app that had
+   never actually been wired to it. */
+.rise-in {
+  animation: riseIn 0.5s ease both;
+}
+
 .back-chevron {
   display: block;
   width: 8px;

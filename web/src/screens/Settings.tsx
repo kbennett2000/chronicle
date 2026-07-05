@@ -253,6 +253,7 @@ export function Settings({
                   border: `1px solid ${settings.generateImages ? "rgba(211,112,60,.9)" : "rgba(109,90,56,.4)"}`,
                   background: settings.generateImages ? "rgba(211,112,60,.85)" : "rgba(12,8,5,.6)",
                   position: "relative",
+                  transition: "background 0.2s, border-color 0.2s",
                 }}
               >
                 <span
@@ -264,6 +265,7 @@ export function Settings({
                     height: 20,
                     borderRadius: "50%",
                     background: settings.generateImages ? "#fbeede" : "#8c7c62",
+                    transition: "left 0.2s, background 0.2s",
                   }}
                 />
               </button>

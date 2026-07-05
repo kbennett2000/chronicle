@@ -152,6 +152,11 @@ export function GalleryPanel({ connection, campaignId, characterSheet, npcRoster
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
+            // Per the handoff's motion catalog: fadeIn .25s on overlays —
+            // every other overlay (sheet-scrim, BottomSheet) already gets
+            // this via its own CSS class; the lightbox was the one overlay
+            // still snapping in with no transition at all.
+            animation: "fadeIn 0.25s ease",
             padding: 24,
           }}
         >

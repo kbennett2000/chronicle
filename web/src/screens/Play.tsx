@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { Connection } from "../lib/connection";
-import { getState, sendTurn, type CharacterSheet } from "../lib/campaign";
+import { getState, sendTurn, type CharacterSheet, type StateSnapshot } from "../lib/campaign";
 import { parseChapterHeadings } from "../lib/session-log";
 import { BottomSheet } from "../components/BottomSheet";
 import { SelfPanel } from "../panels/SelfPanel";
 import { FolkPanel } from "../panels/FolkPanel";
 import { QuestPanel } from "../panels/QuestPanel";
 import { GalleryPanel } from "../panels/GalleryPanel";
+import { loadMuted, saveMuted } from "../lib/mute";
 
 interface PlayProps {
   connection: Connection;
@@ -120,17 +121,31 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   const [npcRoster, setNpcRoster] = useState<string>("");
   const [questLog, setQuestLog] = useState<string>("");
   const [worldState, setWorldState] = useState<string>("");
+  const [muted, setMuted] = useState(() => loadMuted());
   const logEndRef = useRef<HTMLDivElement>(null);
+
+  // Self/Folk/Quest/Views all read these four fields as props — refreshed
+  // after every turn (see handleSend) as well as on mount. A full played
+  // session surfaced this the isolated per-panel Playwright specs never
+  // could: every one of those seeds its fixture file straight to disk
+  // before the page ever loads, so they only ever exercise the initial
+  // fetch, never "a turn just changed this, does the already-open app
+  // notice." Before this fix, these four were fetched once at mount and
+  // never touched again — Folk/Quest/Views would show pre-session-start
+  // data forever, even after turns that added NPCs/quests/locations.
+  function applyPanelState(snapshot: StateSnapshot) {
+    setCharacterSheet(snapshot.characterSheet);
+    setNpcRoster(snapshot.npcRoster);
+    setQuestLog(snapshot.questLog);
+    setWorldState(snapshot.worldState);
+  }
 
   useEffect(() => {
     let cancelled = false;
     getState(connection, campaignId)
       .then((snapshot) => {
         if (cancelled) return;
-        setCharacterSheet(snapshot.characterSheet);
-        setNpcRoster(snapshot.npcRoster);
-        setQuestLog(snapshot.questLog);
-        setWorldState(snapshot.worldState);
+        applyPanelState(snapshot);
         // A brand-new campaign has no currentSessionLog at all yet — a
         // real empty state (no turns taken), not an error.
         if (snapshot.currentSessionLog) {
@@ -159,6 +174,14 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
     logEndRef.current?.scrollIntoView({ block: "end" });
   }, [turns, sending]);
 
+  function toggleMute() {
+    setMuted((prev) => {
+      const next = !prev;
+      saveMuted(next);
+      return next;
+    });
+  }
+
   async function handleSend() {
     const message = input.trim();
     if (!message || sending) return;
@@ -172,6 +195,18 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
         next[next.length - 1] = { playerMessage: message, narration: result.narration, isError: result.isError };
         return next;
       });
+      // Whatever the DM just wrote (HP/inventory, a new NPC, quest
+      // progress, a new location) needs to actually reach the panels that
+      // read it — a successful turn without this would leave Self/Folk/
+      // Quest/Views silently showing whatever was true before this turn.
+      if (!result.isError) {
+        getState(connection, campaignId)
+          .then(applyPanelState)
+          .catch(() => {
+            // Panel data just stays at its last-known-good snapshot; the
+            // turn itself already succeeded and is on screen.
+          });
+      }
     } catch (err) {
       setTurns((prev) => {
         const next = [...prev];
@@ -198,8 +233,23 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
             ACTIVE PLAY
           </div>
         </div>
-        <button className="icon-button" disabled>
-          <div style={{ width: 2.5, height: 6, background: "var(--brass)", borderRadius: 1 }} />
+        <button
+          className="icon-button"
+          onClick={toggleMute}
+          aria-pressed={muted}
+          aria-label={muted ? "Unmute" : "Mute"}
+          data-testid="mute-toggle"
+          style={{ gap: 2, position: "relative" }}
+        >
+          <div style={{ width: 2.5, height: 6, background: "var(--brass)", borderRadius: 1, opacity: muted ? 0.3 : 1, transition: "opacity 0.2s" }} />
+          <div style={{ width: 2.5, height: 11, background: "var(--brass)", borderRadius: 1, opacity: muted ? 0.3 : 1, transition: "opacity 0.2s" }} />
+          <div style={{ width: 2.5, height: 8, background: "var(--brass)", borderRadius: 1, opacity: muted ? 0.3 : 1, transition: "opacity 0.2s" }} />
+          {muted && (
+            <div
+              data-testid="mute-slash"
+              style={{ position: "absolute", width: 22, height: 1.5, background: "var(--ember)", transform: "rotate(-32deg)" }}
+            />
+          )}
         </button>
       </div>
 

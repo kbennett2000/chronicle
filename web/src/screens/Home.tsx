@@ -92,7 +92,7 @@ export function Home({ connection, campaignId, connectionStatus, onContinue, onO
           YOUR CHRONICLES
         </div>
 
-        <div className="parchment" data-testid="campaign-card" style={{ marginTop: 12 }}>
+        <div className="parchment rise-in" data-testid="campaign-card" style={{ marginTop: 12 }}>
           <div className="parchment-fill" />
           <div className="parchment-content" style={{ padding: 20 }}>
             {load.status === "loading" && (
