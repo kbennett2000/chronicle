@@ -205,6 +205,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   const [worldState, setWorldState] = useState<string>("");
   const [muted, setMuted] = useState(() => loadMuted());
   const logEndRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   // Self/Folk/Quest/Views all read these four fields as props — refreshed
   // after every turn (see handleSend) as well as on mount. A full played
@@ -256,6 +257,49 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ block: "end" });
   }, [turns, sending]);
+
+  // Issue #43: the mute button now controls a real ambient bed. Browsers block
+  // autoplay until a user gesture, so we try immediately (entering Play was
+  // itself a tap, which often counts) and, if that's rejected, arm a one-shot
+  // listener to start on the first interaction. Muting pauses; unmuting (always
+  // a click, so never blocked) resumes.
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    el.volume = 0.32;
+    let armed = false;
+    const start = () => {
+      if (muted || !audioRef.current) return;
+      audioRef.current.play().catch(() => {});
+    };
+    const onGesture = () => {
+      start();
+      disarm();
+    };
+    const disarm = () => {
+      if (!armed) return;
+      armed = false;
+      window.removeEventListener("pointerdown", onGesture);
+      window.removeEventListener("keydown", onGesture);
+    };
+    if (!muted) {
+      el.play().catch(() => {
+        armed = true;
+        window.addEventListener("pointerdown", onGesture);
+        window.addEventListener("keydown", onGesture);
+      });
+    }
+    return disarm;
+    // Mount once; mute changes are handled by the effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (muted) el.pause();
+    else el.play().catch(() => {});
+  }, [muted]);
 
   function toggleMute() {
     setMuted((prev) => {
@@ -339,6 +383,12 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
 
   return (
     <div className="screen leather-ground">
+      {/* Issue #43: the ambient bed the mute button controls. Loops seamlessly
+          (see web/public/audio/README.md); .ogg primary, .mp3 fallback. */}
+      <audio ref={audioRef} loop preload="auto" data-testid="ambient-audio">
+        <source src="/audio/ambient.ogg" type="audio/ogg" />
+        <source src="/audio/ambient.mp3" type="audio/mpeg" />
+      </audio>
       <div style={{ flexShrink: 0, padding: "54px 16px 10px", display: "flex", alignItems: "center", gap: 10 }}>
         <button className="icon-button" onClick={onGoHome}>
           <span className="back-chevron" />
