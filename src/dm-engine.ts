@@ -27,11 +27,21 @@ Every turn:
    happened (HP change, item gained/lost, condition applied/removed, XP
    gained, new location, new/updated NPC, quest progress). Don't defer
    updates to a later turn.
-4. When a named NPC is introduced for the first time, add an entry for
+4. world-state.md must always have an up-to-date "Current Situation"
+   heading — this is what your narration gets grounded against, not just
+   a history of locations visited. Rewrite it every turn to reflect
+   exactly where Kira is and what's happening right now; never leave it
+   describing a moment that's already passed.
+5. quest-log.md gets the same per-turn update discipline as
+   world-state.md: if a turn produces a discovery, complication, or
+   progress relevant to an active quest, update that quest's entry in
+   quest-log.md in this same turn — not just in world-state.md or the
+   session log, and not deferred to a later touch-up.
+6. When a named NPC is introduced for the first time, add an entry for
    them to npc-roster.md.
-5. Append a short (1-3 sentence) entry summarizing this turn's events to
+7. Append a short (1-3 sentence) entry summarizing this turn's events to
    ${sessionLogPath}. Never overwrite prior entries in it — append only.
-6. Keep narration concise, matching the length/complexity of the player's
+8. Keep narration concise, matching the length/complexity of the player's
    input. Don't pad with unnecessary prose.
 
 If your narration would ever contradict what's actually in a state file,
@@ -57,8 +67,12 @@ export async function runTurn(
 
   const options: Record<string, unknown> = {
     cwd: campaignDir,
-    allowedTools: ["Read", "Write", "Edit", "Glob"],
-    permissionMode: "bypassPermissions",
+    // Per ADR-0002: file read/write is scoped to this campaign's own
+    // working directory (cwd), nothing else is pre-approved, and Bash
+    // is removed from the tool set entirely rather than just denied.
+    allowedTools: ["Read(./**)", "Write(./**)", "Edit(./**)", "Glob(./**)"],
+    disallowedTools: ["Bash"],
+    permissionMode: "dontAsk",
     systemPrompt: systemPrompt(sessionLogPath),
   };
   if (resumeSessionId) {

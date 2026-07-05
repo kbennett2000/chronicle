@@ -1,26 +1,18 @@
 import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-import fs from "node:fs";
 import { runTurn } from "./dm-engine.js";
+import {
+  resolveCampaignDir,
+  readPersistedSessionId,
+  persistSessionId,
+  startSessionLog,
+} from "./campaign-store.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const campaignDir = path.resolve(__dirname, "../campaigns/test-campaign");
-const sessionIdFile = path.join(campaignDir, ".session-id");
+const campaignDir = resolveCampaignDir("test-campaign");
+const sessionLogRelPath = startSessionLog(campaignDir);
 
-const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-const sessionLogRelPath = `session-log/session-${timestamp}.md`;
-const sessionLogAbsPath = path.join(campaignDir, sessionLogRelPath);
-fs.writeFileSync(
-  sessionLogAbsPath,
-  `# Session ${timestamp}\n\n`
-);
+let resumeSessionId = readPersistedSessionId(campaignDir);
 
-let resumeSessionId: string | undefined = fs.existsSync(sessionIdFile)
-  ? fs.readFileSync(sessionIdFile, "utf8").trim()
-  : undefined;
-
-console.log("Chronicle DM engine — Slice 1 harness");
+console.log("Chronicle DM engine — CLI harness");
 console.log(`Campaign dir: ${campaignDir}`);
 console.log(`Session log: ${sessionLogRelPath}`);
 if (resumeSessionId) {
@@ -53,7 +45,7 @@ async function promptLoop() {
 
     if (result.sessionId) {
       resumeSessionId = result.sessionId;
-      fs.writeFileSync(sessionIdFile, resumeSessionId);
+      persistSessionId(campaignDir, resumeSessionId);
     }
 
     rl.prompt();

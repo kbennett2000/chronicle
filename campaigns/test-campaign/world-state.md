@@ -1,19 +1,18 @@
 # World State
 
 ## Current Situation
-Evening of day 2 (heading into night 2). After a long rest at the Gilded Antler, Kira travelled
-north through the Greywood at first light, moving stealthily (Stealth 18)
-but distracted from her surroundings (Perception 6 — missed the unnatural
-hush and absence of birdsong near the tower). She entered the tower and
-climbed the spiral stair (dodged a crossbow tripwire on the 7th step). A
-gloom-touched giant spider ambushed her from the first landing; she
-wounded it but chose to flee rather than press on. It bit her again on the
-way out. She escaped the tower at 1/16 HP — badly hurt, empty-handed. The
-spider retreated from daylight back to its green-lit lair above the
-landing. Kira then returned safely to Millhaven, reported everything to
-Garrick, and took a long rest at the Gilded Antler (another 2 gp for room
-and poultice; 23→21 gp). She is now fully healed (16/16 HP). The glow, the
-spider, and the missing boy Tobin remain unresolved at the tower.
+Morning of day 4, in Millhaven. Kira cut Tobin fully free, hauled him onto
+her shoulder, and broke for the stair; the spider lunged but missed (tangled
+in its own webs) and would not follow into daylight. She carried Tobin south
+through the Greywood to Millhaven, where Garrick and the miller took him in.
+Tobin is alive but feverish and shaken, babbling about "the green light in
+the walls"; his family is tending him. Kira took a long rest at the Gilded
+Antler (–2 gp, care for both; 21→19 gp) and is fully healed (16/16 HP). She
+is unwounded and back at Millhaven's gate/main street after a short,
+uneventful stroll out the south road and back (Garrick on the gate, a bit
+puzzled). She is deciding her next move. UNRESOLVED: the watchtower still glows,
+and the corrupted giant spider and its tainted egg-brood remain nesting in
+the second-floor guardroom.
 
 ## Locations Visited
 - **Millhaven (main street / gate)** — a small trade town on the edge of

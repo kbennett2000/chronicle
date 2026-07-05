@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dm": "tsx src/cli.ts",
+    "serve": "tsx src/server.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

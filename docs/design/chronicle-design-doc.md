@@ -42,10 +42,15 @@ communicate through the campaign's persistent state files.
 Per-campaign working directory, treated like a small repo:
 
 - `character-sheet.json` — HP, inventory, conditions, XP, spell slots
-- `world-state.md` — locations visited, factions, current situation
+- `world-state.md` — locations visited, factions, and a required
+  **"Current Situation"** heading, kept up to date every turn — this is
+  what narration gets grounded against, not just a location history
 - `npc-roster.md` — every *named* NPC: description, disposition, what they
   know, portrait asset ID
-- `quest-log.md` — active / completed threads
+- `quest-log.md` — active / completed threads. Gets the **same per-turn
+  update discipline as `world-state.md`** — discoveries and complications
+  must be reflected in the relevant quest entry the same turn they land in
+  world-state, not just noted there and left for a later touch-up
 - `content-registry.md` — every mission archetype, NPC name/role, and
   villain motive used, across the campaign (or account) — checked before
   generating anything new

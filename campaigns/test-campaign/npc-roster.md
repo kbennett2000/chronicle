@@ -23,6 +23,17 @@ introduction, in this format:)_
   Gilded Antler for the tower's history.
 - **Portrait asset ID:** (none yet)
 
+## Tobin
+- **Description:** The miller's boy, a young teen. Found cocooned upright in
+  glowing silk in the tower's second-floor guardroom, drained and grey but
+  still breathing (shallow, slow). Went up on a dare two nights ago.
+- **Disposition:** RESCUED by Kira and returned to Millhaven; alive but
+  feverish and corruption-touched, tended by his family. Grateful (as is the
+  town), though not yet coherent enough for a real conversation.
+- **Knows:** Was up in the tower; babbles about "the green light in the
+  walls." May have more to tell once he recovers.
+- **Portrait asset ID:** (none yet)
+
 ## Barrow
 - **Description:** Broad, balding innkeeper of the Gilded Antler; wipes
   mugs with a rag; slow, deliberate speech. Older, a lifelong Millhaven man.

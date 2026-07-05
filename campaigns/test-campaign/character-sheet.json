@@ -24,7 +24,7 @@
     { "item": "Thieves' tools", "quantity": 1 },
     { "item": "Leather armor", "quantity": 1 },
     { "item": "Rations", "quantity": 5 },
-    { "item": "Gold pieces", "quantity": 21 }
+    { "item": "Gold pieces", "quantity": 19 }
   ],
   "xp": 300,
   "spellSlots": {}
