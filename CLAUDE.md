@@ -20,6 +20,20 @@ sequentially — read `0001-core-architecture.md` first.
   rather than assumed correct, and cited against the SRD text once that
   slice is in scope.
 
+## Commit discipline
+- **Every slice ends with its own commit(s), pushed, before the slice is
+  reported done.** Uncommitted work is not "done" — it's a liability
+  sitting in a working tree, one crash or accidental `git checkout` away
+  from gone (see the test-data-hygiene incident this rule exists because
+  of).
+- Do not let multiple slices' work accumulate uncommitted "to batch
+  later" — each slice's changes get committed and pushed at the end of
+  that slice, closing that slice's own issue at that point, not in a
+  retroactive bulk commit spanning several issues.
+- If a slice is interrupted or spans more than one session, commit
+  incremental progress rather than leaving it all uncommitted until the
+  slice fully wraps.
+
 ## Test data hygiene
 - **Never run destructive git operations** (`checkout`, `reset`, `clean`)
   against anything under `campaigns/` without first checking `git status`/
@@ -44,12 +58,14 @@ sequentially — read `0001-core-architecture.md` first.
   better call for a given piece of work.
 - **Definition of done:** every unit of work traces to a GitHub issue.
   Open one before starting work if none exists.
-- **`campaigns/` is out of git's remit entirely** (see ADR-0005).
-  Destructive git operations (`checkout`, `reset --hard`, `clean`) are
-  never run against anything under `campaigns/`. Ad-hoc validation during
-  a slice always uses a disposable throwaway campaign directory created
-  and deleted within that slice — never `test-campaign` or any campaign
-  Kris is actually playing.
+- **Real campaign data is out of git's remit** (see
+  `docs/adr/0005-campaign-data-git-policy.md`); `test-campaign` and
+  `campaigns/_registry/` are named, deliberate exceptions and stay
+  tracked. Destructive git operations (`checkout`, `reset --hard`,
+  `clean`) are never run against anything under `campaigns/`. Ad-hoc
+  validation during a slice always uses a disposable throwaway campaign
+  directory created and deleted within that slice — never `test-campaign`
+  or any campaign Kris is actually playing.
 - Agents (if/when added) live in `.claude/agents/`.
 
 ## Tech stack (initial)
