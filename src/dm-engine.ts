@@ -259,6 +259,40 @@ export async function runTurn(
     // another campaign's in-flight turn might be reading.
     mcpServers,
     model,
+    // Slice 26 (issue #29): logs every tool call this turn actually attempts
+    // and every auto-denial dontAsk mode produces, with the resolved input
+    // and the concrete reason — the assistant-message-block scraping below
+    // only ever saw successful Read calls, never denials, which is exactly
+    // why the permission-break bug was invisible until a played session hit
+    // it. Cheap enough (console.error only) to leave in permanently.
+    hooks: {
+      PreToolUse: [
+        {
+          hooks: [
+            async (input: { tool_name?: string; tool_input?: unknown }) => {
+              console.error(
+                `[dm-engine] PreToolUse: ${input.tool_name} ${JSON.stringify(input.tool_input)}`
+              );
+              return { continue: true };
+            },
+          ],
+        },
+      ],
+      PermissionDenied: [
+        {
+          hooks: [
+            async (input: { tool_name?: string; tool_input?: unknown; reason?: string }) => {
+              console.error(
+                `[dm-engine] PERMISSION DENIED: ${input.tool_name} ${JSON.stringify(
+                  input.tool_input
+                )} reason=${input.reason}`
+              );
+              return { continue: true };
+            },
+          ],
+        },
+      ],
+    },
   };
   if (resumeSessionId) {
     options.resume = resumeSessionId;
@@ -266,6 +300,15 @@ export async function runTurn(
 
   for await (const message of query({ prompt: userInput, options })) {
     if (message.type === "assistant" && message.message?.content) {
+      const toolUseBlocks: { type: string; name: string }[] = message.message.content.filter(
+        (b: unknown): b is { type: string; name: string } =>
+          typeof b === "object" && b !== null && (b as { type?: string }).type === "tool_use"
+      );
+      if (toolUseBlocks.length > 1) {
+        console.error(
+          `[dm-engine] BATCHED tool_use in one message: ${toolUseBlocks.map((b) => b.name).join(", ")}`
+        );
+      }
       for (const block of message.message.content) {
         if ("text" in block && typeof block.text === "string") {
           textParts.push(block.text);
