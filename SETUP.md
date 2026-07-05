@@ -1,0 +1,107 @@
+# SETUP — LAN hosting
+
+Chronicle's DM engine runs as a local HTTP server on one machine (the
+"host") on your home network. This doc covers the steps that aren't code:
+network configuration on the host, and pointing the mobile UI at it.
+Per [ADR-0003](docs/adr/0003-lan-exposure-auth.md), this is a
+single-household-LAN posture — no HTTPS, no per-user accounts, one shared
+passphrase.
+
+## 1. Reserve a stable address for the host machine
+
+Devices need a consistent way to reach the host. Pick one:
+
+- **Static LAN IP (recommended, simplest):** in your router's admin page,
+  find DHCP reservations (sometimes called "address reservation" or
+  "static lease") and reserve an IP for the host machine's MAC address.
+  Find the host's current IP/MAC with:
+  ```
+  ip addr show
+  ```
+- **mDNS hostname:** if your router doesn't support reservations, install
+  Avahi so the host is reachable as `<hostname>.local`:
+  ```
+  sudo apt install avahi-daemon
+  ```
+  Then use `http://<hostname>.local:4317` instead of an IP address
+  everywhere below.
+
+## 2. Set the shared-secret passphrase
+
+```
+cp .env.example .env
+```
+
+Edit `.env` and set:
+
+```
+CHRONICLE_SHARED_SECRET=<pick something long and hard to guess>
+HOST=<the static LAN IP from step 1, e.g. 192.168.1.42>
+```
+
+`.env` is gitignored — it will never be committed. The server refuses to
+start if `CHRONICLE_SHARED_SECRET` isn't set, so this step isn't optional.
+
+## 3. Open the port in the firewall
+
+Default port is `4317` (override with `PORT` in `.env`). If ufw is active:
+
+```
+sudo ufw allow 4317/tcp
+sudo ufw reload
+```
+
+Check ufw's status to confirm the rule and that ufw is actually enabled:
+
+```
+sudo ufw status
+```
+
+## 4. Start the server
+
+```
+npm run serve
+```
+
+You should see:
+
+```
+Chronicle DM engine HTTP API listening on http://<your HOST value>:4317
+```
+
+If it prints an error about `CHRONICLE_SHARED_SECRET` instead, go back to
+step 2.
+
+## 5. Configure the mobile UI
+
+From a phone or second PC on the same LAN, open:
+
+```
+http://<HOST from step 2>:4317
+```
+
+Go to the **Settings** tab → **Connection** section, and fill in:
+
+- **Server address:** `http://<HOST from step 2>:4317`
+- **Passphrase:** the `CHRONICLE_SHARED_SECRET` value from `.env`
+
+Tap **Save & reconnect**. The app stores both in that device's local
+storage and sends the passphrase on every request from then on.
+
+## 6. Validate
+
+From the second device:
+
+- Confirm the Story tab starts/resumes a session and you can send a turn.
+- Confirm a wrong passphrase is rejected: change the Passphrase field to
+  something wrong, Save & reconnect, and confirm you get an auth error
+  instead of a response.
+
+## Notes
+
+- This setup is for one trusted household LAN. Don't port-forward `4317`
+  on your router or otherwise expose it to the public internet — that's
+  explicitly out of scope for this posture (see ADR-0003).
+- If you switch networks (e.g. move the host machine, router replaced),
+  the DHCP reservation may need to be redone and the mobile UI's Server
+  address updated.

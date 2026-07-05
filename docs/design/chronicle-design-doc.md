@@ -69,6 +69,35 @@ not *what* gets generated. The fix is a content-diversity layer:
 - **Seed tables, not free invention.** Quest hooks, complications, locations,
   and villain motives are rolled from tables; Claude elaborates a randomly
   seeded combination rather than inventing from a blank page.
+  - `data/seed-tables.json` (v2) is the canonical, much-expanded content
+    library: conventional + wildcard pools for quest hooks, complications,
+    and villain motives; combinatorial NPCs (role x trait x quirk, 46,240
+    combinations) and locations (archetype x modifier, 1,705 combinations)
+    with standalone wildcard entries for each; plus `surreal_moments`,
+    `emotional_beats`, `travel_events`(+wildcard), `rumors`, and
+    `encounter_twists` — covering travel, downtime, and combat/social scenes,
+    not just quest/NPC/location generation.
+  - **Registry scope is split by category**, not uniform:
+    - **Global** (identity-bearing, must not repeat across the whole
+      account): quest hooks, complications, villain motives, NPCs
+      (combo or standalone), locations (combo or standalone).
+    - **Per-campaign only** (texture, fine to recur across different
+      campaigns, shouldn't repeat within one story): surreal moments,
+      emotional beats, travel events, rumors, encounter twists.
+  - Wildcard pools sampled at a low, configurable rate (`wildcard_chance`,
+    default ~15-20%) across all conventional/wildcard pairs, so strangeness
+    punctuates rather than saturates.
+  - **Field-level anti-repetition**, not just combo-level: Slice 5 validation
+    showed exact-combo dedup alone still lets individual fields (a trait, a
+    modifier) recur well before the combo space is exhausted, since field
+    pools are much smaller than the full combo count. Selection should bias
+    against recently-used individual field values, not just check the full
+    combo — this is a real fix, not a nice-to-have, and should land before
+    the table gets used heavily.
+  - `emotional_beats` and `surreal_moments` in particular are judgment calls,
+    not fixed-cadence rolls — the DM decides *when* injecting one would land
+    well (after a loss, a quiet moment, a reunion), rather than sampling
+    them on a timer.
 - **Content registry** (§3) — generation calls must check it and exclude
   recent repeats.
 - **Persistent NPC identity** — NPCs are real entries in `npc-roster.md`,
@@ -158,8 +187,84 @@ hidden/off, for later), plus a **model selector**:
    prove the persistence-fixes-drift hypothesis over ~10+ turns.
 2. Mobile-first chat UI wrapping Slice 1.
 3. Seed tables + content registry (repetition fix).
-4. Dice roller + character sheet as real UI, not markdown.
-5. SRD-grounded rules adjudication.
-6. Image generation via Grok Build headless, trigger events, caching.
-7. Prompt template/profile system, cosmetic vs. structural split.
-8. Desktop dockable panel layout (optional, lower priority than mobile).
+4. SRD-grounded rules adjudication.
+5. Image generation via Grok Build headless, trigger events, caching.
+6. Prompt template/profile system, cosmetic vs. structural split.
+7. **[Removed — see §13]** Real dice/character-sheet UI is deferred to the
+   Claude Design handoff rather than built by CC first.
+8. Desktop dockable panel layout (optional, lower priority than mobile;
+   also likely folds into the Design handoff rather than a CC slice).
+
+## 11. Adaptive Music (scoped for later, not yet a slice)
+
+Direct feedback from testing the reference app: she likes music that shifts
+with scene atmosphere, but sometimes mutes it — the friction of muting
+matters as much as the feature itself.
+
+- **Curated royalty-free ambient loops tagged by mood** (combat, exploration,
+  tavern/town, tense, emotional, triumphant), not AI-generated audio — same
+  curated-asset philosophy as the seed tables, and avoids per-session
+  generation latency/looping/copyright issues.
+- DM engine emits a **mood tag** per scene (on meaningful change, not every
+  turn) — same event pattern as the image-generation triggers (§8) — and
+  the frontend crossfades to the matching track.
+- Settings screen holds the persisted on/off default and volume.
+- **A fast, obvious mute/volume control lives on the play screen itself**,
+  not buried in settings — this is the actual fix for "sometimes muted it,"
+  not just having the feature.
+- Sequenced after image generation and the mobile UI work is further
+  along — not competing for the next slice yet.
+
+## 12. Per-Campaign Customization: Style, Setting, Tone, Intensity
+
+See ADR-0004 for the architecture decision. Four dials, all stored
+alongside the existing model selection in `campaign-settings.json`, all
+optional with sensible defaults:
+
+- **Art style** — freeform string appended to image-generation prompts.
+  UI offers presets (comic book, Lego-style, pencil sketch, watercolor,
+  anime, pixel art, noir, oil painting) plus a custom text field.
+- **World setting** — optional freeform description (medieval fantasy is
+  the default with nothing set). Reskins the *flavor* of rolled seeds via
+  DM engine instruction; does not fork or bypass the seed tables,
+  selector, or registry. Copyright guardrail: real IP names (Star Wars,
+  etc.) are genre inspiration only — the DM invents original names,
+  never reproduces copyrighted characters/factions/places verbatim.
+- **Tone/whimsy** — a slider surfacing the existing `wildcard_chance`
+  config plus `emotional_beats` frequency, rather than new machinery.
+- **Content intensity** — bounds crude humor (`[funny/crude]` entries) and
+  how graphically combat/violence gets described. Independent of the
+  other three dials.
+
+## 13. Claude Design Handoff Gate
+
+The mobile UI built so far (Slice 3 onward) is functional scaffolding, not
+the intended final UX. Full UI/UX polish is deliberately deferred to
+Claude Design, working directly with Kris — but only once the backend
+*contract* Design would build against stops changing shape, so their work
+isn't invalidated by ongoing backend churn.
+
+**Gate criteria (all must be true before handoff):**
+1. Settings/customization surface fully locked — model, images, art style,
+   world setting, tone, content intensity all exist and are wired
+   (completes at end of Slice 8).
+2. Image generation actually producing real files being served, with
+   defined loading/failure states — not just scoped.
+3. State-snapshot API final in shape (character sheet, NPC roster,
+   quest log, world state, session log) — largely true now, confirm
+   nothing else is about to reshape it.
+
+**Explicitly not gates** (don't change the data shape the UI consumes,
+so Design can start before these land): SRD rules-grounding, texture-
+category wiring (travel/rumors/encounter twists), adaptive music.
+
+**Consequence for the roadmap:** roadmap item 4 ("dice roller + character
+sheet as real UI, not markdown") is removed as a slice — it's exactly the
+kind of UI polish Design should build once, not something CC builds
+roughly now for Design to redo later.
+
+When the gate is met, the deliverable is a complete backend brief for
+Design: full API surface (endpoints, request/response shapes), the
+state-file schema, the settings model, how images arrive and where
+they're served from, auth (shared-secret header), and an explicit note on
+what's *not* the backend's concern (styling, layout, interaction design).

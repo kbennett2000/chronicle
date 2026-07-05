@@ -33,6 +33,99 @@
 
     <main id="settings-view" class="view" hidden>
       <section class="settings-section">
+        <h2>Connection</h2>
+        <p class="settings-hint">
+          Required to reach the DM engine. Ask whoever hosts it for the
+          server address and passphrase.
+        </p>
+        <label class="connection-field">
+          <span>Server address</span>
+          <input
+            type="text"
+            id="server-address"
+            placeholder="http://192.168.1.42:4317"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+          />
+        </label>
+        <label class="connection-field">
+          <span>Passphrase</span>
+          <input
+            type="password"
+            id="server-passphrase"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+          />
+        </label>
+        <button type="button" id="save-connection" class="apply-button">
+          Save &amp; reconnect
+        </button>
+        <p id="connection-status" class="model-status" hidden></p>
+      </section>
+
+      <section class="settings-section">
+        <h2>Story Style</h2>
+        <p class="settings-hint">
+          Optional. Leave everything below at its default for standard
+          fantasy — applies to the next session you start.
+        </p>
+
+        <label class="connection-field">
+          <span>Art style</span>
+          <select id="art-style-preset">
+            <option value="">Standard (no style override)</option>
+            <option value="comic book">Comic book</option>
+            <option value="Lego-style">Lego-style</option>
+            <option value="pencil sketch">Pencil sketch</option>
+            <option value="watercolor">Watercolor</option>
+            <option value="anime">Anime</option>
+            <option value="pixel art">Pixel art</option>
+            <option value="noir">Noir</option>
+            <option value="oil painting">Oil painting</option>
+            <option value="custom">Custom&hellip;</option>
+          </select>
+        </label>
+        <label class="connection-field" id="art-style-custom-row" hidden>
+          <span>Custom art style</span>
+          <input type="text" id="art-style-custom" placeholder="e.g. stained glass" />
+        </label>
+
+        <label class="connection-field">
+          <span>World setting</span>
+          <textarea
+            id="world-setting"
+            rows="2"
+            placeholder="Leave blank for standard medieval fantasy. e.g. 'underwater civilization', 'a gritty cyberpunk city'."
+          ></textarea>
+        </label>
+        <p class="settings-hint">
+          A setting that references an existing property (a franchise,
+          show, game, etc.) is used as tone/genre inspiration only — the DM
+          always invents its own original characters, factions, and names.
+        </p>
+
+        <label class="connection-field">
+          <span>Tone / whimsy: <span id="tone-whimsy-value">standard</span></span>
+          <input type="range" id="tone-whimsy" min="0" max="100" step="5" value="" />
+        </label>
+
+        <label class="connection-field">
+          <span>Content intensity</span>
+          <select id="content-intensity">
+            <option value="standard">Standard</option>
+            <option value="low">Low (soften crude humor &amp; graphic violence)</option>
+          </select>
+        </label>
+
+        <button type="button" id="save-story-style" class="apply-button">
+          Save story style
+        </button>
+        <p id="story-style-status" class="model-status" hidden></p>
+      </section>
+
+      <section class="settings-section">
         <h2>DM Model</h2>
         <p class="settings-hint">
           Applies to the next session you start (existing session keeps its
@@ -47,11 +140,18 @@
 
       <section class="settings-section">
         <h2>Images</h2>
-        <label class="toggle-row toggle-disabled">
+        <p class="settings-hint">
+          Generates a portrait/scene image the first time a character, named
+          NPC, significant location, notable item, or boss is introduced.
+          Requires Grok Build/SuperGrok access configured on the server you're
+          connected to — leave off if that isn't set up.
+        </p>
+        <label class="toggle-row">
           <span>Generate Images</span>
-          <span class="toggle-switch" aria-disabled="true"></span>
+          <input type="checkbox" id="generate-images-toggle" class="toggle-checkbox" />
+          <span class="toggle-switch" aria-hidden="true"></span>
         </label>
-        <p class="settings-hint">Coming soon — not available yet.</p>
+        <p id="generate-images-status" class="model-status" hidden></p>
       </section>
     </main>
   </div>

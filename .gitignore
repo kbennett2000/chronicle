@@ -9,6 +9,7 @@ npm-debug.log*
 # Never commit auth/keys
 .env
 .env.*
+!.env.example
 .grok/
 .credentials.json
 

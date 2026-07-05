@@ -6,10 +6,12 @@ import {
   persistSessionId,
   resolveSessionLog,
   readCampaignModel,
+  readCampaignSettings,
 } from "./campaign-store.js";
 
 const campaignDir = resolveCampaignDir("test-campaign");
 const model = readCampaignModel(campaignDir);
+const settings = readCampaignSettings(campaignDir);
 
 let resumeSessionId = readPersistedSessionId(campaignDir);
 const sessionLogRelPath = resolveSessionLog(campaignDir, Boolean(resumeSessionId));
@@ -43,7 +45,8 @@ async function promptLoop() {
       input,
       resumeSessionId,
       model,
-      (chunk) => process.stdout.write(chunk)
+      settings,
+      (chunk: string) => process.stdout.write(chunk)
     );
     process.stdout.write("\n\n");
 

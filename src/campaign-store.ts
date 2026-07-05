@@ -59,24 +59,91 @@ export function isValidModelId(value: string): value is ModelId {
 const campaignSettingsFile = (campaignDir: string) =>
   path.join(campaignDir, "campaign-settings.json");
 
+function readRawSettings(campaignDir: string): Record<string, unknown> {
+  const file = campaignSettingsFile(campaignDir);
+  if (!fs.existsSync(file)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function writeRawSettings(campaignDir: string, raw: Record<string, unknown>): void {
+  fs.writeFileSync(campaignSettingsFile(campaignDir), JSON.stringify(raw, null, 2) + "\n");
+}
+
 /** Existing campaigns with no stored preference default to DEFAULT_MODEL
  * rather than erroring — the setting is optional, not required. */
 export function readCampaignModel(campaignDir: string): ModelId {
-  const file = campaignSettingsFile(campaignDir);
-  if (!fs.existsSync(file)) return DEFAULT_MODEL;
-  try {
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    if (typeof parsed.model === "string" && isValidModelId(parsed.model)) {
-      return parsed.model;
-    }
-  } catch {
-    // fall through to default
-  }
-  return DEFAULT_MODEL;
+  const raw = readRawSettings(campaignDir);
+  return typeof raw.model === "string" && isValidModelId(raw.model) ? raw.model : DEFAULT_MODEL;
 }
 
+/** Merges onto the existing file rather than overwriting it — this file
+ * also holds the ADR-0004 reskin/tone/intensity fields below, and a plain
+ * model-only write would silently wipe them out. */
 export function persistCampaignModel(campaignDir: string, model: ModelId): void {
-  fs.writeFileSync(campaignSettingsFile(campaignDir), JSON.stringify({ model }, null, 2) + "\n");
+  writeRawSettings(campaignDir, { ...readRawSettings(campaignDir), model });
+}
+
+/** Per ADR-0004: optional per-campaign narration-layer dials, stored
+ * alongside model selection. All absent = standard fantasy defaults,
+ * existing WILDCARD_CHANCE, no content bounding — this feature is opt-in. */
+export type ContentIntensity = "standard" | "low";
+export const CONTENT_INTENSITIES: ContentIntensity[] = ["standard", "low"];
+
+export interface CampaignSettings {
+  model: ModelId;
+  artStyle?: string;
+  worldSetting?: string;
+  /** 0-1. Overrides seed-selector's WILDCARD_CHANCE when set (per ADR-0004,
+   * this is a UI surface on that existing config, not new machinery). */
+  toneWhimsy?: number;
+  contentIntensity?: ContentIntensity;
+  /** Per Slice 9 / design doc §2.2: defaults to false (absent) since it
+   * depends on Grok Build/SuperGrok access being configured on the host —
+   * opt-in, never assumed. */
+  generateImages?: boolean;
+}
+
+export function readCampaignSettings(campaignDir: string): CampaignSettings {
+  const raw = readRawSettings(campaignDir);
+  const settings: CampaignSettings = { model: readCampaignModel(campaignDir) };
+  if (typeof raw.artStyle === "string" && raw.artStyle.trim()) {
+    settings.artStyle = raw.artStyle.trim();
+  }
+  if (typeof raw.worldSetting === "string" && raw.worldSetting.trim()) {
+    settings.worldSetting = raw.worldSetting.trim();
+  }
+  if (typeof raw.toneWhimsy === "number" && raw.toneWhimsy >= 0 && raw.toneWhimsy <= 1) {
+    settings.toneWhimsy = raw.toneWhimsy;
+  }
+  if (
+    typeof raw.contentIntensity === "string" &&
+    CONTENT_INTENSITIES.includes(raw.contentIntensity as ContentIntensity)
+  ) {
+    settings.contentIntensity = raw.contentIntensity as ContentIntensity;
+  }
+  if (typeof raw.generateImages === "boolean") {
+    settings.generateImages = raw.generateImages;
+  }
+  return settings;
+}
+
+/** Merges the given updates onto existing settings. An empty-string
+ * artStyle/worldSetting clears that field back to "absent" (i.e. default)
+ * rather than being stored as a literal empty string. */
+export function persistCampaignSettings(
+  campaignDir: string,
+  updates: Partial<Omit<CampaignSettings, "model">>
+): CampaignSettings {
+  const raw = readRawSettings(campaignDir);
+  const merged: Record<string, unknown> = { ...raw, ...updates };
+  if (merged.artStyle === "") delete merged.artStyle;
+  if (merged.worldSetting === "") delete merged.worldSetting;
+  writeRawSettings(campaignDir, merged);
+  return readCampaignSettings(campaignDir);
 }
 
 const sessionIdFile = (campaignDir: string) => path.join(campaignDir, ".session-id");

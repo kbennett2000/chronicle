@@ -11,13 +11,34 @@ import {
   readStateSnapshot,
   readCampaignModel,
   persistCampaignModel,
+  readCampaignSettings,
+  persistCampaignSettings,
+  CONTENT_INTENSITIES,
   isValidModelId,
   MODEL_OPTIONS,
   InvalidCampaignIdError,
   CampaignNotFoundError,
+  type ContentIntensity,
 } from "./campaign-store.js";
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4317;
+// Per ADR-0003: default stays localhost-only. Set HOST to the machine's
+// LAN IP (or 0.0.0.0 to bind all interfaces) to serve other LAN devices —
+// this is a deliberate opt-in, not automatic, since it changes the trust
+// boundary from "this machine only" to "this household's network."
+const HOST = process.env.HOST ?? "127.0.0.1";
+
+// Required, not optional: once the server can be bound to a LAN interface,
+// shipping without a secret configured would silently serve the API to
+// the whole household network with no auth at all.
+const SHARED_SECRET = process.env.CHRONICLE_SHARED_SECRET;
+if (!SHARED_SECRET) {
+  console.error(
+    "CHRONICLE_SHARED_SECRET is not set. Refusing to start — see .env.example / SETUP.md."
+  );
+  process.exit(1);
+}
+const AUTH_HEADER = "x-chronicle-token";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_ROOT = path.resolve(__dirname, "../public");
@@ -29,8 +50,8 @@ interface ActiveSession {
 }
 
 // In-memory only: which campaign's Agent SDK session/log is "active" for
-// this server process. Local-only prototype, single process, no auth —
-// per ADR-0002 this is still a local trust boundary, not a multi-user one.
+// this server process. Single process, single shared secret (ADR-0003) —
+// still a single-household trust boundary, not a multi-user one.
 const activeSessions = new Map<string, ActiveSession>();
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -125,12 +146,14 @@ const ROUTES: Array<{
       }
 
       console.log(`[${campaignId}] turn on model ${active.model}`);
+      const settings = readCampaignSettings(campaignDir);
       const result = await runTurn(
         campaignDir,
         active.sessionLogPath,
         message,
         active.sessionId,
         active.model,
+        settings,
         () => {}
       );
 
@@ -157,7 +180,108 @@ const ROUTES: Array<{
       sendJson(res, 200, snapshot);
     },
   },
+  {
+    method: "GET",
+    pattern: /^\/campaigns\/([^/]+)\/settings$/,
+    async handler(_req, res, [campaignId]) {
+      const campaignDir = resolveCampaignDir(campaignId);
+      sendJson(res, 200, readCampaignSettings(campaignDir));
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/campaigns\/([^/]+)\/settings$/,
+    async handler(req, res, [campaignId]) {
+      const campaignDir = resolveCampaignDir(campaignId);
+      const body = (await readJsonBody(req)) as Record<string, unknown>;
+
+      const updates: {
+        artStyle?: string;
+        worldSetting?: string;
+        toneWhimsy?: number;
+        contentIntensity?: ContentIntensity;
+        generateImages?: boolean;
+      } = {};
+
+      if (body.artStyle !== undefined) {
+        if (typeof body.artStyle !== "string") {
+          sendJson(res, 400, { error: "artStyle must be a string" });
+          return;
+        }
+        updates.artStyle = body.artStyle;
+      }
+      if (body.worldSetting !== undefined) {
+        if (typeof body.worldSetting !== "string") {
+          sendJson(res, 400, { error: "worldSetting must be a string" });
+          return;
+        }
+        updates.worldSetting = body.worldSetting;
+      }
+      if (body.toneWhimsy !== undefined) {
+        if (typeof body.toneWhimsy !== "number" || body.toneWhimsy < 0 || body.toneWhimsy > 1) {
+          sendJson(res, 400, { error: "toneWhimsy must be a number between 0 and 1" });
+          return;
+        }
+        updates.toneWhimsy = body.toneWhimsy;
+      }
+      if (body.contentIntensity !== undefined) {
+        if (
+          typeof body.contentIntensity !== "string" ||
+          !CONTENT_INTENSITIES.includes(body.contentIntensity as ContentIntensity)
+        ) {
+          sendJson(res, 400, {
+            error: `contentIntensity must be one of ${CONTENT_INTENSITIES.join(", ")}`,
+          });
+          return;
+        }
+        updates.contentIntensity = body.contentIntensity as ContentIntensity;
+      }
+      if (body.generateImages !== undefined) {
+        if (typeof body.generateImages !== "boolean") {
+          sendJson(res, 400, { error: "generateImages must be a boolean" });
+          return;
+        }
+        updates.generateImages = body.generateImages;
+      }
+
+      sendJson(res, 200, persistCampaignSettings(campaignDir, updates));
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/campaigns\/([^/]+)\/images\/([^/]+)$/,
+    async handler(_req, res, [campaignId, filename]) {
+      const campaignDir = resolveCampaignDir(campaignId);
+      const imagesDir = path.join(campaignDir, "images");
+      const resolved = path.resolve(imagesDir, filename);
+      // Same guard shape as resolveCampaignDir/serveStatic: the filename
+      // param must resolve to a plain file directly under this campaign's
+      // own images/ dir, no path traversal. Authenticated like every other
+      // route here — deliberately not folded into serveStatic's
+      // unauthenticated exception (that exception exists only because the
+      // SPA shell can't attach a header on first navigation; these images
+      // are always fetched by app.js, which already has the token).
+      if (
+        path.dirname(resolved) !== imagesDir ||
+        !fs.existsSync(resolved) ||
+        !fs.statSync(resolved).isFile()
+      ) {
+        sendJson(res, 404, { error: "image not found" });
+        return;
+      }
+      const ext = path.extname(resolved).toLowerCase();
+      res.writeHead(200, { "Content-Type": IMAGE_CONTENT_TYPES[ext] ?? "application/octet-stream" });
+      res.end(fs.readFileSync(resolved));
+    },
+  },
 ];
+
+const IMAGE_CONTENT_TYPES: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+};
 
 const STATIC_CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -199,6 +323,18 @@ const server = createServer(async (req, res) => {
       sendJson(res, 404, { error: "not found" });
       return;
     }
+
+    // Static assets (the SPA shell) are intentionally not gated on the
+    // header below — a browser's initial navigation to "/" can't attach a
+    // custom header, so the page has to load unauthenticated before the
+    // user can enter the passphrase into Settings. Only the API routes,
+    // which the SPA calls via fetch() with the header attached, are
+    // secret-gated.
+    if (req.headers[AUTH_HEADER] !== SHARED_SECRET) {
+      sendJson(res, 401, { error: "missing or invalid auth token" });
+      return;
+    }
+
     const params = route.pattern.exec(url.pathname)!.slice(1);
     await route.handler(req, res, params);
   } catch (err) {
@@ -213,6 +349,6 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`Chronicle DM engine HTTP API listening on http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`Chronicle DM engine HTTP API listening on http://${HOST}:${PORT}`);
 });

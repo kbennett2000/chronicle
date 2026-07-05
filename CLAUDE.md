@@ -20,6 +20,21 @@ sequentially — read `0001-core-architecture.md` first.
   rather than assumed correct, and cited against the SRD text once that
   slice is in scope.
 
+## Test data hygiene
+- **Never run destructive git operations** (`checkout`, `reset`, `clean`)
+  against anything under `campaigns/` without first checking `git status`/
+  `git diff` for uncommitted changes — no exceptions, regardless of how
+  confident the change looks like "just my own test pollution."
+- **All experimental/disposable validation uses a freshly created scratch
+  campaign directory**, created and destroyed by
+  `scripts/scratch-campaign.ts` (create/delete in one command) — never
+  `test-campaign` or any other named fixture. This removes any reason to
+  hand-roll a git-checkout cleanup dance again.
+- `test-campaign` (or any deliberately-maintained fixture) must be left in
+  a **clean, committed git state at the end of every slice** — either
+  commit meaningful changes or revert to clean before calling the slice
+  done. Dirty fixture state is never inherited silently across slices.
+
 ## Workflow discipline
 - **ADR-first.** Any architecturally significant change gets an ADR in
   `docs/adr/` before or alongside implementation — not after the fact.
@@ -29,6 +44,12 @@ sequentially — read `0001-core-architecture.md` first.
   better call for a given piece of work.
 - **Definition of done:** every unit of work traces to a GitHub issue.
   Open one before starting work if none exists.
+- **`campaigns/` is out of git's remit entirely** (see ADR-0005).
+  Destructive git operations (`checkout`, `reset --hard`, `clean`) are
+  never run against anything under `campaigns/`. Ad-hoc validation during
+  a slice always uses a disposable throwaway campaign directory created
+  and deleted within that slice — never `test-campaign` or any campaign
+  Kris is actually playing.
 - Agents (if/when added) live in `.claude/agents/`.
 
 ## Tech stack (initial)

@@ -230,6 +230,23 @@ body {
   color: var(--text-dim);
 }
 
+.connection-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.connection-field input {
+  border-radius: 0.6rem;
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text);
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+}
+
 .toggle-row {
   display: flex;
   align-items: center;
@@ -247,6 +264,8 @@ body {
   background: var(--border);
   position: relative;
   display: inline-block;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
 }
 
 .toggle-switch::after {
@@ -258,8 +277,22 @@ body {
   height: 1.1rem;
   border-radius: 50%;
   background: var(--text-dim);
+  transition: transform 0.15s ease;
 }
 
-.toggle-disabled {
-  opacity: 0.5;
+.toggle-checkbox {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.toggle-checkbox:checked + .toggle-switch {
+  background: var(--accent, #4a7dfc);
+}
+
+.toggle-checkbox:checked + .toggle-switch::after {
+  transform: translateX(1.1rem);
+  background: #fff;
 }
