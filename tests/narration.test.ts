@@ -39,3 +39,18 @@ test("is a no-op on clean narration", () => {
   assert.equal(stripMetaChatter(clean), clean);
   assert.equal(stripMetaChatter(""), "");
 });
+
+test("strips backstage preamble before a --- divider (#46 extension)", () => {
+  const raw =
+    "I need to locate the active campaign directory first. The campaign hasn't started yet — character sheet shows 0 HP.\n\n---\n\nYour leather armor creaks as you move.";
+  assert.equal(
+    stripMetaChatter(raw),
+    "Your leather armor creaks as you move."
+  );
+});
+
+test("strips directory and tool-access meta without a divider", () => {
+  const raw =
+    "I'm restricted to the active campaign's own directory. The DM tools are not available through direct tool calls. The corridor is dark ahead.";
+  assert.equal(stripMetaChatter(raw), "The corridor is dark ahead.");
+});

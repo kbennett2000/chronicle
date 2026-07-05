@@ -66,7 +66,11 @@ export function decidePermission(
   // Host MCP tools are granted by name. Match on the server segment so the
   // decision is robust to a server exposing more than one tool, or to any
   // future rename of a single tool within it.
-  if (toolName.startsWith("mcp__seed-tables__") || toolName.startsWith("mcp__texture-tables__")) {
+  if (
+    toolName.startsWith("mcp__seed-tables__") ||
+    toolName.startsWith("mcp__texture-tables__") ||
+    toolName.startsWith("mcp__dice__")
+  ) {
     return { behavior: "allow" };
   }
   if (toolName.startsWith("mcp__image-tools__")) {

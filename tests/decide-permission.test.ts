@@ -44,6 +44,7 @@ test("Bash and unknown tools are denied", () => {
 test("host MCP tools are allowed by server segment", () => {
   assert.ok(allowed("mcp__seed-tables__roll_seed", {}));
   assert.ok(allowed("mcp__texture-tables__roll_texture", {}));
+  assert.ok(allowed("mcp__dice__roll_dice", { notation: "1d20+2" }));
 });
 
 test("image MCP tool is gated on generateImages", () => {
