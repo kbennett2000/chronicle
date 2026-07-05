@@ -6,6 +6,7 @@
  * If either source drifts, that test fails loudly instead of
  * findMarkdownSection silently returning undefined. */
 export const CURRENT_SITUATION_HEADING = "Current Situation";
+export const LOCATIONS_VISITED_HEADING = "Locations Visited";
 export const QUEST_ACTIVE_HEADING = "Active";
 export const QUEST_COMPLETED_HEADING = "Completed";
 

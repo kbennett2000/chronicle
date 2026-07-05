@@ -6,6 +6,7 @@ import { BottomSheet } from "../components/BottomSheet";
 import { SelfPanel } from "../panels/SelfPanel";
 import { FolkPanel } from "../panels/FolkPanel";
 import { QuestPanel } from "../panels/QuestPanel";
+import { GalleryPanel } from "../panels/GalleryPanel";
 
 interface PlayProps {
   connection: Connection;
@@ -118,6 +119,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   const [characterSheet, setCharacterSheet] = useState<CharacterSheet | null>(null);
   const [npcRoster, setNpcRoster] = useState<string>("");
   const [questLog, setQuestLog] = useState<string>("");
+  const [worldState, setWorldState] = useState<string>("");
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -128,6 +130,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
         setCharacterSheet(snapshot.characterSheet);
         setNpcRoster(snapshot.npcRoster);
         setQuestLog(snapshot.questLog);
+        setWorldState(snapshot.worldState);
         // A brand-new campaign has no currentSessionLog at all yet — a
         // real empty state (no turns taken), not an error.
         if (snapshot.currentSessionLog) {
@@ -311,6 +314,14 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
             <FolkPanel connection={connection} campaignId={campaignId} npcRoster={npcRoster} />
           ) : openTab === "Quest" ? (
             <QuestPanel questLog={questLog} />
+          ) : openTab === "Views" && characterSheet ? (
+            <GalleryPanel
+              connection={connection}
+              campaignId={campaignId}
+              characterSheet={characterSheet}
+              npcRoster={npcRoster}
+              worldState={worldState}
+            />
           ) : (
             <p style={{ fontStyle: "italic", color: "var(--ink-dim)", fontSize: 15, textAlign: "center", marginTop: 40 }}>
               {openTab} panel — coming soon

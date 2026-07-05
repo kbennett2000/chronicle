@@ -11,11 +11,6 @@ test.describe("Journal tab bar + bottom-sheet mechanics", () => {
     await page.getByTestId("continue-button").click();
     await expect(page.getByText("ACTIVE PLAY")).toBeVisible();
 
-    // Self (Slice 20), Folk (Slice 21), and Quest (Slice 22) got real
-    // content — see self-panel.spec.ts / folk-panel.spec.ts /
-    // quest-panel.spec.ts; Views is still Slice 19's stub, per plan.
-    const stubTabs: Array<{ testId: string; label: string }> = [{ testId: "tab-views", label: "Views" }];
-
     await page.getByTestId("tab-self").click();
     await expect(page.getByTestId("self-name")).toBeVisible();
     await expect(page.getByText("SELF", { exact: true })).toBeVisible();
@@ -38,13 +33,14 @@ test.describe("Journal tab bar + bottom-sheet mechanics", () => {
     await page.getByTestId("sheet-close").click();
     await expect(page.getByText("No thread worth tracking has begun yet.")).toBeHidden();
 
-    for (const tab of stubTabs) {
-      await page.getByTestId(tab.testId).click();
-      await expect(page.getByText(`${tab.label} panel — coming soon`)).toBeVisible();
-      await expect(page.getByText(tab.label.toUpperCase(), { exact: true })).toBeVisible();
-      await page.getByTestId("sheet-close").click();
-      await expect(page.getByText(`${tab.label} panel — coming soon`)).toBeHidden();
-    }
+    // Views on a fresh scratch campaign (character only, zero images
+    // anywhere) shows its own real empty-state-dominant grid, not the
+    // "coming soon" stub copy.
+    await page.getByTestId("tab-views").click();
+    await expect(page.getByTestId("gallery-count")).toContainText("0 of 1 illustrated");
+    await expect(page.getByText("VIEWS", { exact: true })).toBeVisible();
+    await page.getByTestId("sheet-close").click();
+    await expect(page.getByTestId("gallery-count")).toBeHidden();
 
     // Grabber closes too.
     await page.getByTestId("tab-quest").click();
@@ -54,9 +50,9 @@ test.describe("Journal tab bar + bottom-sheet mechanics", () => {
 
     // Tapping the scrim (outside the sheet) closes it too.
     await page.getByTestId("tab-views").click();
-    await expect(page.getByText("Views panel — coming soon")).toBeVisible();
+    await expect(page.getByTestId("gallery-count")).toBeVisible();
     await page.getByTestId("sheet-scrim").click({ position: { x: 5, y: 5 } });
-    await expect(page.getByText("Views panel — coming soon")).toBeHidden();
+    await expect(page.getByTestId("gallery-count")).toBeHidden();
 
     // Turn input still works underneath — the panel doesn't leave the
     // input dock stuck disabled or the scrim lingering to eat clicks.
@@ -85,7 +81,7 @@ test.describe("Journal tab bar + bottom-sheet mechanics", () => {
     await expect(page.getByTestId("sheet-scrim")).toHaveCount(0);
 
     await page.getByTestId("tab-views").click();
-    await expect(page.getByText("Views panel — coming soon")).toBeVisible();
+    await expect(page.getByTestId("gallery-count")).toBeVisible();
     await expect(page.getByTestId("self-name")).toBeHidden();
     await expect(page.getByTestId("sheet-scrim")).toHaveCount(1);
   });

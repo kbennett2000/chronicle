@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CURRENT_SITUATION_HEADING,
+  LOCATIONS_VISITED_HEADING,
   QUEST_ACTIVE_HEADING,
   QUEST_COMPLETED_HEADING,
   NPC_DESCRIPTION_FIELD,
@@ -23,6 +24,16 @@ test.describe("markdown heading consistency (frontend parser vs. backend source 
   test("dm-engine.ts's system prompt still instructs the exact 'Current Situation' heading", () => {
     const dmEngine = fs.readFileSync(path.join(REPO_ROOT, "src/dm-engine.ts"), "utf8");
     expect(dmEngine).toContain(`"${CURRENT_SITUATION_HEADING}"`);
+  });
+
+  test("scratch-campaign.ts's world-state template still uses the Locations Visited heading", () => {
+    const scratch = fs.readFileSync(path.join(REPO_ROOT, "scripts/scratch-campaign.ts"), "utf8");
+    expect(scratch).toContain(`## ${LOCATIONS_VISITED_HEADING}`);
+  });
+
+  test("image-generator.ts's tool instructions still tell the model to record a location's image as an 'Image' line", () => {
+    const imageGenerator = fs.readFileSync(path.join(REPO_ROOT, "src/image-generator.ts"), "utf8").replace(/\s+/g, " ");
+    expect(imageGenerator).toContain(`an "Image" line under the location's world-state.md bullet`);
   });
 
   test("scratch-campaign.ts's quest-log template still uses the Active/Completed headings", () => {

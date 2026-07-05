@@ -16,7 +16,7 @@ interface EntityPortraitProps {
  * as-is (just parameterized on size) for Folk's NPC rows in Slice 21, so
  * neither drifts stylistically from the other over time. */
 export function EntityPortrait({ connection, campaignId, filename, width, height, imageTestId, emptyTestId }: EntityPortraitProps) {
-  const url = useAuthedImage(connection, campaignId, filename);
+  const { url } = useAuthedImage(connection, campaignId, filename);
   const boxStyle = { width, height, flexShrink: 0, borderRadius: 2, overflow: "hidden" as const };
 
   if (filename && url) {
