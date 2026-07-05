@@ -18,14 +18,38 @@
   },
   "conditions": [],
   "inventory": [
-    { "item": "Shortsword", "quantity": 1 },
-    { "item": "Shortbow", "quantity": 1 },
-    { "item": "Arrows", "quantity": 20 },
-    { "item": "Thieves' tools", "quantity": 1 },
-    { "item": "Leather armor", "quantity": 1 },
-    { "item": "Rations", "quantity": 5 },
-    { "item": "Gold pieces", "quantity": 19 }
+    {
+      "item": "Shortsword",
+      "quantity": 1
+    },
+    {
+      "item": "Shortbow",
+      "quantity": 1
+    },
+    {
+      "item": "Arrows",
+      "quantity": 20
+    },
+    {
+      "item": "Thieves' tools",
+      "quantity": 1
+    },
+    {
+      "item": "Leather armor",
+      "quantity": 1
+    },
+    {
+      "item": "Rations",
+      "quantity": 5
+    }
   ],
   "xp": 300,
-  "spellSlots": {}
+  "spellSlots": {},
+  "currency": {
+    "cp": 0,
+    "sp": 0,
+    "ep": 0,
+    "gp": 19,
+    "pp": 0
+  }
 }

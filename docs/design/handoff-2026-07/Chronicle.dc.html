@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Cormorant+SC:wght@500;600;700&family=Spectral:ital,wght@0,300;0,400;0,500;0,600;1,400;1,600&display=swap" rel="stylesheet">
+<meta name="ext-resource-dependency" content="assets/scene-millbrook.png">
+<meta name="ext-resource-dependency" content="assets/portrait-thistlewood.png">
+<meta name="ext-resource-dependency" content="assets/portrait-wren.png">
+<meta name="ext-resource-dependency" content="assets/parchment-warm.png">
+<meta name="ext-resource-dependency" content="assets/leather-warm.png">
+<style>
+  body{margin:0;background:#0b0705;}
+  @keyframes flicker{0%,100%{transform:rotate(-45deg) scale(1);opacity:1}45%{transform:rotate(-45deg) scale(1.1,.9);opacity:.88}70%{transform:rotate(-45deg) scale(.94,1.06);opacity:1}}
+  @keyframes dotPulse{0%,80%,100%{opacity:.2}40%{opacity:1}}
+  @keyframes emberGlow{0%,100%{box-shadow:0 0 9px rgba(211,112,60,.5)}50%{box-shadow:0 0 20px rgba(211,112,60,.85)}}
+  @keyframes riseIn{from{transform:translateY(26px);opacity:0}to{transform:translateY(0);opacity:1}}
+  @keyframes sheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  .cx-scroll::-webkit-scrollbar{width:0;height:0}
+</style>
+</helmet>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <filter id="deckle" x="-8%" y="-8%" width="116%" height="116%"><feTurbulence type="fractalNoise" baseFrequency="0.013 0.017" numOctaves="2" seed="7" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="12" xChannelSelector="R" yChannelSelector="G"/></filter>
+  <filter id="deckle2" x="-10%" y="-10%" width="120%" height="120%"><feTurbulence type="fractalNoise" baseFrequency="0.02 0.03" numOctaves="2" seed="21" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="7" xChannelSelector="R" yChannelSelector="G"/></filter>
+</defs></svg>
+<template id="__bundler_thumbnail"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" fill="#19120b"/><circle cx="50" cy="52" r="20" fill="#2a1c10"/><path d="M50 38 C56 45 57 51 53 56 C50 59 46 58.5 45 54.5 C44 51 45 47 50 38 Z" fill="#d3703c"/><circle cx="49.5" cy="52.5" r="3.2" fill="#f5d9a0"/></svg></template>
+
+<div style="--ink:#efe6d2;--ink-dim:#c2b398;--ink-faint:#8c7c62;--void:#0d0906;--leather:#19120b;--leather-hi:#241a10;--ember:#d3703c;--ember-deep:#7c3d20;--arcane:#67a6b5;--arcane-deep:#2f565f;--brass:#b8965a;--brass-dim:#6d5a38; min-height:100vh; box-sizing:border-box; display:flex; flex-direction:column; align-items:center; gap:20px; padding:34px 20px 46px; font-family:'Spectral',Georgia,serif; background:radial-gradient(120% 80% at 50% -8%, rgba(120,80,38,.16), rgba(0,0,0,0) 46%), radial-gradient(90% 70% at 50% 120%, rgba(0,0,0,.5), rgba(0,0,0,0) 50%), #0b0705;">
+
+  <div style="text-align:center; max-width:520px;">
+    <div style="font-family:'Cormorant SC',serif; font-weight:700; font-size:15px; letter-spacing:5px; color:var(--brass);">CHRONICLE</div>
+    <div style="font-size:12px; color:var(--ink-faint); margin-top:4px; letter-spacing:.2px;">Interactive UI prototype · tap through it · <span style="color:var(--arcane);">Home → Continue → the four tabs → Settings</span></div>
+  </div>
+
+  <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="true" hint-size="402,874" style="filter:drop-shadow(0 40px 70px rgba(0,0,0,.6));">
+    <div data-app-root="1" style="height:100%; position:relative; overflow:hidden; background:var(--void); font-family:'Spectral',Georgia,serif; color:var(--ink);">
+
+      <!-- ambient candlelight over everything -->
+      <div style="position:absolute; inset:0; z-index:40; pointer-events:none; background:radial-gradient(90% 40% at 50% 0%, rgba(150,104,52,.16), rgba(0,0,0,0) 42%), radial-gradient(120% 60% at 50% 108%, rgba(0,0,0,.42), rgba(0,0,0,0) 46%);"></div>
+
+      <!-- ============================ HOME ============================ -->
+      <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+      <div data-screen-label="Home" style="position:absolute; inset:0; display:flex; flex-direction:column; background:url('assets/leather-warm.png') center/cover, var(--leather); animation:fadeIn .4s ease;">
+        <div class="cx-scroll" style="flex:1; overflow-y:auto; padding:66px 22px 30px;">
+          <div style="text-align:center; margin-bottom:8px;">
+            <div style="display:flex; align-items:center; justify-content:center; gap:12px;">
+              <div style="height:1px; width:34px; background:linear-gradient(90deg,transparent,var(--brass-dim));"></div>
+              <div style="width:7px; height:7px; background:var(--brass-dim); transform:rotate(45deg);"></div>
+              <div style="height:1px; width:34px; background:linear-gradient(90deg,var(--brass-dim),transparent);"></div>
+            </div>
+            <h1 style="font-family:'Cormorant SC',serif; font-weight:700; font-size:44px; letter-spacing:7px; margin:12px 0 2px; color:var(--ink); text-shadow:0 2px 18px rgba(211,112,60,.25);">CHRONICLE</h1>
+            <div style="font-family:'Spectral',serif; font-style:italic; font-size:14px; color:var(--ink-faint);">a solo tale, kept by candlelight</div>
+          </div>
+
+          <div style="margin-top:26px; font-family:'Cormorant SC',serif; font-weight:600; font-size:12px; letter-spacing:2.5px; color:var(--brass-dim); padding-left:2px;">YOUR CHRONICLES</div>
+
+          <!-- campaign card -->
+          <div style="position:relative; margin-top:12px; animation:riseIn .5s ease both;">
+            <div style="position:absolute; inset:0; border-radius:4px; background:radial-gradient(ellipse 72% 44% at 50% 3%, rgba(158,116,60,.30), rgba(0,0,0,0) 60%), url('assets/parchment-warm.png'); background-size:cover, cover; box-shadow:inset 0 0 0 1.5px rgba(20,13,6,.5), inset 0 0 42px rgba(14,9,4,.62); filter:url(#deckle);"></div>
+            <div style="position:relative; padding:14px;">
+              <div style="position:relative; border-radius:2px; overflow:hidden; height:150px; box-shadow:0 6px 16px rgba(0,0,0,.5), inset 0 0 0 1px rgba(184,150,90,.4);">
+                <img src="assets/scene-millbrook.png" alt="Millbrook" style="width:100%; height:100%; object-fit:cover; display:block;">
+                <div style="position:absolute; inset:0; background:linear-gradient(180deg,rgba(0,0,0,0) 40%,rgba(10,6,4,.66));"></div>
+                <div style="position:absolute; left:12px; bottom:9px; right:12px;">
+                  <div style="font-family:'Cormorant SC',serif; font-weight:700; font-size:22px; letter-spacing:1px; color:#f5ecd8; text-shadow:0 1px 6px rgba(0,0,0,.8);">The Millbrook Road</div>
+                </div>
+                <div style="position:absolute; top:9px; right:9px; font-family:'Cormorant SC',serif; font-size:10px; letter-spacing:1.5px; color:#f0e4cc; background:rgba(20,12,6,.6); border:1px solid rgba(184,150,90,.5); padding:3px 8px; border-radius:2px;">SESSION 4</div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px; margin-top:12px;">
+                <div style="width:34px; height:34px; border-radius:50%; overflow:hidden; border:1px solid var(--brass-dim); flex-shrink:0;"><img src="assets/portrait-wren.png" style="width:100%;height:100%;object-fit:cover;"></div>
+                <div style="min-width:0;">
+                  <div style="font-family:'Cormorant SC',serif; font-weight:600; font-size:15px; letter-spacing:.6px; color:var(--ink);">Wren Ashcombe</div>
+                  <div style="font-size:11.5px; color:var(--ink-faint);">Half-Elf Ranger · Level 3</div>
+                </div>
+              </div>
+              <div style="margin-top:11px; padding-top:11px; border-top:1px solid rgba(109,90,56,.32);">
+                <div style="font-family:'Cormorant SC',serif; font-size:10px; letter-spacing:1.5px; color:var(--arcane); opacity:.9;">CURRENT SITUATION</div>
+                <div style="font-size:13.5px; line-height:1.5; color:var(--ink-dim); margin-top:3px; font-style:italic;">Limped into Millbrook nursing wolf-bites. An old herbalist seems to know why the pack came so far south.</div>
+              </div>
+              <button onClick="{{ resume }}" style="margin-top:14px; width:100%; border:none; cursor:pointer; padding:13px; border-radius:3px; background:linear-gradient(180deg,#d8743e,#a8511f); box-shadow:0 4px 14px rgba(160,70,25,.4), inset 0 1px 0 rgba(255,210,170,.4); color:#faf0e2; font-family:'Cormorant SC',serif; font-weight:700; font-size:14px; letter-spacing:2px;">CONTINUE THE TALE</button>
+              <div style="text-align:center; margin-top:7px; font-size:11px; color:var(--ink-faint);">last played 2 days ago · autosaved</div>
+            </div>
+          </div>
+
+          <button onClick="{{ resume }}" style="margin-top:16px; width:100%; cursor:pointer; padding:12px; border-radius:3px; background:rgba(36,26,16,.5); border:1px solid rgba(109,90,56,.4); color:var(--ink-dim); font-family:'Cormorant SC',serif; font-weight:600; font-size:12.5px; letter-spacing:2px;">＋ BEGIN A NEW CHRONICLE</button>
+        </div>
+
+        <div style="flex-shrink:0; padding:12px 22px 30px; border-top:1px solid rgba(109,90,56,.28); background:linear-gradient(180deg,rgba(0,0,0,0),rgba(0,0,0,.25)); display:flex; align-items:center; justify-content:space-between;">
+          <div style="display:flex; align-items:center; gap:7px;">
+            <div style="width:6px; height:6px; border-radius:50%; background:var(--arcane); box-shadow:0 0 8px var(--arcane);"></div>
+            <span style="font-size:11px; color:var(--ink-faint);">the hearth · 192.168.1.24</span>
+          </div>
+          <button onClick="{{ goSettings }}" style="display:flex; align-items:center; gap:7px; background:none; border:none; cursor:pointer; color:var(--ink-dim); font-family:'Cormorant SC',serif; font-size:11.5px; letter-spacing:1.5px;">
+            <span style="display:inline-flex; width:15px; height:15px; border:1.5px solid var(--brass); border-radius:50%; align-items:center; justify-content:center;"><span style="width:5px;height:5px;background:var(--brass);border-radius:50%;"></span></span>
+            SETTINGS
+          </button>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ============================ PLAY ============================ -->
+      <sc-if value="{{ isPlay }}" hint-placeholder-val="{{ true }}">
+      <div data-screen-label="Active Play" style="position:absolute; inset:0; display:flex; flex-direction:column; background:url('assets/leather-warm.png') center/cover, var(--leather); animation:fadeIn .4s ease;">
+        <!-- running-head chrome -->
+        <div style="flex-shrink:0; padding:54px 16px 10px; display:flex; align-items:center; gap:10px; position:relative; z-index:6;">
+          <button onClick="{{ goHome }}" style="width:32px; height:32px; flex-shrink:0; border-radius:50%; background:rgba(36,26,16,.6); border:1px solid var(--brass-dim); cursor:pointer; display:flex; align-items:center; justify-content:center;"><span style="display:block; width:8px; height:8px; border-left:1.5px solid var(--brass); border-bottom:1.5px solid var(--brass); transform:rotate(45deg); margin-left:3px;"></span></button>
+          <div style="flex:1; text-align:center; min-width:0;">
+            <div style="font-family:'Cormorant SC',serif; font-size:13px; letter-spacing:2px; color:var(--ink-dim);">iv · MILLBROOK</div>
+          </div>
+          <button onClick="{{ toggleMute }}" style="width:32px; height:32px; flex-shrink:0; border-radius:50%; background:rgba(36,26,16,.6); border:1px solid var(--brass-dim); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:2px; position:relative;">
+            <div style="width:2.5px; height:6px; background:var(--brass); border-radius:1px; opacity:{{ muteBarOp }};"></div>
+            <div style="width:2.5px; height:11px; background:var(--brass); border-radius:1px; opacity:{{ muteBarOp }};"></div>
+            <div style="width:2.5px; height:8px; background:var(--brass); border-radius:1px; opacity:{{ muteBarOp }};"></div>
+            <sc-if value="{{ muted }}" hint-placeholder-val="{{ true }}"><div style="position:absolute; width:22px; height:1.5px; background:var(--ember); transform:rotate(-32deg);"></div></sc-if>
+          </button>
+        </div>
+
+        <!-- narration page -->
+        <div style="flex:1; position:relative; margin:0 12px; min-height:0;">
+          <div style="position:absolute; inset:0; background:radial-gradient(ellipse 72% 44% at 50% 3%, rgba(158,116,60,.30), rgba(0,0,0,0) 60%), url('assets/parchment-warm.png'); background-size:cover, cover; box-shadow:inset 0 0 0 1.5px rgba(20,13,6,.5), inset 0 0 42px rgba(14,9,4,.62); filter:url(#deckle);"></div>
+          <div class="cx-scroll" style="position:relative; height:100%; overflow-y:auto; padding:22px 22px 16px;">
+            <sc-for list="{{ messages }}" as="m" hint-placeholder-count="6">
+              <sc-if value="{{ m.isChapter }}" hint-placeholder-val="{{ true }}">
+                <div style="text-align:center; margin:2px 0 20px;"><div style="font-family:'Cormorant SC',serif; font-size:11px; letter-spacing:2.5px; color:var(--brass-dim);">{{ m.text }}</div><div style="height:1px; width:60px; margin:8px auto 0; background:linear-gradient(90deg,transparent,var(--brass-dim),transparent);"></div></div>
+              </sc-if>
+              <sc-if value="{{ m.isDropDm }}" hint-placeholder-val="{{ true }}">
+                <p style="margin:0 0 16px; font-size:16px; line-height:1.64; color:var(--ink);"><span style="float:left; font-family:'Cormorant',serif; font-weight:600; font-size:52px; line-height:.74; color:var(--ember); padding:5px 7px 0 0;">{{ m.dropChar }}</span>{{ m.dropRest }}</p>
+              </sc-if>
+              <sc-if value="{{ m.isDm }}" hint-placeholder-val="{{ true }}">
+                <p style="margin:0 0 16px; font-size:16px; line-height:1.64; color:var(--ink);">{{ m.text }}</p>
+              </sc-if>
+              <sc-if value="{{ m.isPlayer }}" hint-placeholder-val="{{ true }}">
+                <div style="margin:0 0 16px; padding-left:12px; border-left:2px solid var(--ember-deep);"><div style="font-family:'Cormorant SC',serif; font-size:10px; letter-spacing:2px; color:var(--ember); margin-bottom:2px;">YOU</div><div style="font-size:15px; line-height:1.55; font-style:italic; color:var(--ink-dim);">{{ m.text }}</div></div>
+              </sc-if>
+              <sc-if value="{{ m.isHp }}" hint-placeholder-val="{{ true }}">
+                <div style="text-align:center; margin:0 0 16px;"><span style="display:inline-block; transform:rotate(-2.5deg); background:rgba(34,20,12,.85); color:var(--ember); font-family:'Cormorant SC',serif; font-weight:600; font-size:12px; letter-spacing:1px; padding:5px 12px; box-shadow:0 0 14px rgba(211,112,60,.5); filter:url(#deckle2);">{{ m.text }} · the wolf's tooth</span></div>
+              </sc-if>
+              <sc-if value="{{ m.isEvent }}" hint-placeholder-val="{{ true }}">
+                <div style="display:flex; align-items:center; gap:9px; margin:0 0 16px;"><div style="height:1px; flex:1; background:rgba(103,166,181,.3);"></div><span style="font-family:'Cormorant SC',serif; font-size:10px; letter-spacing:1.5px; color:var(--arcane);">{{ m.text }}</span><div style="height:1px; flex:1; background:rgba(103,166,181,.3);"></div></div>
+              </sc-if>
+              <sc-if value="{{ m.isImage }}" hint-placeholder-val="{{ true }}">
+                <figure style="margin:0 0 18px;"><div style="position:relative; border-radius:2px; overflow:hidden; box-shadow:0 8px 20px rgba(0,0,0,.55), 0 0 0 1px rgba(184,150,90,.5), inset 0 0 0 4px rgba(20,12,6,.4);"><img src="{{ m.file }}" style="width:100%; height:180px; object-fit:cover; display:block;"></div><figcaption style="text-align:center; margin-top:7px; font-family:'Cormorant SC',serif; font-size:10.5px; letter-spacing:1.5px; color:var(--brass-dim);">{{ m.caption }}</figcaption></figure>
+              </sc-if>
+            </sc-for>
+
+            <sc-if value="{{ sending }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex; align-items:center; gap:11px; margin:2px 0 10px; opacity:.92;">
+                <div style="width:10px; height:15px; background:var(--ember); border-radius:50% 50% 50% 0; transform:rotate(-45deg); animation:flicker 2.2s ease-in-out infinite; flex-shrink:0;"></div>
+                <span style="font-style:italic; font-size:14.5px; color:var(--ink-dim);">The Dungeon Master is weaving what happens next<span style="animation:dotPulse 1.4s infinite">.</span><span style="animation:dotPulse 1.4s infinite .2s">.</span><span style="animation:dotPulse 1.4s infinite .4s">.</span></span>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+
+        <!-- input dock -->
+        <div style="flex-shrink:0; padding:12px 14px 8px; position:relative; z-index:6;">
+          <div style="display:flex; align-items:center; gap:9px; background:linear-gradient(180deg,var(--leather-hi),var(--leather)); border:1px solid var(--brass-dim); border-radius:24px; padding:6px 6px 6px 16px; box-shadow:0 4px 16px rgba(0,0,0,.4), inset 0 1px 0 rgba(184,150,90,.12);">
+            <div style="width:6px; height:6px; border-radius:50%; background:var(--arcane); box-shadow:0 0 7px var(--arcane); flex-shrink:0;"></div>
+            <input value="{{ input }}" onInput="{{ onInput }}" onKeyDown="{{ onKey }}" placeholder="What do you do?" style="flex:1; min-width:0; background:none; border:none; outline:none; color:var(--ink); font-family:'Spectral',serif; font-style:italic; font-size:15px; padding:6px 0;">
+            <button onClick="{{ send }}" style="width:38px; height:38px; flex-shrink:0; border:none; cursor:pointer; border-radius:50%; background:radial-gradient(circle at 38% 34%, #e08247, #a8511f 70%); box-shadow:0 2px 8px rgba(160,70,25,.5), inset 0 1px 1px rgba(255,220,180,.5); display:flex; align-items:center; justify-content:center;"><span style="display:block; width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:8px solid #fbeede;"></span></button>
+          </div>
+        </div>
+
+        <!-- journal tabs -->
+        <div style="flex-shrink:0; display:flex; gap:3px; padding:0 10px 26px; position:relative; z-index:6;">
+          <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="4">
+            <button onClick="{{ t.onOpen }}" style="flex:1; cursor:pointer; border:none; background:linear-gradient(180deg,var(--leather-hi),#120c07); border-radius:9px 9px 0 0; padding:11px 3px 9px; position:relative; box-shadow:inset 0 1px 0 rgba(184,150,90,.14), 0 -2px 8px rgba(0,0,0,.3);">
+              <sc-if value="{{ t.isSelf }}" hint-placeholder-val="{{ true }}">
+                <div style="position:absolute; top:-9px; left:50%; transform:translateX(-50%); width:19px; height:19px; border-radius:50%; background:radial-gradient(circle at 38% 34%,#e0743c,#8f3f1c); animation:emberGlow 2.4s ease-in-out infinite; display:flex; align-items:center; justify-content:center;"><div style="width:11px; height:1px; background:rgba(30,12,6,.6); transform:rotate(40deg);"></div></div>
+              </sc-if>
+              <sc-if value="{{ t.isDot }}" hint-placeholder-val="{{ true }}">
+                <div style="height:8px; margin-bottom:5px; display:flex; align-items:center; justify-content:center;"><span style="width:7px; height:7px; border:1.5px solid var(--brass-dim); border-radius:{{ t.glyphR }}; transform:rotate({{ t.glyphRot }});"></span></div>
+              </sc-if>
+              <div style="font-family:'Cormorant SC',serif; font-weight:600; font-size:11px; letter-spacing:1px; color:var(--ink-dim);">{{ t.label }}</div>
+              <sc-if value="{{ t.isSelf }}" hint-placeholder-val="{{ true }}"><div style="font-family:'Cormorant SC',serif; font-size:8.5px; color:var(--ember); margin-top:2px;">{{ hpText }}</div></sc-if>
+            </button>
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ============================ SETTINGS ============================ -->
+      <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ true }}">
+      <div data-screen-label="Settings" style="position:absolute; inset:0; display:flex; flex-direction:column; background:url('assets/leather-warm.png') center/cover, var(--leather); animation:fadeIn .35s ease;">
+        <div style="flex-shrink:0; padding:54px 16px 12px; display:flex; align-items:center; gap:10px; border-bottom:1px solid rgba(109,90,56,.3);">
+          <button onClick="{{ backFromSettings }}" style="width:32px; height:32px; border-radius:50%; background:rgba(36,26,16,.6); border:1px solid var(--brass-dim); cursor:pointer; display:flex; align-items:center; justify-content:center;"><span style="display:block; width:8px; height:8px; border-left:1.5px solid var(--brass); border-bottom:1.5px solid var(--brass); transform:rotate(45deg); margin-left:3px;"></span></button>
+          <div style="font-family:'Cormorant SC',serif; font-weight:700; font-size:18px; letter-spacing:2px; color:var(--ink);">SETTINGS</div>
+        </div>
+        <div class="cx-scroll" style="flex:1; overflow-y:auto; padding:20px 18px 40px;">
+
+          <!-- The Engine -->
+          <div style="font-family:'Cormorant SC',serif; font-size:11px; letter-spacing:2px; color:var(--brass); margin:2px 0 4px;">THE ENGINE</div>
+          <div style="font-size:11.5px; color:var(--ink-faint); margin-bottom:10px; font-style:italic;">Locked once a story is underway — adjudication shouldn't shift mid-tale.</div>
+          <sc-for list="{{ modelRows }}" as="md" hint-placeholder-count="3">
+            <button onClick="{{ md.onPick }}" style="display:block; width:100%; text-align:left; cursor:pointer; margin-bottom:7px; padding:12px 14px; border-radius:4px; background:{{ md.bg }}; border:1px solid {{ md.bd }}; box-shadow:{{ md.sh }};">
+              <div style="display:flex; align-items:center; justify-content:space-between;"><span style="font-family:'Cormorant SC',serif; font-weight:600; font-size:14px; letter-spacing:.6px; color:var(--ink);">{{ md.label }}</span><span style="width:15px; height:15px; border-radius:50%; border:1.5px solid {{ md.ring }}; display:flex; align-items:center; justify-content:center;"><span style="width:7px; height:7px; border-radius:50%; background:{{ md.dot }};"></span></span></div>
+              <div style="font-size:12px; color:var(--ink-dim); margin-top:3px; line-height:1.4;">{{ md.description }}</div>
+            </button>
+          </sc-for>
+
+          <!-- The Look -->
+          <div style="font-family:'Cormorant SC',serif; font-size:11px; letter-spacing:2px; color:var(--brass); margin:22px 0 4px;">THE LOOK</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:11px 14px; border-radius:4px; background:rgba(28,20,12,.55); border:1px solid rgba(109,90,56,.36);">
+            <div><div style="font-family:'Cormorant SC',serif; font-size:13.5px; color:var(--ink);">Generate scene art</div><div style="font-size:11px; color:var(--ink-faint); margin-top:2px;">Off by default · needs Grok Build configured</div></div>
+            <button onClick="{{ toggleImages }}" style="width:46px; height:26px; border-radius:20px; cursor:pointer; border:1px solid {{ imgTglBd }}; background:{{ imgTglBg }}; position:relative; transition:.2s;"><span style="position:absolute; top:2px; left:{{ imgTglX }}; width:20px; height:20px; border-radius:50%; background:{{ imgTglKnob }}; transition:.2s; box-shadow:0 1px 3px rgba(0,0,0,.5);"></span></button>
+          </div>
+          <div style="font-size:12px; color:var(--ink-dim); margin:12px 0 7px;">Art style <span style="color:var(--ink-faint);">— appended to every image prompt</span></div>
+          <div style="display:flex; flex-wrap:wrap; gap:6px;">
+            <sc-for list="{{ artChips }}" as="a" hint-placeholder-count="8">
+              <button onClick="{{ a.onPick }}" style="cursor:pointer; padding:7px 12px; border-radius:20px; font-family:'Spectral',serif; font-size:12.5px; background:{{ a.bg }}; border:1px solid {{ a.bd }}; color:{{ a.fg }};">{{ a.name }}</button>
+            </sc-for>
+          </div>
+          <input value="{{ artCustom }}" onInput="{{ onArtCustom }}" placeholder="or describe your own — stained glass, ukiyo-e, storybook…" style="margin-top:8px; width:100%; box-sizing:border-box; background:{{ artCustomBg }}; border:1px solid {{ artCustomBd }}; border-radius:20px; padding:8px 14px; color:var(--ink); font-family:'Spectral',serif; font-style:italic; font-size:13px; outline:none;">
+
+          <!-- The World -->
+          <div style="font-family:'Cormorant SC',serif; font-size:11px; letter-spacing:2px; color:var(--brass); margin:22px 0 4px;">THE WORLD</div>
+          <div style="font-size:12px; color:var(--ink-dim); margin-bottom:6px;">Setting <span style="color:var(--ink-faint);">— empty keeps standard fantasy</span></div>
+          <input value="{{ worldSetting }}" onInput="{{ onWorld }}" placeholder="e.g. underwater merfolk city-states…" style="width:100%; box-sizing:border-box; background:rgba(12,8,5,.5); border:1px solid rgba(109,90,56,.4); border-radius:4px; padding:11px 13px; color:var(--ink); font-family:'Spectral',serif; font-style:italic; font-size:14px; outline:none;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin:18px 0 5px;"><span style="font-size:12px; color:var(--ink-dim);">Tone &amp; whimsy</span><span style="font-family:'Cormorant SC',serif; font-size:11px; letter-spacing:1px; color:var(--ember);">{{ whimsyLabel }}</span></div>
+          <input type="range" min="0" max="1" step="0.05" value="{{ whimsy }}" onInput="{{ onWhimsy }}" style="width:100%; accent-color:#d3703c; height:4px;">
+          <div style="display:flex; justify-content:space-between; font-size:10.5px; color:var(--ink-faint); margin-top:3px;"><span>grounded</span><span>deeply strange</span></div>
+
+          <div style="font-size:12px; color:var(--ink-dim); margin:18px 0 6px;">Content intensity</div>
+          <div style="display:flex; gap:7px;">
+            <sc-for list="{{ intensityRows }}" as="iv" hint-placeholder-count="2">
+              <button onClick="{{ iv.onPick }}" style="flex:1; cursor:pointer; text-align:left; padding:11px 13px; border-radius:4px; background:{{ iv.bg }}; border:1px solid {{ iv.bd }};"><div style="font-family:'Cormorant SC',serif; font-size:13px; color:{{ iv.fg }};">{{ iv.label }}</div><div style="font-size:10.5px; color:var(--ink-faint); margin-top:3px; line-height:1.35;">{{ iv.note }}</div></button>
+            </sc-for>
+          </div>
+
+          <!-- The Hearth (connection) -->
+          <div style="font-family:'Cormorant SC',serif; font-size:11px; letter-spacing:2px; color:var(--brass); margin:24px 0 4px;">THE HEARTH</div>
+          <div style="font-size:11.5px; color:var(--ink-faint); font-style:italic; margin-bottom:10px;">Your phone only talks to your home server over the LAN — that server is what reaches out to Claude and Grok.</div>
+          <div style="font-size:11px; color:var(--ink-dim); margin-bottom:4px;">Server address</div>
+          <input value="{{ serverAddress }}" onInput="{{ onServer }}" style="width:100%; box-sizing:border-box; background:rgba(12,8,5,.5); border:1px solid rgba(109,90,56,.4); border-radius:4px; padding:10px 13px; color:var(--ink); font-family:ui-monospace,Menlo,monospace; font-size:13px; outline:none;">
+          <div style="font-size:11px; color:var(--ink-dim); margin:11px 0 4px;">Passphrase</div>
+          <input value="{{ passphrase }}" onInput="{{ onPass }}" type="password" style="width:100%; box-sizing:border-box; background:rgba(12,8,5,.5); border:1px solid rgba(109,90,56,.4); border-radius:4px; padding:10px 13px; color:var(--ink); font-family:ui-monospace,Menlo,monospace; font-size:13px; outline:none;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-top:12px;">
+            <div style="display:flex; align-items:center; gap:7px;"><div style="width:7px; height:7px; border-radius:50%; background:var(--arcane); box-shadow:0 0 8px var(--arcane);"></div><span style="font-size:11.5px; color:var(--ink-dim);">Connected to the hearth</span></div>
+            <button style="cursor:pointer; padding:8px 14px; border-radius:3px; background:rgba(36,26,16,.6); border:1px solid var(--brass-dim); color:var(--ink-dim); font-family:'Cormorant SC',serif; font-size:11px; letter-spacing:1.5px;">TEST</button>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ============================ PANELS ============================ -->
+      <sc-if value="{{ hasPanel }}" hint-placeholder-val="{{ true }}">
+      <div style="position:absolute; inset:0; z-index:30; display:flex; flex-direction:column; justify-content:flex-end;">
+        <div onClick="{{ closePanel }}" style="position:absolute; inset:0; background:rgba(6,4,2,.62); animation:fadeIn .25s ease;"></div>
+        <div style="position:relative; height:90%; display:flex; flex-direction:column; animation:sheetUp .34s cubic-bezier(.2,.8,.2,1) both;">
+          <div style="position:absolute; inset:0; border-radius:16px 16px 0 0; background:radial-gradient(ellipse 72% 44% at 50% 3%, rgba(158,116,60,.30), rgba(0,0,0,0) 60%), url('assets/parchment-warm.png'); background-size:cover, cover; box-shadow:inset 0 0 0 1.5px rgba(20,13,6,.5), inset 0 0 42px rgba(14,9,4,.62); filter:url(#deckle);"></div>
+          <!-- grabber + title -->
+          <div style="position:relative; flex-shrink:0; padding:12px 20px 8px; display:flex; align-items:center; justify-content:space-between;">
+            <div style="position:absolute; top:8px; left:50%; transform:translateX(-50%); width:38px; height:4px; border-radius:2px; background:var(--brass-dim);"></div>
+            <div style="font-family:'Cormorant SC',serif; font-weight:700; font-size:19px; letter-spacing:1.5px; color:var(--ink); margin-top:6px;">{{ panelTitle }}</div>
+            <button onClick="{{ closePanel }}" style="margin-top:6px; width:28px; height:28px; border-radius:50%; background:rgba(20,12,6,.4); border:1px solid var(--brass-dim); cursor:pointer; color:var(--ink-dim); font-size:15px; line-height:1; display:flex; align-items:center; justify-content:center;">✕</button>
+          </div>
+          <div class="cx-scroll" style="position:relative; flex:1; overflow-y:auto; padding:8px 20px 30px;">
+
+            <!-- SELF -->
+            <sc-if value="{{ panelSelf }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex; gap:14px; align-items:center;">
+                <div style="width:76px; height:88px; flex-shrink:0; border-radius:2px; overflow:hidden; box-shadow:0 4px 12px rgba(0,0,0,.5), 0 0 0 1px rgba(184,150,90,.5), inset 0 0 0 3px rgba(20,12,6,.4);"><img src="assets/portrait-wren.png" style="width:100%;height:100%;object-fit:cover;"></div>
+                <div style="min-width:0;">
+                  <div style="font-family:'Cormorant SC',serif; font-weight:700; font-size:21px; letter-spacing:.6px; color:var(--ink);">Wren Ashcombe</div>
+                  <div style="font-size:12.5px; color:var(--ink-dim);">Half-Elf Ranger · Level 3</div>
+                  <div style="margin-top:8px;"><div style="height:5px; border-radius:3px; background:rgba(12,8,4,.5); overflow:hidden;"><div style="height:100%; width:{{ xpPct }}; background:linear-gradient(90deg,var(--arcane-deep),var(--arcane));"></div></div><div style="font-size:10px; color:var(--ink-faint); margin-top:3px;">{{ xpText }} to level 4</div></div>
+                </div>
+              </div>
+
+              <div style="display:flex; gap:8px; margin-top:16px;">
+                <div style="flex:1; text-align:center; padding:11px 4px; border-radius:4px; background:rgba(20,12,6,.35); border:1px solid rgba(109,90,56,.3);">
+                  <div style="display:flex; align-items:center; justify-content:center; gap:5px;"><div style="width:9px; height:13px; background:var(--ember); border-radius:50% 50% 50% 0; transform:rotate(-45deg);"></div><span style="font-family:'Cormorant SC',serif; font-weight:700; font-size:18px; color:var(--ember);">{{ hpText }}</span></div>
+                  <div style="font-family:'Cormorant SC',serif; font-size:9px; letter-spacing:1.5px; color:var(--ink-faint); margin-top:3px;">VITALITY</div>
+                </div>
+                <div style="flex:1; text-align:center; padding:11px 4px; border-radius:4px; background:rgba(20,12,6,.35); border:1px solid rgba(109,90,56,.3);">
+                  <div style="font-family:'Cormorant SC',serif; font-weight:700; font-size:18px; color:var(--ink);">{{ ac }}</div>
+                  <div style="font-family:'Cormorant SC',serif; font-size:9px; letter-spacing:1.5px; color:var(--ink-faint); margin-top:3px;">ARMOUR</div>
+                </div>
+                <div style="flex:1; text-align:center; padding:11px 4px; border-radius:4px; background:rgba(20,12,6,.35); border:1px solid rgba(109,90,56,.3);">
+                  <div style="font-family:'Cormorant SC',serif; font-weight:700; font-size:18px; color:var(--ink);">{{ speed }}</div>
+                  <div style="font-family:'Cormorant SC',serif; font-size:9px; letter-spacing:1.5px; color:var(--ink-faint); margin-top:3px;">SPEED</div>
+                </div>
+              </div>
+
+              <div style="display:flex; align-items:center; gap:8px; margin-top:12px;">
+                <span style="font-family:'Cormorant SC',serif; font-size:10px; letter-spacing:1.5px; color:var(--ink-faint);">CONDITIONS</span>
+                <sc-for list="{{ conditions }}" as="c" hint-placeholder-count="1"><span style="font-family:'Spectral',serif; font-size:12px; color:var(--ember); background:rgba(124,61,32,.28); border:1px solid rgba(211,112,60,.4); padding:3px 10px; border-radius:20px;">{{ c.name }}</span></sc-for>
+              </div>
+
+              <div style="margin-top:18px; font-family:'Cormorant SC',serif; font-size:10px; letter-spacing:1.5px; color:var(--brass-dim);">ABILITIES</div>
+              <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:7px; margin-top:8px;">
+                <sc-for list="{{ stats }}" as="s" hint-placeholder-count="6">
+                  <div style="text-align:center; padding:9px 4px; border-radius:4px; background:rgba(20,12,6,.3); border:1px solid rgba(109,90,56,.25);"><div style="font-family:'Cormorant SC',serif; font-size:9px; letter-spacing:1px; color:var(--ink-faint);">{{ s.k }}</div><div style="font-family:'Cormorant SC',serif; font-weight:700; font-size:19px; color:var(--ink); line-height:1.1;">{{ s.v }}</div><div style="font-size:11px; color:var(--arcane);">{{ s.m }}</div></div>
+                </sc-for>
+              </div>
+
+              <div style="display:flex; align-items:center; gap:10px; margin-top:16px;">
+                <span style="font-family:'Cormorant SC',serif; font-size:10px; letter-spacing:1.5px; color:var(--brass-dim);">SPELL SLOTS · 1ST</span>
+                <div style="display:flex; gap:6px;"><sc-for list="{{ slots }}" as="sl" hint-placeholder-count="3"><span style="width:12px; height:12px; border-radius:50%; border:1.5px solid var(--arcane); background:{{ sl.fill }};"></span></sc-for></div>
+              </div>
+
+              <div style="margin-top:18px; font-family:'Cormorant SC',serif; font-size:10px; letter-spacing:1.5px; color:var(--brass-dim);">PURSE</div>
+              <div style="display:flex; gap:10px; margin-top:8px;">
+                <sc-for list="{{ coins }}" as="co" hint-placeholder-count="5">
+                  <div style="text-align:center;"><div style="width:26px; height:26px; margin:0 auto; border-radius:50%; background:{{ co.col }}; box-shadow:inset 0 -2px 3px rgba(0,0,0,.4), inset 0 2px 2px rgba(255,255,255,.25);"></div><div style="font-family:'Cormorant SC',serif; font-size:12px; color:var(--ink); margin-top:4px;">{{ co.v }}</div><div style="font-size:9px; color:var(--ink-faint); letter-spacing:1px;">{{ co.k }}</div></div>
+                </sc-for>
+              </div>
+
+              <div style="margin-top:18px; font-family:'Cormorant SC',serif; font-size:10px; letter-spacing:1.5px; color:var(--brass-dim);">CARRIED</div>
+              <div style="margin-top:6px;">
+                <sc-for list="{{ inventory }}" as="it" hint-placeholder-count="6">
+                  <div style="display:flex; align-items:baseline; justify-content:space-between; padding:7px 0; border-bottom:1px solid rgba(109,90,56,.2);"><span style="font-size:14px; color:var(--ink);">{{ it.n }}</span><span style="font-size:11.5px; color:var(--ink-faint); font-style:italic;">{{ it.note }}</span></div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <!-- FOLK -->
+            <sc-if value="{{ panelFolk }}" hint-placeholder-val="{{ true }}">
+              <sc-for list="{{ npcs }}" as="n" hint-placeholder-count="3">
+                <div style="display:flex; gap:13px; padding:12px 0; border-bottom:1px solid rgba(109,90,56,.22);">
+                  <sc-if value="{{ n.has }}" hint-placeholder-val="{{ true }}"><div style="width:56px; height:64px; flex-shrink:0; border-radius:2px; overflow:hidden; box-shadow:0 3px 8px rgba(0,0,0,.5), 0 0 0 1px rgba(184,150,90,.45);"><img src="{{ n.image }}" style="width:100%;height:100%;object-fit:cover;"></div></sc-if>
+                  <sc-if value="{{ n.none }}" hint-placeholder-val="{{ true }}"><div style="width:56px; height:64px; flex-shrink:0; border-radius:2px; background:rgba(20,12,6,.4); border:1px dashed rgba(109,90,56,.5); display:flex; align-items:center; justify-content:center; text-align:center;"><span style="font-family:'Spectral',serif; font-style:italic; font-size:9px; line-height:1.2; color:var(--ink-faint); padding:0 3px;">no likeness</span></div></sc-if>
+                  <div style="min-width:0;">
+                    <div style="display:flex; align-items:center; gap:8px;"><span style="font-family:'Cormorant SC',serif; font-weight:600; font-size:15.5px; color:var(--ink);">{{ n.name }}</span></div>
+                    <div style="font-family:'Cormorant SC',serif; font-size:9.5px; letter-spacing:1px; color:{{ n.dispCol }}; margin:2px 0 5px;">{{ n.disp }}</div>
+                    <div style="font-size:12.5px; line-height:1.45; color:var(--ink-dim);">{{ n.note }}</div>
+                  </div>
+                </div>
+              </sc-for>
+            </sc-if>
+
+            <!-- QUEST -->
+            <sc-if value="{{ panelQuest }}" hint-placeholder-val="{{ true }}">
+              <div style="font-family:'Cormorant SC',serif; font-size:10px; letter-spacing:1.5px; color:var(--ember); margin-bottom:8px;">ACTIVE</div>
+              <sc-for list="{{ questsActive }}" as="q" hint-placeholder-count="1">
+                <div style="margin-bottom:16px;"><div style="font-family:'Cormorant SC',serif; font-weight:600; font-size:16px; color:var(--ink);">{{ q.title }}</div><div style="font-size:13px; line-height:1.5; color:var(--ink-dim); font-style:italic; margin:3px 0 8px;">{{ q.detail }}</div>
+                  <sc-for list="{{ q.steps }}" as="st" hint-placeholder-count="3"><div style="display:flex; align-items:center; gap:9px; padding:3px 0;"><span style="width:14px; height:14px; border-radius:50%; flex-shrink:0; border:1.5px solid {{ st.ring }}; background:{{ st.fill }}; display:flex; align-items:center; justify-content:center;"><span style="color:#faf0e2; font-size:9px; opacity:{{ st.checkOp }};">✓</span></span><span style="font-size:13px; color:{{ st.col }}; text-decoration:{{ st.strike }};">{{ st.t }}</span></div></sc-for>
+                </div>
+              </sc-for>
+              <div style="font-family:'Cormorant SC',serif; font-size:10px; letter-spacing:1.5px; color:var(--brass-dim); margin:6px 0 8px;">THREADS</div>
+              <sc-for list="{{ questsOpen }}" as="q" hint-placeholder-count="1">
+                <div style="margin-bottom:14px;"><div style="font-family:'Cormorant SC',serif; font-weight:600; font-size:15px; color:var(--ink-dim);">{{ q.title }}</div><div style="font-size:12.5px; line-height:1.5; color:var(--ink-faint); font-style:italic; margin-top:2px;">{{ q.detail }}</div></div>
+              </sc-for>
+              <div style="font-family:'Cormorant SC',serif; font-size:10px; letter-spacing:1.5px; color:var(--brass-dim); margin:6px 0 8px;">CLOSED</div>
+              <sc-for list="{{ questsDone }}" as="q" hint-placeholder-count="2">
+                <div style="display:flex; align-items:center; gap:9px; padding:4px 0;"><span style="width:14px; height:14px; border-radius:50%; background:var(--arcane-deep); display:flex; align-items:center; justify-content:center;"><span style="color:#dfeef0; font-size:9px;">✓</span></span><span style="font-size:13px; color:var(--ink-faint); text-decoration:line-through;">{{ q.title }}</span></div>
+              </sc-for>
+            </sc-if>
+
+            <!-- VIEWS (gallery) -->
+            <sc-if value="{{ panelViews }}" hint-placeholder-val="{{ true }}">
+              <div style="font-size:12px; color:var(--ink-faint); font-style:italic; margin-bottom:12px;">{{ galleryCount }} · most faces and places are never drawn</div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <sc-for list="{{ gallery }}" as="g" hint-placeholder-count="6">
+                  <sc-if value="{{ g.has }}" hint-placeholder-val="{{ true }}">
+                    <button onClick="{{ g.onOpen }}" style="padding:0; border:none; cursor:pointer; background:none; text-align:left;"><div style="position:relative; border-radius:2px; overflow:hidden; height:110px; box-shadow:0 4px 10px rgba(0,0,0,.5), 0 0 0 1px rgba(184,150,90,.4);"><img src="{{ g.file }}" style="width:100%;height:100%;object-fit:cover;display:block;"><div style="position:absolute; inset:0; background:linear-gradient(180deg,rgba(0,0,0,0) 55%,rgba(8,5,3,.72));"></div><div style="position:absolute; left:7px; right:7px; bottom:6px;"><div style="font-family:'Cormorant SC',serif; font-size:9px; letter-spacing:1px; color:var(--arcane);">{{ g.type }}</div><div style="font-family:'Spectral',serif; font-size:11.5px; color:#f2e8d6; line-height:1.2;">{{ g.name }}</div></div></div></button>
+                  </sc-if>
+                  <sc-if value="{{ g.none }}" hint-placeholder-val="{{ true }}">
+                    <div style="height:110px; border-radius:2px; background:rgba(20,12,6,.35); border:1px dashed rgba(109,90,56,.4); display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:0 8px;"><div style="font-family:'Cormorant SC',serif; font-size:9px; letter-spacing:1px; color:var(--ink-faint); opacity:.7;">{{ g.type }}</div><div style="font-family:'Spectral',serif; font-style:italic; font-size:11px; color:var(--ink-faint); margin-top:3px; line-height:1.3;">{{ g.name }}</div><div style="font-size:9px; color:var(--ink-faint); opacity:.6; margin-top:5px;">— no likeness —</div></div>
+                  </sc-if>
+                </sc-for>
+              </div>
+            </sc-if>
+
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- LIGHTBOX -->
+      <sc-if value="{{ hasLightbox }}" hint-placeholder-val="{{ true }}">
+      <div onClick="{{ closeLightbox }}" style="position:absolute; inset:0; z-index:50; background:rgba(4,2,1,.9); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px; animation:fadeIn .25s ease;">
+        <div style="position:relative; width:100%; border-radius:2px; overflow:hidden; box-shadow:0 20px 50px rgba(0,0,0,.7), 0 0 0 1px rgba(184,150,90,.5), inset 0 0 0 5px rgba(16,10,5,.5);"><img src="{{ lbFile }}" style="width:100%; display:block;"></div>
+        <div style="text-align:center; margin-top:14px;"><div style="font-family:'Cormorant SC',serif; font-size:10px; letter-spacing:2px; color:var(--arcane);">{{ lbType }}</div><div style="font-family:'Cormorant SC',serif; font-weight:600; font-size:18px; letter-spacing:.6px; color:var(--ink); margin-top:2px;">{{ lbName }}</div><div style="font-size:11.5px; color:var(--ink-faint); font-style:italic; margin-top:3px;">first drawn · {{ lbSeen }}</div></div>
+        <div style="margin-top:16px; font-size:11px; color:var(--ink-faint);">tap anywhere to close</div>
+      </div>
+      </sc-if>
+
+    </div>
+  </x-import>
+
+  <div style="max-width:520px; text-align:center; font-size:11.5px; line-height:1.7; color:var(--ink-faint);">
+    <span style="color:var(--ink-dim);">Screens:</span> Home · Active Play · Self (character sheet) · Folk (NPCs) · Quest log · Views (scene gallery) · Settings — <span style="color:var(--ink-dim);">try:</span> type an action &amp; send to see the loading state · the mute toggle (top-right of Play) · a “no likeness” NPC in Folk
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;startScreen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;home&quot;,&quot;options&quot;:[&quot;home&quot;,&quot;play&quot;,&quot;settings&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;imagesOn&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;}}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    const start = (props && props.startScreen) || 'home';
+    const imagesOn = props && props.imagesOn !== undefined ? props.imagesOn : true;
+    this._reply = 0;
+    this.state = {
+      screen: start, panel: null, lightbox: null,
+      input: '', sending: false, muted: false, artCustom: '',
+      hp: 18, hpMax: 24,
+      messages: this.initialMessages(),
+      settings: {
+        model: 'claude-sonnet-5', artStyle: 'oil painting', worldSetting: '',
+        toneWhimsy: 0.35, contentIntensity: 'standard', generateImages: imagesOn,
+        serverAddress: '192.168.1.24:8787', passphrase: 'hearth-and-hollow',
+      },
+    };
+  }
+
+  initialMessages() {
+    return [
+      { role: 'chapter', text: 'SESSION IV · THE MILLBROOK ROAD' },
+      { role: 'dm', drop: true, text: 'The wolves came out of the treeline before you heard them — no howl, just cracking brush and then teeth. Your bowstring answered before you had finished thinking about it; the first dropped mid-stride. The second was less considerate, and its jaws found your forearm before your blade found its throat.' },
+      { role: 'hp', text: '\u22126 hp' },
+      { role: 'player', text: 'Bind the wound and press on toward the town.' },
+      { role: 'dm', text: 'You cinch a strip of cloak over the bite. By the time Millbrook\u2019s gate-lanterns swim into view, the ache has settled into your shoulder like an old argument.' },
+      { role: 'image', file: 'assets/scene-millbrook.png', caption: 'MILLBROOK \u2014 TOWN SQUARE' },
+      { role: 'dm', text: 'Smoke curls from a dozen chimneys. Someone in the square is arguing about the price of turnips as though the world has not nearly ended twice this week. An old man in a herb-stall apron watches you over a cup, unhurried.' },
+      { role: 'event', text: 'OLD WICK THISTLEWOOD ENTERS THE TALE' },
+    ];
+  }
+
+  replies() {
+    return [
+      'Wick sets down his cup. \u201cYou look like the road chewed on you,\u201d he says, and nudges a stool out with his boot. \u201cSit. Whatever you were sent to find can wait until I\u2019ve seen that arm.\u201d',
+      'You thread through the market crowd. Somewhere a lute is being played badly and with great confidence. No one here has heard the word \u201cwolves\u201d spoken the way you mean it.',
+      'You reach for your coin-purse and find it lighter than it should be. The turnip-seller, still mid-rant about the sky, does not quite meet your eye.',
+    ];
+  }
+
+  // ---- handlers ----
+  go = (screen) => this.setState({ screen, panel: null, lightbox: null });
+  resume = () => this.setState({ screen: 'play', panel: null, lightbox: null });
+  goHome = () => this.go('home');
+  goSettings = () => this.go('settings');
+  backFromSettings = () => this.setState({ screen: 'play' });
+  openPanel = (panel) => this.setState({ panel });
+  closePanel = () => this.setState({ panel: null });
+  openLightbox = (img) => this.setState({ lightbox: img });
+  closeLightbox = () => this.setState({ lightbox: null });
+  toggleMute = () => this.setState((s) => ({ muted: !s.muted }));
+  onInput = (e) => this.setState({ input: e.target.value });
+  onKey = (e) => { if (e.key === 'Enter') { e.preventDefault(); this.send(); } };
+  send = () => {
+    const t = this.state.input.trim();
+    if (!t || this.state.sending) return;
+    this.setState((s) => ({ messages: [...s.messages, { role: 'player', text: t }], input: '', sending: true }));
+    clearTimeout(this._t);
+    this._t = setTimeout(() => {
+      const r = this.replies()[this._reply % this.replies().length];
+      this._reply++;
+      this.setState((s) => ({ messages: [...s.messages, { role: 'dm', text: r }], sending: false }));
+    }, 2100);
+  };
+  setSetting = (k, v) => this.setState((s) => ({ settings: { ...s.settings, [k]: v } }));
+  onWorld = (e) => this.setSetting('worldSetting', e.target.value);
+  onWhimsy = (e) => this.setSetting('toneWhimsy', parseFloat(e.target.value));
+  onServer = (e) => this.setSetting('serverAddress', e.target.value);
+  onPass = (e) => this.setSetting('passphrase', e.target.value);
+  toggleImages = () => this.setSetting('generateImages', !this.state.settings.generateImages);
+  onArtCustom = (e) => { const v = e.target.value; this.setState({ artCustom: v }); this.setSetting('artStyle', v); };
+
+  // ---- static data ----
+  data() {
+    return {
+      models: [
+        { id: 'claude-haiku-4-5', label: 'Haiku 4.5', description: 'Quick and light. Best for fast back-and-forth.' },
+        { id: 'claude-sonnet-5', label: 'Sonnet 5', description: 'Balanced fidelity and speed. Recommended.' },
+        { id: 'claude-opus-4-8', label: 'Opus 4.8', description: 'Higher fidelity, higher cost. Deepest adjudication.' },
+      ],
+      artPresets: ['comic book', 'Lego-style', 'pencil sketch', 'watercolour', 'anime', 'pixel art', 'noir', 'oil painting'],
+      intensities: [
+        { id: 'standard', label: 'Standard', note: 'Full range of humour and description.' },
+        { id: 'low', label: 'Low', note: 'No crude humour; violence stays non-graphic.' },
+      ],
+      character: {
+        ac: 15, speed: '30ft', xp: 2700, xpNext: 3400,
+        conditions: [{ name: 'Wounded' }],
+        stats: [{ k: 'STR', v: 11, m: '+0' }, { k: 'DEX', v: 16, m: '+3' }, { k: 'CON', v: 14, m: '+2' }, { k: 'INT', v: 10, m: '+0' }, { k: 'WIS', v: 15, m: '+2' }, { k: 'CHA', v: 12, m: '+1' }],
+        slots: [true, true, false],
+        currency: [{ k: 'pp', v: 1, col: '#cfd6d8' }, { k: 'gp', v: 23, col: '#c9a24a' }, { k: 'ep', v: 0, col: '#cfc9a8' }, { k: 'sp', v: 8, col: '#b9b6ad' }, { k: 'cp', v: 12, col: '#b06a3a' }],
+        inventory: [
+          { n: 'Shortbow', note: '+ 40 arrows' }, { n: 'Shortsword', note: '' }, { n: "Healer's kit", note: '\u00d7 1' },
+          { n: 'Hooded cloak', note: 'bloodied' }, { n: 'Trail rations', note: '\u00d7 4' }, { n: 'Cured herb bundle', note: 'a gift from Wick' },
+        ],
+      },
+      npcs: [
+        { name: 'Old Wick Thistlewood', disp: 'WARY BUT FAIR', image: 'assets/portrait-thistlewood.png', note: 'Herbalist by the square. Thinks something in the north wood is driving the wolves south — and that it is only getting worse.' },
+        { name: 'Gate-warden Bram', disp: 'GRUFF', image: null, note: 'Waved you through for a copper and a nod. Missing two fingers on his left hand.' },
+        { name: 'The turnip-seller', disp: 'UNKNOWN', image: null, note: 'Certain the sky is falling. Possibly right.' },
+      ],
+      quests: {
+        active: [{ title: "Thistlewood's Ask", detail: 'Find what is driving the wolves out of the north wood.', steps: [{ t: 'Speak with Old Wick', done: true }, { t: 'Reach the north wood by first light', done: false }, { t: 'Bring back proof of the cause', done: false }] }],
+        open: [{ title: 'The Unsigned Letter', detail: 'Someone paid to bring you to Millbrook. The letter bore no name.' }],
+        done: [{ title: 'Survive the ambush' }, { title: 'Reach Millbrook before dark' }],
+      },
+      gallery: [
+        { type: 'LOCATION', name: 'Millbrook — Town Square', file: 'assets/scene-millbrook.png', seen: 'Session 4' },
+        { type: 'FOLK', name: 'Old Wick Thistlewood', file: 'assets/portrait-thistlewood.png', seen: 'Session 4' },
+        { type: 'FOLK', name: 'Wren Ashcombe', file: 'assets/portrait-wren.png', seen: 'Session 1' },
+        { type: 'LOCATION', name: 'The North Road', file: null },
+        { type: 'FOLK', name: 'Gate-warden Bram', file: null },
+        { type: 'LOCATION', name: "Wick's herb-stall", file: null },
+      ],
+    };
+  }
+
+  renderVals() {
+    const s = this.state, st = s.settings, d = this.data();
+    const hpText = s.hp + '/' + s.hpMax;
+    const parchStyle = "position:absolute; inset:0; background:radial-gradient(ellipse 72% 44% at 50% 3%, rgba(158,116,60,.30), rgba(0,0,0,0) 60%), url('assets/parchment-warm.png'); background-size:cover, cover; box-shadow:inset 0 0 0 1.5px rgba(20,13,6,.5), inset 0 0 42px rgba(14,9,4,.62); filter:url(#deckle);";
+
+    const messages = s.messages.map((m) => {
+      const o = { text: m.text, isChapter: m.role === 'chapter', isPlayer: m.role === 'player', isHp: m.role === 'hp', isEvent: m.role === 'event', isImage: m.role === 'image', file: m.file, caption: m.caption, isDm: false, isDropDm: false };
+      if (m.role === 'dm') { if (m.drop) { o.isDropDm = true; o.dropChar = m.text.charAt(0); o.dropRest = m.text.slice(1); } else { o.isDm = true; } }
+      return o;
+    });
+
+    const tabs = [
+      { key: 'self', label: 'Self', isSelf: true, isDot: false, onOpen: () => this.openPanel('self') },
+      { key: 'folk', label: 'Folk', isDot: true, glyphR: '50%', glyphRot: '0deg', onOpen: () => this.openPanel('folk') },
+      { key: 'quest', label: 'Quest', isDot: true, glyphR: '1px', glyphRot: '45deg', onOpen: () => this.openPanel('quest') },
+      { key: 'views', label: 'Views', isDot: true, glyphR: '1px', glyphRot: '0deg', onOpen: () => this.openPanel('views') },
+    ];
+
+    const modelRows = d.models.map((m) => {
+      const sel = st.model === m.id;
+      return { ...m, onPick: () => this.setSetting('model', m.id),
+        bg: sel ? 'rgba(124,61,32,.24)' : 'rgba(28,20,12,.5)', bd: sel ? 'rgba(211,112,60,.55)' : 'rgba(109,90,56,.32)',
+        sh: sel ? '0 0 16px rgba(211,112,60,.2)' : 'none', ring: sel ? '#d3703c' : '#6d5a38', dot: sel ? '#d3703c' : 'transparent' };
+    });
+    const artChips = d.artPresets.map((a) => {
+      const sel = st.artStyle === a && !s.artCustom;
+      return { name: a, onPick: () => { this.setState({ artCustom: '' }); this.setSetting('artStyle', a); },
+        bg: sel ? 'rgba(211,112,60,.9)' : 'rgba(28,20,12,.5)', bd: sel ? 'rgba(211,112,60,.9)' : 'rgba(109,90,56,.36)', fg: sel ? '#fbeede' : '#c2b398' };
+    });
+    const artCustomActive = !!s.artCustom;
+    const intensityRows = d.intensities.map((i) => {
+      const sel = st.contentIntensity === i.id;
+      return { ...i, onPick: () => this.setSetting('contentIntensity', i.id),
+        bg: sel ? 'rgba(124,61,32,.24)' : 'rgba(28,20,12,.5)', bd: sel ? 'rgba(211,112,60,.55)' : 'rgba(109,90,56,.32)', fg: sel ? '#efe6d2' : '#c2b398' };
+    });
+
+    const dispCol = (dp) => dp === 'WARY BUT FAIR' ? 'var(--brass)' : dp === 'GRUFF' ? 'var(--ink-faint)' : 'var(--ink-faint)';
+    const npcs = d.npcs.map((n) => ({ ...n, has: !!n.image, none: !n.image, dispCol: dispCol(n.disp) }));
+
+    const stepDeco = (done) => ({ ring: done ? 'var(--arcane)' : 'var(--brass-dim)', fill: done ? 'var(--arcane-deep)' : 'transparent', checkOp: done ? '1' : '0', col: done ? 'var(--ink-faint)' : 'var(--ink)', strike: done ? 'line-through' : 'none' });
+    const questsActive = d.quests.active.map((q) => ({ ...q, steps: q.steps.map((x) => ({ t: x.t, ...stepDeco(x.done) })) }));
+
+    const gallery = d.gallery.map((g) => ({ ...g, has: !!g.file, none: !g.file, onOpen: g.file ? () => this.openLightbox(g) : null }));
+    const illus = d.gallery.filter((g) => g.file).length;
+
+    const whimsy = st.toneWhimsy;
+    const whimsyLabel = whimsy < 0.22 ? 'Grounded' : whimsy < 0.45 ? 'A little strange' : whimsy < 0.7 ? 'Often strange' : 'Deeply strange';
+    const imgOn = st.generateImages;
+    const lb = s.lightbox || {};
+    const panelTitle = { self: 'CHARACTER', folk: 'THE FOLK', quest: 'QUEST LOG', views: 'GALLERY' }[s.panel] || '';
+
+    return {
+      parchStyle,
+      isHome: s.screen === 'home', isPlay: s.screen === 'play', isSettings: s.screen === 'settings',
+      hasPanel: !!s.panel, panelSelf: s.panel === 'self', panelFolk: s.panel === 'folk', panelQuest: s.panel === 'quest', panelViews: s.panel === 'views', panelTitle,
+      hasLightbox: !!s.lightbox, lbFile: lb.file, lbName: lb.name, lbType: lb.type, lbSeen: lb.seen,
+      sending: s.sending, muted: s.muted, muteBarOp: s.muted ? '0.3' : '1',
+      input: s.input, messages, tabs, hpText,
+      resume: this.resume, goHome: this.goHome, goSettings: this.goSettings, backFromSettings: this.backFromSettings,
+      openPanel: this.openPanel, closePanel: this.closePanel, closeLightbox: this.closeLightbox, toggleMute: this.toggleMute,
+      onInput: this.onInput, onKey: this.onKey, send: this.send,
+      ac: d.character.ac, speed: d.character.speed,
+      xpPct: Math.round((d.character.xp / d.character.xpNext) * 100) + '%',
+      xpText: d.character.xp.toLocaleString() + ' / ' + d.character.xpNext.toLocaleString() + ' xp',
+      conditions: d.character.conditions, stats: d.character.stats,
+      slots: d.character.slots.map((f) => ({ fill: f ? 'var(--arcane)' : 'transparent' })),
+      coins: d.character.currency, inventory: d.character.inventory,
+      npcs, questsActive, questsOpen: d.quests.open, questsDone: d.quests.done,
+      gallery, galleryCount: illus + ' of ' + d.gallery.length + ' illustrated',
+      modelRows, artChips, intensityRows, artCustom: s.artCustom, onArtCustom: this.onArtCustom, artCustomBd: artCustomActive ? 'rgba(211,112,60,.7)' : 'rgba(109,90,56,.4)', artCustomBg: artCustomActive ? 'rgba(124,61,32,.2)' : 'rgba(12,8,5,.5)',
+      worldSetting: st.worldSetting, whimsy, whimsyLabel,
+      serverAddress: st.serverAddress, passphrase: st.passphrase,
+      onWorld: this.onWorld, onWhimsy: this.onWhimsy, onServer: this.onServer, onPass: this.onPass, toggleImages: this.toggleImages,
+      imgTglBg: imgOn ? 'rgba(211,112,60,.85)' : 'rgba(12,8,5,.6)', imgTglBd: imgOn ? 'rgba(211,112,60,.9)' : 'rgba(109,90,56,.4)',
+      imgTglX: imgOn ? '24px' : '2px', imgTglKnob: imgOn ? '#fbeede' : '#8c7c62',
+    };
+  }
+}
+</script>
+</body>
+</html>
