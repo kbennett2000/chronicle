@@ -1,6 +1,6 @@
 import type { Connection } from "../lib/connection";
 import type { CharacterSheet } from "../lib/campaign";
-import { useAuthedImage } from "../lib/useAuthedImage";
+import { EntityPortrait } from "../components/EntityPortrait";
 
 interface SelfPanelProps {
   connection: Connection;
@@ -44,38 +44,6 @@ function StatBox({ label, value, color }: { label: string; value: string; color?
   );
 }
 
-function Portrait({ connection, campaignId, filename }: { connection: Connection; campaignId: string; filename: string | undefined }) {
-  const url = useAuthedImage(connection, campaignId, filename);
-  const boxStyle = { width: 76, height: 88, flexShrink: 0, borderRadius: 2, overflow: "hidden" as const };
-
-  if (filename && url) {
-    return (
-      <div style={{ ...boxStyle, boxShadow: "0 4px 12px rgba(0,0,0,.5), 0 0 0 1px rgba(184,150,90,.5), inset 0 0 0 3px rgba(20,12,6,.4)" }}>
-        <img src={url} alt="" data-testid="self-portrait-image" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-      </div>
-    );
-  }
-
-  return (
-    <div
-      data-testid="self-portrait-none"
-      style={{
-        ...boxStyle,
-        background: "rgba(20,12,6,.4)",
-        border: "1px dashed rgba(109,90,56,.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        textAlign: "center",
-      }}
-    >
-      <span style={{ fontFamily: "var(--font-body)", fontStyle: "italic", fontSize: 10, lineHeight: 1.3, color: "var(--ink-faint)", padding: "0 4px" }}>
-        no likeness yet
-      </span>
-    </div>
-  );
-}
-
 export function SelfPanel({ connection, campaignId, sheet }: SelfPanelProps) {
   const currency = sheet.currency ?? ZERO_CURRENCY;
   const conditions = sheet.conditions ?? [];
@@ -86,7 +54,15 @@ export function SelfPanel({ connection, campaignId, sheet }: SelfPanelProps) {
   return (
     <div>
       <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-        <Portrait connection={connection} campaignId={campaignId} filename={sheet.portraitImage} />
+        <EntityPortrait
+          connection={connection}
+          campaignId={campaignId}
+          filename={sheet.portraitImage}
+          width={76}
+          height={88}
+          imageTestId="self-portrait-image"
+          emptyTestId="self-portrait-none"
+        />
         <div style={{ minWidth: 0 }}>
           <div data-testid="self-name" style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 21, letterSpacing: 0.6, color: "var(--ink)" }}>
             {sheet.name}

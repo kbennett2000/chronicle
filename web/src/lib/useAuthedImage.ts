@@ -16,9 +16,16 @@ export function useAuthedImage(connection: Connection, campaignId: string, filen
       setUrl(null);
       return;
     }
+    // Per src/image-generator.ts, the value recorded in a state-file
+    // entry (character-sheet.json's portraitImage, npc-roster.md's
+    // "Portrait asset ID") is generateImage's own relPath, e.g.
+    // "images/npc-garrick.jpg" — but GET /images/:filename's route
+    // pattern excludes "/" entirely, so any directory prefix must be
+    // stripped down to the bare basename before building this URL.
+    const basename = filename.split("/").pop() || filename;
     let objectUrl: string | null = null;
     let cancelled = false;
-    fetchImageBlob(connection, `/campaigns/${encodeURIComponent(campaignId)}/images/${encodeURIComponent(filename)}`)
+    fetchImageBlob(connection, `/campaigns/${encodeURIComponent(campaignId)}/images/${encodeURIComponent(basename)}`)
       .then((blob) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);

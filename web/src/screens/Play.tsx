@@ -4,6 +4,7 @@ import { getState, sendTurn, type CharacterSheet } from "../lib/campaign";
 import { parseChapterHeadings } from "../lib/session-log";
 import { BottomSheet } from "../components/BottomSheet";
 import { SelfPanel } from "../panels/SelfPanel";
+import { FolkPanel } from "../panels/FolkPanel";
 
 interface PlayProps {
   connection: Connection;
@@ -114,6 +115,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   const [sending, setSending] = useState(false);
   const [openTab, setOpenTab] = useState<Tab | null>(null);
   const [characterSheet, setCharacterSheet] = useState<CharacterSheet | null>(null);
+  const [npcRoster, setNpcRoster] = useState<string>("");
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -122,6 +124,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
       .then((snapshot) => {
         if (cancelled) return;
         setCharacterSheet(snapshot.characterSheet);
+        setNpcRoster(snapshot.npcRoster);
         // A brand-new campaign has no currentSessionLog at all yet — a
         // real empty state (no turns taken), not an error.
         if (snapshot.currentSessionLog) {
@@ -301,6 +304,8 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
         <BottomSheet title={openTab.toUpperCase()} onClose={() => setOpenTab(null)}>
           {openTab === "Self" && characterSheet ? (
             <SelfPanel connection={connection} campaignId={campaignId} sheet={characterSheet} />
+          ) : openTab === "Folk" ? (
+            <FolkPanel connection={connection} campaignId={campaignId} npcRoster={npcRoster} />
           ) : (
             <p style={{ fontStyle: "italic", color: "var(--ink-dim)", fontSize: 15, textAlign: "center", marginTop: 40 }}>
               {openTab} panel — coming soon

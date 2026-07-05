@@ -13,7 +13,21 @@ export interface MarkdownSection {
 
 const HEADING_RE = /^(#{1,6})\s+(.*\S)\s*$/;
 
-export function parseMarkdownSections(markdown: string): MarkdownSection[] {
+/** npc-roster.md's own template (see scripts/scratch-campaign.ts's
+ * EMPTY_NPC_ROSTER) ships an HTML comment showing the `## <Name>` entry
+ * format as a worked example — including a literal `##`-prefixed line.
+ * Left un-stripped, that reads as a real heading with a fake "<Name>"
+ * NPC, which is exactly the brand-new/zero-NPCs case this needs to
+ * render as a clean empty state, not a bogus entry. Comments are never
+ * meaningful content in any state file, so stripping them here (once,
+ * for every section-based parser) is correct for worldState/questLog
+ * too, not just npcRoster. */
+function stripHtmlComments(markdown: string): string {
+  return markdown.replace(/<!--[\s\S]*?-->/g, "");
+}
+
+export function parseMarkdownSections(rawMarkdown: string): MarkdownSection[] {
+  const markdown = stripHtmlComments(rawMarkdown);
   const lines = markdown.split(/\r?\n/);
   const sections: MarkdownSection[] = [];
   let current: MarkdownSection | null = null;
@@ -56,4 +70,35 @@ export function findMarkdownSection(markdown: string, heading: string): Markdown
     console.warn(`[markdown] expected heading "${heading}" not found`);
   }
   return found;
+}
+
+const BULLET_FIELD_RE = /^-\s*\*\*([^*]+):\*\*\s?(.*)$/;
+
+/** Second parsing pass, flagged by the Slice 14 plan, for a section's
+ * `- **Field:** value` bullets (npc-roster.md's per-NPC entries; quest-
+ * log/views entries later reuse this same shape). A field's value can
+ * wrap onto un-bulleted continuation lines — npc-roster.md's real
+ * entries do this for longer "Knows" text — so any non-bullet, non-blank
+ * line is appended to whatever field came before it; a blank line ends
+ * that continuation. */
+export function parseBulletFields(body: string): Record<string, string> {
+  const fields: Record<string, string> = {};
+  let currentKey: string | null = null;
+
+  for (const rawLine of body.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      currentKey = null;
+      continue;
+    }
+    const match = BULLET_FIELD_RE.exec(line);
+    if (match) {
+      currentKey = match[1].trim();
+      fields[currentKey] = match[2].trim();
+    } else if (currentKey) {
+      fields[currentKey] = `${fields[currentKey]} ${line}`.trim();
+    }
+  }
+
+  return fields;
 }

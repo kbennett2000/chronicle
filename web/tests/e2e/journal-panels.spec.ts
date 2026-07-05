@@ -11,10 +11,10 @@ test.describe("Journal tab bar + bottom-sheet mechanics", () => {
     await page.getByTestId("continue-button").click();
     await expect(page.getByText("ACTIVE PLAY")).toBeVisible();
 
-    // Self got real content in Slice 20 (see self-panel.spec.ts); the
-    // other three are still Slice 19's stubs, per plan.
+    // Self (Slice 20) and Folk (Slice 21) got real content — see
+    // self-panel.spec.ts / folk-panel.spec.ts; Quest/Views are still
+    // Slice 19's stubs, per plan.
     const stubTabs: Array<{ testId: string; label: string }> = [
-      { testId: "tab-folk", label: "Folk" },
       { testId: "tab-quest", label: "Quest" },
       { testId: "tab-views", label: "Views" },
     ];
@@ -24,6 +24,14 @@ test.describe("Journal tab bar + bottom-sheet mechanics", () => {
     await expect(page.getByText("SELF", { exact: true })).toBeVisible();
     await page.getByTestId("sheet-close").click();
     await expect(page.getByTestId("self-name")).toBeHidden();
+
+    // Folk on a fresh scratch campaign (zero NPCs met) shows its own
+    // empty state, not the "coming soon" stub copy.
+    await page.getByTestId("tab-folk").click();
+    await expect(page.getByText("No one worth naming has crossed your path yet.")).toBeVisible();
+    await expect(page.getByText("FOLK", { exact: true })).toBeVisible();
+    await page.getByTestId("sheet-close").click();
+    await expect(page.getByText("No one worth naming has crossed your path yet.")).toBeHidden();
 
     for (const tab of stubTabs) {
       await page.getByTestId(tab.testId).click();
@@ -40,10 +48,10 @@ test.describe("Journal tab bar + bottom-sheet mechanics", () => {
     await expect(page.getByText("Quest panel — coming soon")).toBeHidden();
 
     // Tapping the scrim (outside the sheet) closes it too.
-    await page.getByTestId("tab-folk").click();
-    await expect(page.getByText("Folk panel — coming soon")).toBeVisible();
+    await page.getByTestId("tab-views").click();
+    await expect(page.getByText("Views panel — coming soon")).toBeVisible();
     await page.getByTestId("sheet-scrim").click({ position: { x: 5, y: 5 } });
-    await expect(page.getByText("Folk panel — coming soon")).toBeHidden();
+    await expect(page.getByText("Views panel — coming soon")).toBeHidden();
 
     // Turn input still works underneath — the panel doesn't leave the
     // input dock stuck disabled or the scrim lingering to eat clicks.
