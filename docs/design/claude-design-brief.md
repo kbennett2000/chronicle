@@ -61,13 +61,28 @@ GET /campaigns/:id/state
     worldState: string,       // markdown
     npcRoster: string,        // markdown
     questLog: string,         // markdown
-    currentSessionLog: { path: string; content: string } | undefined
+    currentSessionLog: {
+      path: string;
+      content: string;         // prose narrative, for flavor/recap
+      transcript: Array<{      // deterministic, server-written turn record
+        turnIndex: number;
+        timestamp: string;
+        playerMessage: string;
+        narration: string;
+      }>;
+    } | undefined
   }
 ```
-**Correction:** `currentSessionLog` is an object, not a bare markdown
-string, and can be `undefined` entirely if no session has been started
-yet for that snapshot. Use `currentSessionLog?.content`. This response
-also includes an extra `model` field not documented before (harmless,
+**Correction/addition (per ADR-0007):** `currentSessionLog` is an object,
+not a bare markdown string, and can be `undefined` entirely if no session
+has been started yet for that snapshot. Use `currentSessionLog?.content`
+for prose/flavor text, but use `currentSessionLog?.transcript` — not
+prose-parsing — for anything that needs to reliably distinguish player
+input from DM narration turn-by-turn. The prose log is not a reliable
+source for that distinction; the transcript is written deterministically
+in code at the moment of each turn, specifically because the model's
+retrospective prose can't be trusted to preserve it. This response also
+includes an extra `model` field not documented before (harmless,
 additive).
 
 ### Get/set campaign settings

@@ -74,46 +74,52 @@ _(none established yet)_
   );
 }
 
-/** Reusable worker-scoped fixture: boots a real chronicle backend against a
+/** Reusable per-test fixture: boots a real chronicle backend against a
  * disposable scratch campaign (per CLAUDE.md test-data-hygiene — this is
  * exactly the "ad-hoc validation" case scripts/scratch-campaign.ts exists
  * for, so test-campaign itself is never touched or dirtied by e2e runs).
  * Every future UI slice's Playwright specs should import `test`/`expect`
- * from this file rather than re-deriving this setup. */
-export const test = base.extend<object, { chronicleServer: ChronicleTestServer }>({
-  chronicleServer: [
-    async ({}, use) => {
-      const campaignId = runScratchScript(["create"]);
-      seedCampaignContent(campaignId);
+ * from this file rather than re-deriving this setup.
+ *
+ * Deliberately test-scoped, not worker-scoped: a worker-scoped instance is
+ * shared across every test in a file (and every file run by that worker),
+ * so any test that submits a turn leaves state the next test wasn't
+ * expecting — Slice 18 found this the hard way when adding a second
+ * turn-submitting spec made an unrelated "fresh campaign" test fail,
+ * because it was fresh several tests ago, not anymore. One server+
+ * campaign per test costs a few extra seconds of boot time; it buys
+ * actual isolation. */
+export const test = base.extend<{ chronicleServer: ChronicleTestServer }, object>({
+  chronicleServer: async ({}, use) => {
+    const campaignId = runScratchScript(["create"]);
+    seedCampaignContent(campaignId);
 
-      const port = 4500 + Math.floor(Math.random() * 400);
-      const baseURL = `http://127.0.0.1:${port}`;
-      const proc: ChildProcess = spawn("npx", ["tsx", "src/server.ts"], {
-        cwd: REPO_ROOT,
-        env: { ...process.env, CHRONICLE_SHARED_SECRET: TOKEN, PORT: String(port), HOST: "127.0.0.1" },
-        stdio: "pipe",
-      });
+    const port = 4500 + Math.floor(Math.random() * 400);
+    const baseURL = `http://127.0.0.1:${port}`;
+    const proc: ChildProcess = spawn("npx", ["tsx", "src/server.ts"], {
+      cwd: REPO_ROOT,
+      env: { ...process.env, CHRONICLE_SHARED_SECRET: TOKEN, PORT: String(port), HOST: "127.0.0.1" },
+      stdio: "pipe",
+    });
 
-      let stderr = "";
-      proc.stderr?.on("data", (chunk) => {
-        stderr += chunk.toString();
-      });
+    let stderr = "";
+    proc.stderr?.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
 
-      try {
-        await waitForReady(baseURL, TOKEN);
-      } catch (err) {
-        proc.kill();
-        runScratchScript(["delete", campaignId]);
-        throw new Error(`${(err as Error).message}\n${stderr}`);
-      }
-
-      await use({ baseURL, token: TOKEN, campaignId });
-
+    try {
+      await waitForReady(baseURL, TOKEN);
+    } catch (err) {
       proc.kill();
       runScratchScript(["delete", campaignId]);
-    },
-    { scope: "worker" },
-  ],
+      throw new Error(`${(err as Error).message}\n${stderr}`);
+    }
+
+    await use({ baseURL, token: TOKEN, campaignId });
+
+    proc.kill();
+    runScratchScript(["delete", campaignId]);
+  },
 });
 
 export { expect };

@@ -1,50 +1,17 @@
 import { parseMarkdownSections } from "./markdown";
 
-export type LogEntry =
-  | { type: "chapter"; text: string }
-  | { type: "narration"; text: string; isError?: boolean }
-  | { type: "player"; text: string };
-
-/** Re-joins one session-log heading's body into per-turn bullets: each
- * "- ..." line starts a new bullet, and indented continuation lines (the
- * file wraps long bullets across multiple lines, no leading "-") are
- * appended to it. See tests/e2e/turn.spec.ts's fixture data, or any real
- * campaigns/test-campaign/session-log/*.md file, for the actual shape. */
-function splitBullets(body: string): string[] {
-  const bullets: string[] = [];
-  let current: string[] | null = null;
-
-  for (const line of body.split(/\r?\n/)) {
-    const bulletMatch = /^-\s+(.*\S)\s*$/.exec(line);
-    if (bulletMatch) {
-      if (current) bullets.push(current.join(" "));
-      current = [bulletMatch[1]];
-    } else if (current && line.trim() !== "") {
-      current.push(line.trim());
-    }
-  }
-  if (current) bullets.push(current.join(" "));
-  return bullets;
-}
-
-/** Hydrates history from a currentSessionLog.content markdown blob:
- * "# Session <timestamp>" headings become chapter entries, and each
- * bullet under one becomes a narration entry.
+/** Chapter framing only — "# Session <timestamp>" headings out of a
+ * currentSessionLog.content prose blob. That's the model's legitimate
+ * literary framing (titles, retrospective narrative flavor) and stays
+ * sourced from the prose log per ADR-0007.
  *
- * Important gap: the persisted file is a flat list of terse, already-
- * summarized DM-voice bullets, one per turn — it does NOT preserve which
- * part was the player's action vs. the DM's narration, and there's no
- * "story event" (first-NPC-appearance) marker either. That distinction
- * only exists for turns happening live in the current session (see
- * lib/campaign.ts's sendTurn and how Play.tsx appends "player" entries
- * itself) — it cannot be reconstructed from history. */
-export function parseSessionLog(markdown: string): LogEntry[] {
-  const entries: LogEntry[] = [];
-  for (const section of parseMarkdownSections(markdown)) {
-    entries.push({ type: "chapter", text: section.heading });
-    for (const bullet of splitBullets(section.body)) {
-      entries.push({ type: "narration", text: bullet });
-    }
-  }
-  return entries;
+ * Turn-by-turn player-action/narration content is deliberately NOT parsed
+ * from here — the prose log is a flat list of terse, already-summarized
+ * DM-voice bullets that never preserved which part was the player's
+ * literal action vs. the DM's literal narration. See
+ * lib/campaign.ts's TurnTranscriptRecord (currentSessionLog.transcript)
+ * for that: the server's own deterministic record, written at the moment
+ * both strings are already in hand, which Play.tsx uses instead. */
+export function parseChapterHeadings(markdown: string): string[] {
+  return parseMarkdownSections(markdown).map((section) => section.heading);
 }

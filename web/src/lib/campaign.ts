@@ -20,13 +20,27 @@ export interface CharacterSheet {
   portraitImage?: string;
 }
 
+/** Per ADR-0007: the server's own deterministic record of who said what
+ * this session, written at the moment both strings are already in hand —
+ * never inferred from currentSessionLog.content's prose. Use this for
+ * turn-by-turn player-action/narration attribution instead of parsing
+ * the prose log (see lib/session-log.ts, which still owns chapter/
+ * story-event framing from that prose — a legitimate literary device,
+ * just not the mechanical speaker attribution). */
+export interface TurnTranscriptRecord {
+  turnIndex: number;
+  timestamp: string;
+  playerMessage: string;
+  narration: string;
+}
+
 export interface StateSnapshot {
   characterSheet: CharacterSheet;
   worldState: string;
   npcRoster: string;
   questLog: string;
   model: string;
-  currentSessionLog?: { path: string; content: string };
+  currentSessionLog?: { path: string; content: string; transcript: TurnTranscriptRecord[] };
 }
 
 export interface SessionStartResult {

@@ -191,13 +191,61 @@ export function resolveSessionLog(campaignDir: string, resuming: boolean): strin
   return startSessionLog(campaignDir);
 }
 
+/** Per ADR-0007: the server's own deterministic record of who said what,
+ * written at the moment both strings are already in hand — never
+ * inferred from the model's prose. One JSONL file per session, alongside
+ * (not replacing) that session's prose log. */
+export interface TurnTranscriptRecord {
+  turnIndex: number;
+  timestamp: string;
+  playerMessage: string;
+  narration: string;
+}
+
+/** session-log/session-<ts>.md -> session-log/session-<ts>.transcript.jsonl */
+function transcriptPathFor(sessionLogRelPath: string): string {
+  return sessionLogRelPath.replace(/\.md$/, ".transcript.jsonl");
+}
+
+export function readTurnTranscript(campaignDir: string, sessionLogRelPath: string): TurnTranscriptRecord[] {
+  const abs = path.join(campaignDir, transcriptPathFor(sessionLogRelPath));
+  if (!fs.existsSync(abs)) return [];
+  return fs
+    .readFileSync(abs, "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line) as TurnTranscriptRecord);
+}
+
+/** Appends one record and returns it. turnIndex is derived from how many
+ * records already exist for this session — fine for a single-process,
+ * single-household app where turns are submitted strictly one at a time
+ * (ADR-0003's trust boundary), not a concern requiring a lock file. */
+export function appendTurnTranscript(
+  campaignDir: string,
+  sessionLogRelPath: string,
+  playerMessage: string,
+  narration: string
+): TurnTranscriptRecord {
+  const abs = path.join(campaignDir, transcriptPathFor(sessionLogRelPath));
+  const turnIndex = readTurnTranscript(campaignDir, sessionLogRelPath).length;
+  const record: TurnTranscriptRecord = {
+    turnIndex,
+    timestamp: new Date().toISOString(),
+    playerMessage,
+    narration,
+  };
+  fs.appendFileSync(abs, JSON.stringify(record) + "\n");
+  return record;
+}
+
 export interface StateSnapshot {
   characterSheet: unknown;
   worldState: string;
   npcRoster: string;
   questLog: string;
   model: ModelId;
-  currentSessionLog?: { path: string; content: string };
+  currentSessionLog?: { path: string; content: string; transcript: TurnTranscriptRecord[] };
 }
 
 export function readStateSnapshot(
@@ -220,6 +268,7 @@ export function readStateSnapshot(
       snapshot.currentSessionLog = {
         path: currentSessionLogRelPath,
         content: fs.readFileSync(abs, "utf8"),
+        transcript: readTurnTranscript(campaignDir, currentSessionLogRelPath),
       };
     }
   }

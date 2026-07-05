@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Connection } from "../lib/connection";
 import { getState, sendTurn } from "../lib/campaign";
-import { parseSessionLog, type LogEntry } from "../lib/session-log";
+import { parseChapterHeadings } from "../lib/session-log";
 
 interface PlayProps {
   connection: Connection;
@@ -11,59 +11,102 @@ interface PlayProps {
 
 type LoadState = { status: "loading" } | { status: "error"; message: string } | { status: "ready" };
 
+/** One player message + its (eventual) DM response. `narration: null`
+ * means the turn is still in flight — per ADR-0007 this is built from
+ * currentSessionLog.transcript (hydration) and sendTurn's own result
+ * (live), never from parsing the prose log. */
+interface DisplayTurn {
+  playerMessage: string;
+  narration: string | null;
+  isError?: boolean;
+}
+
 const TABS = ["Self", "Folk", "Quest", "Views"];
 
-function LogEntryView({ entry }: { entry: LogEntry }) {
-  if (entry.type === "chapter") {
-    return (
-      <div style={{ textAlign: "center", margin: "2px 0 20px" }}>
-        <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2.5, color: "var(--brass-dim)" }}>
-          {entry.text}
-        </div>
-        <div
-          style={{
-            height: 1,
-            width: 60,
-            margin: "8px auto 0",
-            background: "linear-gradient(90deg,transparent,var(--brass-dim),transparent)",
-          }}
-        />
+function ChapterHeading({ text }: { text: string }) {
+  return (
+    <div style={{ textAlign: "center", margin: "2px 0 20px" }}>
+      <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2.5, color: "var(--brass-dim)" }}>
+        {text}
       </div>
-    );
-  }
-  if (entry.type === "player") {
-    return (
+      <div
+        style={{
+          height: 1,
+          width: 60,
+          margin: "8px auto 0",
+          background: "linear-gradient(90deg,transparent,var(--brass-dim),transparent)",
+        }}
+      />
+    </div>
+  );
+}
+
+function TurnView({ turn }: { turn: DisplayTurn }) {
+  return (
+    <>
       <div style={{ margin: "0 0 16px", paddingLeft: 12, borderLeft: "2px solid var(--ember-deep)" }}>
         <div style={{ fontFamily: "var(--font-display)", fontSize: 10, letterSpacing: 2, color: "var(--ember)", marginBottom: 2 }}>
           YOU
         </div>
-        <div style={{ fontSize: 15, lineHeight: 1.55, fontStyle: "italic", color: "var(--ink-dim)" }}>{entry.text}</div>
+        <div
+          data-testid="player-message"
+          style={{ fontSize: 15, lineHeight: 1.55, fontStyle: "italic", color: "var(--ink-dim)" }}
+        >
+          {turn.playerMessage}
+        </div>
       </div>
-    );
-  }
-  return (
-    <p
-      style={{
-        margin: "0 0 16px",
-        fontSize: 16,
-        lineHeight: 1.64,
-        color: entry.isError ? "var(--ember)" : "var(--ink)",
-        whiteSpace: "pre-wrap",
-      }}
-    >
-      {entry.text}
-    </p>
+      {turn.narration !== null && (
+        <p
+          data-testid="narration"
+          style={{
+            margin: "0 0 16px",
+            fontSize: 16,
+            lineHeight: 1.64,
+            color: turn.isError ? "var(--ember)" : "var(--ink)",
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {turn.narration}
+        </p>
+      )}
+    </>
   );
 }
 
-/** Chapter/narration entries hydrate from currentSessionLog?.content (a
- * flat per-turn bullet list — see lib/session-log.ts for why history
- * can't be split into player/DM/story-event sub-types the way a turn
- * happening live in this session can). Image reveals and the HP wax-note
- * are out of scope this slice. */
+function WeavingIndicator() {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 11, margin: "2px 0 10px", opacity: 0.92 }}>
+      <div
+        style={{
+          width: 10,
+          height: 15,
+          background: "var(--ember)",
+          borderRadius: "50% 50% 50% 0",
+          transform: "rotate(-45deg)",
+          animation: "flicker 2.2s ease-in-out infinite",
+          flexShrink: 0,
+        }}
+      />
+      <span style={{ fontStyle: "italic", fontSize: 14.5, color: "var(--ink-dim)" }}>
+        The Dungeon Master is weaving what happens next
+        <span style={{ animation: "dotPulse 1.4s infinite" }}>.</span>
+        <span style={{ animation: "dotPulse 1.4s infinite .2s" }}>.</span>
+        <span style={{ animation: "dotPulse 1.4s infinite .4s" }}>.</span>
+      </span>
+    </div>
+  );
+}
+
+/** Chapter framing (from the prose log) and turn-by-turn player/narration
+ * content (from currentSessionLog.transcript) are two independent data
+ * sources per ADR-0007 — composing them is just "render the chapter
+ * heading(s), then every turn in order," since a session's prose log has
+ * exactly one heading for the one transcript it corresponds to. Image
+ * reveals and the HP wax-note are out of scope this slice. */
 export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
-  const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [chapters, setChapters] = useState<string[]>([]);
+  const [turns, setTurns] = useState<DisplayTurn[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -75,7 +118,18 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
         if (cancelled) return;
         // A brand-new campaign has no currentSessionLog at all yet — a
         // real empty state (no turns taken), not an error.
-        setEntries(snapshot.currentSessionLog ? parseSessionLog(snapshot.currentSessionLog.content) : []);
+        if (snapshot.currentSessionLog) {
+          setChapters(parseChapterHeadings(snapshot.currentSessionLog.content));
+          setTurns(
+            snapshot.currentSessionLog.transcript.map((record) => ({
+              playerMessage: record.playerMessage,
+              narration: record.narration,
+            }))
+          );
+        } else {
+          setChapters([]);
+          setTurns([]);
+        }
         setLoad({ status: "ready" });
       })
       .catch((err) => {
@@ -88,22 +142,31 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ block: "end" });
-  }, [entries, sending]);
+  }, [turns, sending]);
 
   async function handleSend() {
     const message = input.trim();
     if (!message || sending) return;
-    setEntries((prev) => [...prev, { type: "player", text: message }]);
+    setTurns((prev) => [...prev, { playerMessage: message, narration: null }]);
     setInput("");
     setSending(true);
     try {
       const result = await sendTurn(connection, campaignId, message);
-      setEntries((prev) => [...prev, { type: "narration", text: result.narration, isError: result.isError }]);
+      setTurns((prev) => {
+        const next = [...prev];
+        next[next.length - 1] = { playerMessage: message, narration: result.narration, isError: result.isError };
+        return next;
+      });
     } catch (err) {
-      setEntries((prev) => [
-        ...prev,
-        { type: "narration", text: err instanceof Error ? err.message : String(err), isError: true },
-      ]);
+      setTurns((prev) => {
+        const next = [...prev];
+        next[next.length - 1] = {
+          playerMessage: message,
+          narration: err instanceof Error ? err.message : String(err),
+          isError: true,
+        };
+        return next;
+      });
     } finally {
       setSending(false);
     }
@@ -138,39 +201,14 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
               Couldn't read this campaign: {load.message}
             </p>
           )}
-          {/* session/start creates the session-log file (and its chapter
-              heading) up front, before any turn happens — so a truly
-              untouched session still has one chapter entry with no
-              narration/player content under it. That's the real empty
-              state to check for, not "zero entries". */}
-          {load.status === "ready" && !entries.some((e) => e.type !== "chapter") && !sending && (
+          {load.status === "ready" && chapters.map((text, i) => <ChapterHeading key={i} text={text} />)}
+          {load.status === "ready" && turns.length === 0 && !sending && (
             <p style={{ fontStyle: "italic", color: "var(--ink-dim)", fontSize: 15, textAlign: "center" }}>
               The tale hasn't begun — say what you do.
             </p>
           )}
-          {load.status === "ready" &&
-            entries.map((entry, i) => <LogEntryView key={i} entry={entry} />)}
-          {sending && (
-            <div style={{ display: "flex", alignItems: "center", gap: 11, margin: "2px 0 10px", opacity: 0.92 }}>
-              <div
-                style={{
-                  width: 10,
-                  height: 15,
-                  background: "var(--ember)",
-                  borderRadius: "50% 50% 50% 0",
-                  transform: "rotate(-45deg)",
-                  animation: "flicker 2.2s ease-in-out infinite",
-                  flexShrink: 0,
-                }}
-              />
-              <span style={{ fontStyle: "italic", fontSize: 14.5, color: "var(--ink-dim)" }}>
-                The Dungeon Master is weaving what happens next
-                <span style={{ animation: "dotPulse 1.4s infinite" }}>.</span>
-                <span style={{ animation: "dotPulse 1.4s infinite .2s" }}>.</span>
-                <span style={{ animation: "dotPulse 1.4s infinite .4s" }}>.</span>
-              </span>
-            </div>
-          )}
+          {load.status === "ready" && turns.map((turn, i) => <TurnView key={i} turn={turn} />)}
+          {sending && <WeavingIndicator />}
           <div ref={logEndRef} />
         </div>
       </div>

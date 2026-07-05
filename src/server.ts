@@ -9,6 +9,7 @@ import {
   persistSessionId,
   resolveSessionLog,
   readStateSnapshot,
+  appendTurnTranscript,
   readCampaignModel,
   persistCampaignModel,
   readCampaignSettings,
@@ -161,6 +162,11 @@ const ROUTES: Array<{
         active.sessionId = result.sessionId;
         persistSessionId(campaignDir, result.sessionId);
       }
+
+      // Per ADR-0007: the deterministic speaker-attribution record, written
+      // here (not inferred from prose afterward) at the one point both
+      // strings are already in hand — for every turn, error or not.
+      appendTurnTranscript(campaignDir, active.sessionLogPath, message, result.text);
 
       sendJson(res, result.isError ? 502 : 200, {
         narration: result.text,
