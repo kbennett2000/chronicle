@@ -24,7 +24,8 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   checking: "Testing…",
   connected: "Connected to the hearth",
   unauthorized: "Wrong passphrase",
-  unreachable: "Could not reach that address",
+  unreachable: "Could not reach that address — check the IP and that both devices are on the same network",
+  "origin-mismatch": "This page was loaded from a different address — reload the app from the address above",
 };
 
 const ART_PRESETS = ["comic book", "Lego-style", "pencil sketch", "watercolour", "anime", "pixel art", "noir", "oil painting"];

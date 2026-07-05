@@ -12,6 +12,12 @@ export interface ChronicleTestServer {
   baseURL: string;
   token: string;
   campaignId: string;
+  /** Kills the backend process early, before the fixture's own teardown —
+   * for tests that need to simulate the server going away mid-session
+   * (e.g. a same-origin address that was reachable at page load but isn't
+   * anymore). Safe to call more than once; the fixture's teardown no-ops
+   * if this already ran. */
+  stop: () => void;
 }
 
 function runScratchScript(args: string[]): string {
@@ -117,14 +123,18 @@ _(none established yet)_
  * because it was fresh several tests ago, not anymore. One server+
  * campaign per test costs a few extra seconds of boot time; it buys
  * actual isolation. */
-async function bootServer(campaignId: string, use: (server: ChronicleTestServer) => Promise<void>): Promise<void> {
+async function bootServer(
+  campaignId: string,
+  use: (server: ChronicleTestServer) => Promise<void>,
+  host = "127.0.0.1"
+): Promise<void> {
   const port = 4500 + Math.floor(Math.random() * 400);
   const baseURL = `http://127.0.0.1:${port}`;
   // detached: true makes this process the leader of its own process
   // group (pid === pgid) — see killServerTree below for why that matters.
   const proc: ChildProcess = spawn("npx", ["tsx", "src/server.ts"], {
     cwd: REPO_ROOT,
-    env: { ...process.env, CHRONICLE_SHARED_SECRET: TOKEN, PORT: String(port), HOST: "127.0.0.1" },
+    env: { ...process.env, CHRONICLE_SHARED_SECRET: TOKEN, PORT: String(port), HOST: host },
     stdio: "pipe",
     detached: true,
   });
@@ -142,13 +152,27 @@ async function bootServer(campaignId: string, use: (server: ChronicleTestServer)
     throw new Error(`${(err as Error).message}\n${stderr}`);
   }
 
-  await use({ baseURL, token: TOKEN, campaignId });
+  let stopped = false;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    killServerTree(proc);
+  };
 
-  killServerTree(proc);
+  await use({ baseURL, token: TOKEN, campaignId, stop });
+
+  stop();
   runScratchScript(["delete", campaignId]);
 }
 
-export const test = base.extend<{ chronicleServer: ChronicleTestServer; freshChronicleServer: ChronicleTestServer }, object>({
+export const test = base.extend<
+  {
+    chronicleServer: ChronicleTestServer;
+    freshChronicleServer: ChronicleTestServer;
+    crossOriginChronicleServer: ChronicleTestServer;
+  },
+  object
+>({
   chronicleServer: async ({}, use) => {
     const campaignId = runScratchScript(["create"]);
     seedCampaignContent(campaignId);
@@ -163,6 +187,18 @@ export const test = base.extend<{ chronicleServer: ChronicleTestServer; freshChr
   freshChronicleServer: async ({}, use) => {
     const campaignId = runScratchScript(["create"]);
     await bootServer(campaignId, use);
+  },
+
+  // Bound to 0.0.0.0 (not just 127.0.0.1) so the same running server is
+  // genuinely reachable via two different origins in the browser's eyes —
+  // "127.0.0.1" and "localhost" are distinct origins even though they
+  // resolve to the same box, which is exactly issue #34's scenario (one
+  // address to load the page, a different-but-legitimate address
+  // configured in Hearth) without depending on this machine's real LAN IP
+  // being reachable/stable in CI.
+  crossOriginChronicleServer: async ({}, use) => {
+    const campaignId = runScratchScript(["create"]);
+    await bootServer(campaignId, use, "0.0.0.0");
   },
 });
 

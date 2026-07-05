@@ -356,7 +356,44 @@ function serveStatic(req: IncomingMessage, res: ServerResponse): boolean {
   return true;
 }
 
+// Per issue #34: the phone's own page can legitimately be loaded from one
+// address (e.g. a hostname, or localhost while testing) and configured in
+// Settings -> Hearth to talk to the *same* server via a different address
+// (e.g. its LAN IP) — the browser treats those as different origins and
+// blocks the cross-origin fetch entirely without CORS headers. Reflecting
+// the request's own Origin back (rather than a fixed allowlist, which
+// would need to somehow already know every address this server might be
+// reached by) is what makes that legitimate case work. This does not
+// weaken the auth model: CORS only controls whether a browser lets page
+// JS *read* a cross-origin response — it never replaces the secret-token
+// check below, which every non-static route still enforces regardless of
+// Origin. A page on a different origin still gets 401 without the right
+// token; it just no longer gets silently blocked before even trying.
+function applyCorsHeaders(req: IncomingMessage, res: ServerResponse): void {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Chronicle-Token");
+  res.setHeader("Access-Control-Max-Age", "600");
+}
+
 const server = createServer(async (req, res) => {
+  applyCorsHeaders(req, res);
+
+  // Preflight: browsers send this ahead of any cross-origin request that
+  // carries a custom header (X-Chronicle-Token) or a non-simple method,
+  // and it can never carry that header itself — so it can't be gated on
+  // the auth check below. No route needs its own explicit OPTIONS entry;
+  // this handles every one of them in one place.
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
   try {
     const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
     const route = ROUTES.find(

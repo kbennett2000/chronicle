@@ -71,7 +71,13 @@ export async function apiFetch(connection: Connection, path: string, options?: R
   return body;
 }
 
-export type ConnectionStatus = "unchecked" | "checking" | "connected" | "unauthorized" | "unreachable";
+export type ConnectionStatus =
+  | "unchecked"
+  | "checking"
+  | "connected"
+  | "unauthorized"
+  | "unreachable"
+  | "origin-mismatch";
 
 /** GET /models is the cheapest authenticated route to confirm the stored
  * address+passphrase actually reach this server — used for both the
@@ -82,6 +88,18 @@ export async function checkConnection(connection: Connection): Promise<Connectio
     return "connected";
   } catch (err) {
     if (err instanceof AuthError) return "unauthorized";
+    // fetch() deliberately can't tell page JS *why* a cross-origin request
+    // failed — a CORS block and a genuine network failure both surface as
+    // the exact same opaque error, by design (browsers won't leak whether
+    // the response even arrived). But the fix is different either way:
+    // "reload from the address you configured" vs. "check the IP/
+    // firewall" — and *that* distinction we can make client-side, since it
+    // only depends on comparing the configured address against the origin
+    // this page actually loaded from, not on inspecting the failed
+    // request itself (see issue #34).
+    if (typeof window !== "undefined" && serverOrigin(connection) !== window.location.origin) {
+      return "origin-mismatch";
+    }
     return "unreachable";
   }
 }
