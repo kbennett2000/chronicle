@@ -9,7 +9,7 @@ import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runTurn } from "./dm-engine.js";
+import { runTurn, openingDirective } from "./dm-engine.js";
 import {
   resolveCampaignDir,
   readPersistedSessionId,
@@ -301,6 +301,84 @@ const ROUTES: Array<{
         // Always clear the single-flight lock — on success, on a 502 engine
         // error, and on a thrown exception (which propagates to the top-level
         // catch → 500). The lock must never stick.
+        active.busy = false;
+      }
+    },
+  },
+  {
+    // ADR-0013: generate a new campaign's opening scene (turn-zero). This is
+    // DM-initiated — no player message — so it has its own route rather than
+    // going through /turns (whose non-empty-message guard would reject it).
+    // Idempotent: if the campaign already has any turns, it returns the latest
+    // one with { alreadyStarted: true } instead of writing a second opening,
+    // so a page reload or double client fire can't duplicate it.
+    method: "POST",
+    pattern: /^\/campaigns\/([^/]+)\/opening$/,
+    async handler(_req, res, [campaignId]) {
+      const campaignDir = resolveCampaignDir(campaignId);
+      const active = activeSessions.get(campaignId);
+      if (!active) {
+        sendJson(res, 409, {
+          error: `no active session for campaign '${campaignId}' — call POST /campaigns/${campaignId}/session/start first`,
+        });
+        return;
+      }
+
+      // Already started? Hand back the existing opening instead of generating
+      // another. Reuse the same log the turns/state paths use so the count is
+      // consistent with what Play renders.
+      const existing = readTurnTranscript(campaignDir, active.sessionLogPath);
+      if (existing.length > 0) {
+        sendJson(res, 200, {
+          narration: existing[0].narration,
+          sessionId: active.sessionId ?? null,
+          model: active.model,
+          isError: false,
+          alreadyStarted: true,
+        });
+        return;
+      }
+
+      if (active.busy) {
+        sendJson(res, 409, {
+          error: `a turn is already in progress for campaign '${campaignId}' — wait for it to finish before submitting another`,
+        });
+        return;
+      }
+      active.busy = true;
+
+      try {
+        console.log(`[${campaignId}] opening scene on model ${active.model}`);
+        const settings = readCampaignSettings(campaignDir);
+        const result = await runTurn(
+          campaignDir,
+          active.sessionLogPath,
+          openingDirective(campaignDir),
+          active.sessionId,
+          active.model,
+          settings,
+          () => {}
+        );
+
+        if (result.sessionId) {
+          active.sessionId = result.sessionId;
+          persistSessionId(campaignDir, result.sessionId);
+        }
+
+        // Turn-zero: empty playerMessage marks a DM-initiated turn (ADR-0013).
+        // On an engine error, don't persist a broken opening — leave the
+        // campaign at zero turns so the next enter-Play retries it cleanly.
+        if (!result.isError) {
+          appendTurnTranscript(campaignDir, active.sessionLogPath, "", result.text);
+        }
+
+        sendJson(res, result.isError ? 502 : 200, {
+          narration: result.text,
+          sessionId: result.sessionId ?? null,
+          model: result.model,
+          isError: result.isError,
+        });
+      } finally {
         active.busy = false;
       }
     },

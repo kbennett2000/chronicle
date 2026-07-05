@@ -340,6 +340,39 @@ adjudicate the outcome against the appropriate DC/AC.`);
   return sections.join("\n\n");
 }
 
+/** ADR-0013: the one-time director cue that produces a new campaign's opening
+ * scene (turn-zero). It is passed to runTurn as the turn's userInput but is
+ * never persisted — only the DM's resulting narration is. It is an instruction
+ * to the DM, not player dialogue, so it speaks in the second person about the
+ * scene to write, and leans on the system prompt (which already carries the
+ * world setting, tone, content stance, and anti-meta rules) for everything
+ * else. Reads the character straight off the sheet so the opening names the
+ * real player character (issues #51/#48), never a placeholder. */
+export function openingDirective(campaignDir: string): string {
+  const character = readCharacterIdentity(campaignDir);
+  const descriptor = [character.race, character.class].filter(Boolean).join(" ").trim();
+  const who = descriptor ? `${character.name}, a ${descriptor}` : character.name;
+  return `Begin the campaign. This is the very first moment of play — the player has
+just created ${who} and is waiting to be dropped into the world. Write the
+opening scene now, on your own initiative; there is no player action to
+respond to yet.
+
+Narrate an immersive, present-tense opening that:
+- establishes exactly where ${character.name} is and what is happening around
+  them right now, in vivid sensory detail (a few tight paragraphs, not a wall);
+- fits the campaign's established world setting and tone;
+- naturally grounds ${character.name}'s appearance and the gear they carry, in
+  the fiction (no stat block, no mechanics talk);
+- presents one immediate, concrete situation or hook for them to react to —
+  something is already in motion, not a blank tavern waiting for orders;
+- ends by inviting the player to act (e.g. a beat that clearly hands them the
+  moment), without listing menu-style options.
+
+Before or after narrating, update world-state.md's "## Current Situation"
+section so it reflects this opening. Write only the in-world scene as your
+reply — no preamble, no bookkeeping notes, no meta commentary.`;
+}
+
 export interface TurnResult {
   text: string;
   sessionId: string | undefined;

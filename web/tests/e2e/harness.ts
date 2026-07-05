@@ -108,6 +108,30 @@ _(none established yet)_
   );
 }
 
+/** Seeds a single opening turn (ADR-0013: turn-zero, empty playerMessage) so
+ * the campaign reads as "already started." Play only auto-generates an opening
+ * scene when a campaign has ZERO turns (issue #54) — most specs just want to
+ * reach Play and exercise UI/panels, not fire a real Agent SDK opening every
+ * time, so the default `chronicleServer` fixture is pre-opened with this. Specs
+ * that specifically test the turn/opening flow use `unopenedChronicleServer`
+ * (zero turns) instead. No persisted .session-id is written — the seeded turn
+ * is history, not a resumable Agent SDK conversation (a fresh log is started on
+ * session/start, and /state falls back to this one for its transcript). */
+function seedOpeningTurn(campaignId: string): void {
+  const logDir = path.join(REPO_ROOT, "campaigns", campaignId, "session-log");
+  const base = "session-2020-01-01T00-00-00-000Z";
+  fs.writeFileSync(path.join(logDir, `${base}.md`), `# ${base}\n\nThe seeded opening.\n`);
+  fs.writeFileSync(
+    path.join(logDir, `${base}.transcript.jsonl`),
+    JSON.stringify({
+      turnIndex: 0,
+      timestamp: "2020-01-01T00:00:00.000Z",
+      playerMessage: "",
+      narration: "Torchlight throws long shadows across the seeded hall as your tale begins.",
+    }) + "\n"
+  );
+}
+
 /** Reusable per-test fixture: boots a real chronicle backend against a
  * disposable scratch campaign (per CLAUDE.md test-data-hygiene — this is
  * exactly the "ad-hoc validation" case scripts/scratch-campaign.ts exists
@@ -168,12 +192,27 @@ async function bootServer(
 export const test = base.extend<
   {
     chronicleServer: ChronicleTestServer;
+    unopenedChronicleServer: ChronicleTestServer;
     freshChronicleServer: ChronicleTestServer;
     crossOriginChronicleServer: ChronicleTestServer;
   },
   object
 >({
+  // Pre-opened (ADR-0013): seeded content + a turn-zero opening record, so
+  // entering Play does NOT auto-fire a real Agent SDK opening. This is the
+  // right default for every UI/panel spec — they reach Play and test their
+  // own thing without paying for (and racing against) an opening turn.
   chronicleServer: async ({}, use) => {
+    const campaignId = runScratchScript(["create"]);
+    seedCampaignContent(campaignId);
+    seedOpeningTurn(campaignId);
+    await bootServer(campaignId, use);
+  },
+
+  // Seeded content but ZERO turns — entering Play auto-generates the opening
+  // scene (issue #54). For specs that specifically exercise the turn/opening
+  // flow (turn, transcript, opening) and need a real, empty starting log.
+  unopenedChronicleServer: async ({}, use) => {
     const campaignId = runScratchScript(["create"]);
     seedCampaignContent(campaignId);
     await bootServer(campaignId, use);

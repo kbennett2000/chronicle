@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Connection } from "../lib/connection";
-import { getState, sendTurn, illustrateMoment, type CharacterSheet, type StateSnapshot } from "../lib/campaign";
+import { getState, sendTurn, generateOpening, illustrateMoment, type CharacterSheet, type StateSnapshot } from "../lib/campaign";
 import { useAuthedImage } from "../lib/useAuthedImage";
 import { parseChapterHeadings } from "../lib/session-log";
 import { BottomSheet } from "../components/BottomSheet";
@@ -140,17 +140,21 @@ function TurnView({
   const canIllustrate = turn.narration !== null && !turn.isError;
   return (
     <>
-      <div style={{ margin: "0 0 16px", paddingLeft: 12, borderLeft: "2px solid var(--ember-deep)" }}>
-        <div style={{ fontFamily: "var(--font-display)", fontSize: 10, letterSpacing: 2, color: "var(--ember)", marginBottom: 2 }}>
-          YOU
+      {/* ADR-0013: a turn-zero opening scene has an empty playerMessage (the DM
+          spoke unprompted) — render narration alone, with no "YOU" block. */}
+      {turn.playerMessage.trim() !== "" && (
+        <div style={{ margin: "0 0 16px", paddingLeft: 12, borderLeft: "2px solid var(--ember-deep)" }}>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 10, letterSpacing: 2, color: "var(--ember)", marginBottom: 2 }}>
+            YOU
+          </div>
+          <div
+            data-testid="player-message"
+            style={{ fontSize: 15, lineHeight: 1.55, fontStyle: "italic", color: "var(--ink-dim)" }}
+          >
+            {turn.playerMessage}
+          </div>
         </div>
-        <div
-          data-testid="player-message"
-          style={{ fontSize: 15, lineHeight: 1.55, fontStyle: "italic", color: "var(--ink-dim)" }}
-        >
-          {turn.playerMessage}
-        </div>
-      </div>
+      )}
       {turn.narration !== null && (
         <p
           data-testid="narration"
@@ -196,7 +200,7 @@ function TurnView({
   );
 }
 
-function WeavingIndicator() {
+function WeavingIndicator({ label = "The Dungeon Master is weaving what happens next" }: { label?: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 11, margin: "2px 0 10px", opacity: 0.92 }}>
       <div
@@ -211,7 +215,7 @@ function WeavingIndicator() {
         }}
       />
       <span style={{ fontStyle: "italic", fontSize: 14.5, color: "var(--ink-dim)" }}>
-        The Dungeon Master is weaving what happens next
+        {label}
         <span style={{ animation: "dotPulse 1.4s infinite" }}>.</span>
         <span style={{ animation: "dotPulse 1.4s infinite .2s" }}>.</span>
         <span style={{ animation: "dotPulse 1.4s infinite .4s" }}>.</span>
@@ -232,6 +236,14 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   const [turns, setTurns] = useState<DisplayTurn[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  // ADR-0013: turn-zero opening-scene generation. `openingScene` is true while
+  // the DM is writing the first beat of a brand-new campaign; `openingError`
+  // holds a reason if it couldn't (the player then just types to begin). The
+  // ref makes the auto-trigger fire at most once per mount even though the
+  // effect re-runs as turns/load change (the server is idempotent regardless).
+  const [openingScene, setOpeningScene] = useState(false);
+  const [openingError, setOpeningError] = useState<string | null>(null);
+  const openingFiredRef = useRef(false);
   const [openTab, setOpenTab] = useState<Tab | null>(null);
   // Per-turn illustration state (ADR-0009): which turn index is currently
   // generating, and any error to show under that turn's button.
@@ -292,9 +304,50 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
     };
   }, [connection, campaignId]);
 
+  // ADR-0013 (issue #54): a brand-new campaign has zero turns, which used to
+  // land the player on a blank "the tale hasn't begun" screen. Instead, the
+  // first time we're ready with no turns, ask the DM to set the opening scene
+  // (a turn-zero record with no player message), showing a "setting the scene"
+  // state meanwhile. Fires once per mount (openingFiredRef); the server is
+  // idempotent, so a reload/double-fire can't produce a second opening.
+  useEffect(() => {
+    // Fire once, when load first resolves. `turns.length` is deliberately NOT
+    // a dependency: the success path calls setTurns, and if that re-ran this
+    // effect its cleanup would cancel the in-flight .finally and leave the
+    // input stuck disabled. openingFiredRef guards against any re-entry, and
+    // the server is idempotent regardless.
+    if (load.status !== "ready" || turns.length > 0 || openingFiredRef.current) return;
+    openingFiredRef.current = true;
+    let cancelled = false;
+    setOpeningScene(true);
+    setOpeningError(null);
+    generateOpening(connection, campaignId)
+      .then((result) => {
+        if (cancelled) return;
+        if (result.isError) {
+          setOpeningError(result.narration || "The Dungeon Master couldn't set the scene.");
+          return;
+        }
+        setTurns([{ playerMessage: "", narration: result.narration }]);
+        // Current Situation / gear the opening just established need to reach
+        // the Self/Views panels, same as after a normal turn.
+        getState(connection, campaignId).then(applyPanelState).catch(() => {});
+      })
+      .catch((err) => {
+        if (!cancelled) setOpeningError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setOpeningScene(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load.status, connection, campaignId]);
+
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ block: "end" });
-  }, [turns, sending]);
+  }, [turns, sending, openingScene]);
 
   // Issue #43: the mute button now controls a real ambient bed. Browsers block
   // autoplay until a user gesture, so we try immediately (entering Play was
@@ -470,9 +523,17 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
             </p>
           )}
           {load.status === "ready" && chapters.map((text, i) => <ChapterHeading key={i} text={text} />)}
-          {load.status === "ready" && turns.length === 0 && !sending && (
-            <p style={{ fontStyle: "italic", color: "var(--ink-dim)", fontSize: 15, textAlign: "center" }}>
-              The tale hasn't begun — say what you do.
+          {/* ADR-0013: a zero-turn campaign is either having its opening scene
+              woven now, or the opening failed and the player begins manually. */}
+          {load.status === "ready" && turns.length === 0 && !openingError && (
+            <WeavingIndicator label="The Dungeon Master is setting the scene" />
+          )}
+          {load.status === "ready" && turns.length === 0 && openingError && (
+            <p
+              data-testid="opening-error"
+              style={{ fontStyle: "italic", color: "var(--ink-dim)", fontSize: 15, textAlign: "center" }}
+            >
+              The scene wouldn't take shape just now — describe your first action to begin the tale.
             </p>
           )}
           {load.status === "ready" &&
@@ -514,7 +575,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
                 handleSend();
               }
             }}
-            disabled={sending || load.status !== "ready"}
+            disabled={sending || openingScene || load.status !== "ready"}
             placeholder="What do you do?"
             data-testid="turn-input"
             style={{
@@ -532,7 +593,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
           />
           <button
             onClick={handleSend}
-            disabled={sending || load.status !== "ready" || !input.trim()}
+            disabled={sending || openingScene || load.status !== "ready" || !input.trim()}
             data-testid="send-button"
             style={{
               width: 38,

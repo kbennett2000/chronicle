@@ -213,6 +213,33 @@ export async function sendTurn(connection: Connection, campaignId: string, messa
   return body as TurnResult;
 }
 
+/** ADR-0013 opening scene (turn-zero). Generates the DM-initiated first beat of
+ * a brand-new campaign. Like sendTurn, a 502 engine error comes back as a valid
+ * { narration, isError:true } body (a domain result to render), so this uses
+ * apiFetchRaw and treats 200/502 as results rather than throwing. `alreadyStarted`
+ * is true when the campaign already had an opening (the server is idempotent). */
+export interface OpeningResult {
+  narration: string;
+  sessionId: string | null;
+  model: string;
+  isError: boolean;
+  alreadyStarted?: boolean;
+}
+
+export async function generateOpening(connection: Connection, campaignId: string): Promise<OpeningResult> {
+  const { status, body } = await apiFetchRaw(connection, `/campaigns/${encodeURIComponent(campaignId)}/opening`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  // 200 (success / already-started) and 502 (engine error) both carry a
+  // { narration, isError } body to render. Anything else (409 no active
+  // session, etc.) is not a domain result — throw so Play shows the fallback.
+  if (status !== 200 && status !== 502) {
+    throw new ApiError((body as { error?: string }).error ?? `request failed (${status})`);
+  }
+  return body as OpeningResult;
+}
+
 /** ADR-0009 on-demand illustration. `ok:false` is a domain result carrying the
  * exact Grok failure reason (returned at HTTP 200), not an exception — so the
  * UI can show *why* nothing was drawn instead of failing silently. */
