@@ -149,6 +149,13 @@ export interface CampaignCreationSettings {
   /** Issue #57: the model the new campaign should start on. Omitted keeps the
    * server default (Sonnet). */
   model?: string;
+  /** Issue #60: look/play defaults carried from the player's last game
+   * (lib/lookPrefs.ts) so a new campaign doesn't revert to images-off. Omitted
+   * fields keep the server defaults. */
+  generateImages?: boolean;
+  artStyle?: string;
+  autoIllustrateTurns?: boolean;
+  autoRollDice?: boolean;
 }
 
 /** Creates a new campaign from a character-creation form (ADR-0010); the

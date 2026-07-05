@@ -202,6 +202,38 @@ const ROUTES: Array<{
         }
         creationSettings.contentIntensity = creation.contentIntensity as ContentIntensity;
       }
+      // Issue #60: a new game also carries the player's remembered look/play
+      // defaults (generateImages/artStyle/autoIllustrateTurns/autoRollDice) so
+      // it doesn't revert to images-off. Same validation as POST /settings;
+      // these merge via persistCampaignSettings below.
+      if (creation.generateImages !== undefined) {
+        if (typeof creation.generateImages !== "boolean") {
+          sendJson(res, 400, { error: "generateImages must be a boolean" });
+          return;
+        }
+        creationSettings.generateImages = creation.generateImages;
+      }
+      if (creation.artStyle !== undefined) {
+        if (typeof creation.artStyle !== "string") {
+          sendJson(res, 400, { error: "artStyle must be a string" });
+          return;
+        }
+        creationSettings.artStyle = creation.artStyle;
+      }
+      if (creation.autoIllustrateTurns !== undefined) {
+        if (typeof creation.autoIllustrateTurns !== "boolean") {
+          sendJson(res, 400, { error: "autoIllustrateTurns must be a boolean" });
+          return;
+        }
+        creationSettings.autoIllustrateTurns = creation.autoIllustrateTurns;
+      }
+      if (creation.autoRollDice !== undefined) {
+        if (typeof creation.autoRollDice !== "boolean") {
+          sendJson(res, 400, { error: "autoRollDice must be a boolean" });
+          return;
+        }
+        creationSettings.autoRollDice = creation.autoRollDice;
+      }
 
       const campaignId = deriveCampaignId(String(sheet.name), (id) =>
         fs.existsSync(path.join(CAMPAIGNS_ROOT, id))

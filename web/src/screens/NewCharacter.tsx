@@ -9,6 +9,7 @@ import {
   type ModelOption,
 } from "../lib/campaign";
 import { loadPreferredModel, savePreferredModel } from "../lib/modelPref";
+import { loadLookPrefs } from "../lib/lookPrefs";
 
 interface NewCharacterProps {
   connection: Connection;
@@ -125,6 +126,15 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
     // Only send the world fields the player actually changed — omitted fields
     // keep the standard-fantasy defaults (issue #48).
     const settings: CampaignCreationSettings = {};
+    // Issue #60: seed the new game with the player's remembered look/play
+    // defaults (images/art/auto-illustrate/auto-roll) so it doesn't revert to
+    // images-off. Explicit form fields below still take precedence.
+    const lookPrefs = loadLookPrefs();
+    if (lookPrefs.generateImages !== undefined) settings.generateImages = lookPrefs.generateImages;
+    if (lookPrefs.artStyle !== undefined) settings.artStyle = lookPrefs.artStyle;
+    if (lookPrefs.autoIllustrateTurns !== undefined) settings.autoIllustrateTurns = lookPrefs.autoIllustrateTurns;
+    if (lookPrefs.autoRollDice !== undefined) settings.autoRollDice = lookPrefs.autoRollDice;
+    if (lookPrefs.contentIntensity !== undefined) settings.contentIntensity = lookPrefs.contentIntensity;
     if (worldSetting.trim()) settings.worldSetting = worldSetting.trim();
     if (toneWhimsy > 0) settings.toneWhimsy = toneWhimsy;
     if (contentIntensity !== "standard") settings.contentIntensity = contentIntensity;

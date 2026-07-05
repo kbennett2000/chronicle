@@ -61,6 +61,22 @@ test("strips directory and tool-access meta without a divider", () => {
   assert.equal(stripMetaChatter(raw), "The corridor is dark ahead.");
 });
 
+test("strips the post-turn 'updated session log' bookkeeping leak (#62)", () => {
+  // The screenshot leak: a past-tense, asterisk-wrapped bookkeeping note glued
+  // after the real narration. Both the emphasis and the sentence must go.
+  assert.equal(
+    stripMetaChatter("The gate groans open. *Updated session log with this turn's action.*"),
+    "The gate groans open."
+  );
+  assert.equal(
+    stripMetaChatter("Recorded this turn's action. You press deeper into the mist."),
+    "You press deeper into the mist."
+  );
+  // False-positive guard: ordinary prose using these words as fiction survives.
+  const prose = "She updated her grip and noted the exits before stepping inside.";
+  assert.equal(stripMetaChatter(prose), prose);
+});
+
 test("keeps the player-facing roll request when auto-roll is OFF (#44)", () => {
   // With auto-roll off the DM asks the player to roll — that phrasing must NOT
   // be stripped, or the player never gets asked for their value.
