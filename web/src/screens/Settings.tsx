@@ -417,6 +417,61 @@ export function Settings({
                 );
               })}
             </div>
+
+            {/* Issue #44: engine rolls dice by default; off = you provide values. */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "11px 14px",
+                borderRadius: 4,
+                background: "rgba(28,20,12,.55)",
+                border: "1px solid rgba(109,90,56,.36)",
+                margin: "18px 0 0",
+              }}
+            >
+              <div>
+                <div style={{ fontFamily: "var(--font-display)", fontSize: 13.5, color: "var(--ink)" }}>Auto-roll dice</div>
+                <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 2 }}>
+                  On: the DM rolls for you · Off: you supply your own roll values
+                </div>
+              </div>
+              {(() => {
+                const on = settings.autoRollDice !== false; // absent === on
+                return (
+                  <button
+                    data-testid="dice-toggle"
+                    aria-pressed={on}
+                    onClick={() => patchSettings({ autoRollDice: !on }, setWorldSave)}
+                    style={{
+                      width: 46,
+                      height: 26,
+                      borderRadius: 20,
+                      cursor: "pointer",
+                      border: `1px solid ${on ? "rgba(211,112,60,.9)" : "rgba(109,90,56,.4)"}`,
+                      background: on ? "rgba(211,112,60,.85)" : "rgba(12,8,5,.6)",
+                      position: "relative",
+                      transition: "background 0.2s, border-color 0.2s",
+                    }}
+                  >
+                    <span
+                      style={{
+                        position: "absolute",
+                        top: 2,
+                        left: on ? 24 : 2,
+                        width: 20,
+                        height: 20,
+                        borderRadius: "50%",
+                        background: on ? "#fbeede" : "#8c7c62",
+                        transition: "left 0.2s, background 0.2s",
+                      }}
+                    />
+                  </button>
+                );
+              })()}
+            </div>
+
             <div data-testid="world-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 6 }}>
               {worldSave === "saving" && "Saving…"}
               {worldSave === "saved" && "Saved (POST /settings)."}

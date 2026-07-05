@@ -10,10 +10,15 @@ import { buildImagePrompt } from "./image-prompt.js";
 
 const execFileAsync = promisify(execFile);
 
-/** Generous but bounded — image generation observed at ~4-6s in testing,
- * this leaves headroom for a slow/loaded host without hanging a turn
- * indefinitely if Grok Build wedges. */
-const GROK_TIMEOUT_MS = 90_000;
+/** Generous but bounded. Early testing saw ~4-6s, but real generations under
+ * load exceed the old 90s ceiling (issue #52), so this is raised — and, more
+ * importantly, a timeout no longer discards a finished image: the salvage step
+ * in generateImage harvests whatever Grok actually wrote before it was killed. */
+const GROK_TIMEOUT_MS = 180_000;
+
+/** A copied-in image below this many bytes is treated as a truncated/partial
+ * write (e.g. Grok killed mid-write on timeout) and not used. */
+const MIN_IMAGE_BYTES = 1024;
 
 export type ImageEntityType = "character" | "npc" | "location" | "item" | "boss" | "scene";
 
@@ -81,6 +86,48 @@ function findGeneratedImagePath(campaignDir: string, sessionId: string): string 
   return found;
 }
 
+/** Timeout/fallback salvage (issue #52): Grok Build writes each generated image
+ * under ~/.grok/sessions/<encodeURIComponent(cwd)>/<sessionId>/images/, and on
+ * a timeout we no longer have the stdout sessionId — but the file may already
+ * exist. Scan every session dir for this campaign's cwd and return the newest
+ * image file written at/after `sinceMs` (this invocation), so a run that
+ * finished just after we killed it still yields its image instead of a hard
+ * failure. The `sinceMs` floor keeps us from resurrecting a stale image from an
+ * earlier call. */
+function findLatestGeneratedImage(campaignDir: string, sinceMs: number): string | undefined {
+  const base = path.join(os.homedir(), ".grok", "sessions", encodeURIComponent(campaignDir));
+  return newestImageUnder(base, sinceMs);
+}
+
+/** Newest image file under `<sessionsBase>/<sessionId>/images/`, written at or
+ * after `sinceMs`, or undefined if none. Split out (and exported) so the
+ * salvage logic is unit-testable without a real ~/.grok tree. */
+export function newestImageUnder(sessionsBase: string, sinceMs: number): string | undefined {
+  if (!fs.existsSync(sessionsBase)) return undefined;
+  let best: string | undefined;
+  let bestMtime = -1;
+  for (const sessionId of fs.readdirSync(sessionsBase)) {
+    const imagesDir = path.join(sessionsBase, sessionId, "images");
+    if (!fs.existsSync(imagesDir)) continue;
+    for (const name of fs.readdirSync(imagesDir)) {
+      const full = path.join(imagesDir, name);
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(full);
+      } catch {
+        continue;
+      }
+      // 1s slack for coarse filesystem mtime resolution vs. Date.now().
+      if (!stat.isFile() || stat.mtimeMs + 1000 < sinceMs) continue;
+      if (stat.mtimeMs > bestMtime) {
+        bestMtime = stat.mtimeMs;
+        best = full;
+      }
+    }
+  }
+  return best;
+}
+
 /** Shells out to `grok -p "/imagine ..."` headlessly (design doc §2.2),
  * locates the resulting image file, and copies it into this campaign's own
  * images/ directory. Never throws — every failure mode (Grok Build not
@@ -97,7 +144,10 @@ export async function generateImage(
   const prompt = buildImagePrompt(description, settings);
   const slug = slugify(name);
 
-  let stdout: string;
+  // Marks which images belong to THIS call for the timeout-salvage path below.
+  const startedAt = Date.now();
+  let stdout: string | undefined;
+  let timedOut = false;
   try {
     const result = await execFileAsync(
       "grok",
@@ -107,32 +157,47 @@ export async function generateImage(
     stdout = result.stdout;
   } catch (err) {
     const e = err as NodeJS.ErrnoException & { killed?: boolean; stderr?: string };
-    const reason = e.killed
-      ? `timed out after ${GROK_TIMEOUT_MS}ms`
-      : e.code === "ENOENT"
-        ? "grok CLI not found on PATH"
-        : e.stderr?.trim() || e.message || String(err);
-    console.error(`[image-generator] grok invocation failed for "${name}": ${reason}`);
-    return { ok: false, error: `Grok Build invocation failed: ${reason}` };
-  }
-
-  let sessionId: string;
-  try {
-    const parsed = JSON.parse(stdout);
-    if (typeof parsed.sessionId !== "string") {
-      throw new Error("response had no sessionId");
+    if (e.code === "ENOENT") {
+      console.error(`[image-generator] grok CLI not found on PATH for "${name}"`);
+      return { ok: false, error: "Grok Build invocation failed: grok CLI not found on PATH" };
     }
-    sessionId = parsed.sessionId;
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    console.error(`[image-generator] could not parse grok output for "${name}": ${reason}`);
-    return { ok: false, error: `Grok Build returned unparseable output: ${reason}` };
+    // A timeout (killed) is NOT terminal: Grok may have already written the
+    // image before we killed it (issue #52). Fall through to the salvage scan.
+    if (e.killed) {
+      timedOut = true;
+      console.error(`[image-generator] grok timed out after ${GROK_TIMEOUT_MS}ms for "${name}" — attempting to salvage`);
+    } else {
+      const reason = e.stderr?.trim() || e.message || String(err);
+      console.error(`[image-generator] grok invocation failed for "${name}": ${reason}`);
+      return { ok: false, error: `Grok Build invocation failed: ${reason}` };
+    }
   }
 
-  const sourcePath = findGeneratedImagePath(campaignDir, sessionId);
+  // Preferred: the exact path Grok recorded in this session's chat history.
+  // Fallback/salvage: the newest image file written during this call (works
+  // even when we have no sessionId because Grok was killed on timeout).
+  let sourcePath: string | undefined;
+  if (stdout) {
+    try {
+      const parsed = JSON.parse(stdout);
+      if (typeof parsed.sessionId === "string") {
+        sourcePath = findGeneratedImagePath(campaignDir, parsed.sessionId);
+      }
+    } catch {
+      // Unparseable stdout just means we lean on the salvage scan below.
+    }
+  }
   if (!sourcePath) {
-    console.error(`[image-generator] no image file located for session ${sessionId} ("${name}")`);
-    return { ok: false, error: "Grok Build did not produce a locatable image file" };
+    sourcePath = findLatestGeneratedImage(campaignDir, startedAt);
+  }
+  if (!sourcePath) {
+    console.error(`[image-generator] no image file located for "${name}"${timedOut ? " (timed out)" : ""}`);
+    return {
+      ok: false,
+      error: timedOut
+        ? `Grok Build timed out after ${GROK_TIMEOUT_MS}ms and produced no image`
+        : "Grok Build did not produce a locatable image file",
+    };
   }
 
   const ext = path.extname(sourcePath) || ".jpg";
@@ -142,6 +207,11 @@ export async function generateImage(
   try {
     fs.mkdirSync(imagesDir, { recursive: true });
     fs.copyFileSync(sourcePath, destPath);
+    // Guard against a truncated file if Grok was killed mid-write.
+    if (fs.statSync(destPath).size < MIN_IMAGE_BYTES) {
+      fs.rmSync(destPath, { force: true });
+      return { ok: false, error: "Grok Build produced an incomplete image file" };
+    }
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     console.error(`[image-generator] failed to save image for "${name}": ${reason}`);

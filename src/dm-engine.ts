@@ -4,7 +4,10 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { createSeedMcpServer, SEED_TOOL_NAME } from "./seed-selector.js";
 import { createTextureMcpServer, TEXTURE_TOOL_NAME } from "./texture-selector.js";
 import { createImageMcpServer, GENERATE_IMAGE_TOOL_NAME } from "./image-generator.js";
+import { createDiceMcpServer, DICE_TOOL_NAME } from "./dice.js";
+import { stripMetaChatter } from "./narration.js";
 import type { CampaignSettings } from "./campaign-store.js";
+import { readCharacterIdentity, type CharacterIdentity } from "./campaign-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -63,7 +66,11 @@ export function decidePermission(
   // Host MCP tools are granted by name. Match on the server segment so the
   // decision is robust to a server exposing more than one tool, or to any
   // future rename of a single tool within it.
-  if (toolName.startsWith("mcp__seed-tables__") || toolName.startsWith("mcp__texture-tables__")) {
+  if (
+    toolName.startsWith("mcp__seed-tables__") ||
+    toolName.startsWith("mcp__texture-tables__") ||
+    toolName.startsWith("mcp__dice__")
+  ) {
     return { behavior: "allow" };
   }
   if (toolName.startsWith("mcp__image-tools__")) {
@@ -120,9 +127,18 @@ items, or verbatim lines/quotes. Invent your own original names for every
 character, faction, location, and object the setting calls for — reskin
 the property's *feel*, not its specific copyrighted content.`;
 
-function systemPrompt(sessionLogPath: string, settings: CampaignSettings): string {
+function systemPrompt(
+  sessionLogPath: string,
+  settings: CampaignSettings,
+  character: CharacterIdentity
+): string {
+  // Issues #51/#48: the player character is whoever character-sheet.json says
+  // — never a hardcoded name. A blank race/class (older/edge sheets) degrades
+  // to just the name rather than emitting a dangling "a  " descriptor.
+  const descriptor = [character.race, character.class].filter(Boolean).join(" ").trim();
+  const who = descriptor ? `${character.name}, a ${descriptor}` : character.name;
   const base = `You are the Dungeon Master for a solo Dungeons & Dragons 5th Edition
-campaign for the player character Kira Emberfall. The working directory
+campaign for the player character ${who}. The working directory
 contains the campaign's persistent state as plain files — this is the
 source of truth, not your conversation memory.
 
@@ -151,8 +167,8 @@ Every turn:
 5. world-state.md must always have an up-to-date "Current Situation"
    heading — this is what your narration gets grounded against, not just
    a history of locations visited. Rewrite it every turn to reflect
-   exactly where Kira is and what's happening right now; never leave it
-   describing a moment that's already passed.
+   exactly where ${character.name} is and what's happening right now; never
+   leave it describing a moment that's already passed.
 6. quest-log.md gets the same per-turn update discipline as
    world-state.md: if a turn produces a discovery, complication, or
    progress relevant to an active quest, update that quest's entry in
@@ -230,18 +246,47 @@ Every turn:
     than alive. Elaborate what it returns in your own words; never quote
     its wording directly.
 16. Your file read/write access to this campaign's state files is already
-    fully granted — never break character in narration to ask the player
-    for permission to read/write/edit files, or to mention tool access,
-    file paths, or any other implementation detail. These are invisible
-    to the player; if you find yourself about to write a sentence like
-    "may I have permission to edit..." or "I need access to...", that
-    sentence does not belong in narration at all — just perform the
-    file operation and continue narrating the story.
+    fully granted, and the working directory you are in right now IS this
+    campaign's correct, active directory — its files ARE ${character.name}'s
+    own character sheet, world, NPCs, and quests. Never question, doubt, or
+    ask to "establish"/"initialize"/"set up" the campaign context; never
+    claim you are "blocked", "restricted", or in the "wrong" directory;
+    never ask whether you are being run through the app/CLI or "which
+    campaign" this is — you already have everything you need on disk right
+    here. Never break character in narration to ask the player for
+    permission to read/write/edit files, or to mention tool access, file
+    paths, campaign directories, or any other implementation detail. These
+    are invisible to the player; if you find yourself about to write a
+    sentence like "may I have permission to edit...", "I need access
+    to...", or "I'm being blocked from reading the campaign files...", that
+    sentence does not belong in narration at all — just read the files you
+    need, perform the file operation, and continue narrating the story.
+17. Everything you output is player-facing narration — there is no
+    backstage. Never narrate your own bookkeeping: no "Let me update the
+    state files.", "Updating the character sheet.", "Let me record that.",
+    "Back to the story:", or similar segues. Perform the file writes
+    silently and let the prose flow as if the state simply IS what you
+    wrote. The only text you emit is the story the player reads.
 
 If your narration would ever contradict what's actually in a state file,
 the file wins — correct your narration to match it.`;
 
   const sections = [base];
+
+  // Issue #47: without an explicit stance the base model editorializes and
+  // moralizes about the player's choices. This is always-on (the low
+  // content-intensity softener below still applies on top of it).
+  sections.push(`Content stance: this is a work of collaborative adult fiction, and the
+player has full authorial latitude over their OWN character's choices —
+including violent, transgressive, morally grey, chaotic, selfish, or purely
+comedic ones. Run it straight as their Dungeon Master. Never moralize,
+lecture, scold, express disapproval, question whether they're "sure", or
+comment on the "coherence" or worthiness of how they want to play; never
+break character to impose your own narrative preferences or steer them
+toward a "better" story. When an action has in-world consequences (NPCs
+react, factions retaliate, a reputation forms, a body is found), narrate
+those consequences AS STORY — that is the game — not as judgment. You are
+not the player's conscience; you are the world reacting to them.`);
 
   if (settings.worldSetting) {
     sections.push(`Setting reskin: the player has configured this campaign's world setting
@@ -275,6 +320,23 @@ the same discipline as ${SEED_TOOL_NAME}. If it fails, continue narrating
 normally without an image; never let it block or delay your response.`);
   }
 
+  if (settings.autoRollDice !== false) {
+    sections.push(`Dice: whenever the rules call for a roll — an ability check, attack roll,
+saving throw, damage roll, initiative, death save, or any d20 test — call the
+${DICE_TOOL_NAME} tool and use its result as the authoritative outcome. Never
+invent the number yourself, and never ask the player what they rolled: you
+roll for them now. Pass standard notation (e.g. "1d20+5", "2d6", "d100") and
+use the mode argument for advantage/disadvantage. Apply the natural-20 /
+natural-1 flags for critical hits/misses per the SRD. Roll before you narrate
+the outcome, then narrate what the result means in the fiction.`);
+  } else {
+    sections.push(`Dice: auto-roll is OFF for this campaign — the player supplies their own
+roll values. When the rules call for a roll, tell the player exactly what to
+roll (e.g. "roll a d20 and add your Stealth modifier") and wait for their
+number; do not invent it or assume a value. Once they give you a total,
+adjudicate the outcome against the appropriate DC/AC.`);
+  }
+
   return sections.join("\n\n");
 }
 
@@ -297,6 +359,8 @@ export async function runTurn(
   let sessionId: string | undefined;
   let isError = false;
   const textParts: string[] = [];
+  // Issues #51/#48: the DM addresses whoever the sheet says, in this exact dir.
+  const character = readCharacterIdentity(campaignDir);
 
   const allowedTools = [
     "Read(./**)",
@@ -322,6 +386,15 @@ export async function runTurn(
     allowedTools.push(GENERATE_IMAGE_TOOL_NAME);
     mcpServers["image-tools"] = createImageMcpServer(campaignDir, settings);
   }
+  // Issue #44: auto-roll defaults ON (absent === on); only an explicit false
+  // reverts to the player supplying roll values. When on, the engine gets a
+  // real host-side dice roller; when off, the tool isn't offered and the
+  // system prompt tells the model to ask the player instead.
+  const autoRollDice = settings.autoRollDice !== false;
+  if (autoRollDice) {
+    allowedTools.push(DICE_TOOL_NAME);
+    mcpServers["dice"] = createDiceMcpServer();
+  }
 
   const options: Record<string, unknown> = {
     cwd: campaignDir,
@@ -335,7 +408,7 @@ export async function runTurn(
     allowedTools,
     disallowedTools: ["Bash"],
     permissionMode: "dontAsk",
-    systemPrompt: systemPrompt(sessionLogPath, settings),
+    systemPrompt: systemPrompt(sessionLogPath, settings, character),
     // Per ADR-0004: a fresh MCP server per turn so this campaign's toneWhimsy
     // (if set) overrides the wildcard chance without touching shared state
     // another campaign's in-flight turn might be reading.
@@ -444,5 +517,10 @@ export async function runTurn(
     }
   }
 
-  return { text: textParts.join(""), sessionId, isError, model };
+  // Issue #46: strip any state-bookkeeping chatter the model leaked between
+  // tool calls before the text becomes player-facing narration / the persisted
+  // transcript. On an engine error keep the raw text (it's diagnostic, and the
+  // patterns only match well-formed bookkeeping sentences anyway).
+  const text = isError ? textParts.join("") : stripMetaChatter(textParts.join(""));
+  return { text, sessionId, isError, model };
 }

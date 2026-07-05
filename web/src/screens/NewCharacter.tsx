@@ -1,6 +1,11 @@
 import { useMemo, useState } from "react";
 import type { Connection } from "../lib/connection";
-import { createCampaign, startSession, type CharacterCreationInput } from "../lib/campaign";
+import {
+  createCampaign,
+  startSession,
+  type CharacterCreationInput,
+  type CampaignCreationSettings,
+} from "../lib/campaign";
 
 interface NewCharacterProps {
   connection: Connection;
@@ -52,6 +57,13 @@ const inputStyle = {
 
 const labelStyle = { fontSize: 11, color: "var(--ink-dim)", margin: "16px 0 4px", letterSpacing: 0.5 } as const;
 
+// Same vocabulary as the Settings screen so a world described here reads the
+// same once you edit it later (issue #48).
+const INTENSITY_OPTIONS: Array<{ id: "standard" | "low"; label: string; note: string }> = [
+  { id: "standard", label: "Standard", note: "Full range of humour and description." },
+  { id: "low", label: "Low", note: "No crude humour; violence stays non-graphic." },
+];
+
 export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterProps) {
   const [name, setName] = useState("");
   const [race, setRace] = useState(RACES[0]);
@@ -59,6 +71,9 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
   const [scores, setScores] = useState<Record<Ability, number>>({
     strength: 8, dexterity: 8, constitution: 8, intelligence: 8, wisdom: 8, charisma: 8,
   });
+  const [worldSetting, setWorldSetting] = useState("");
+  const [toneWhimsy, setToneWhimsy] = useState(0);
+  const [contentIntensity, setContentIntensity] = useState<"standard" | "low">("standard");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,8 +99,18 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
     setCreating(true);
     setError(null);
     const character: CharacterCreationInput = { name: name.trim(), race, class: klass, abilityScores: scores };
+    // Only send the world fields the player actually changed — omitted fields
+    // keep the standard-fantasy defaults (issue #48).
+    const settings: CampaignCreationSettings = {};
+    if (worldSetting.trim()) settings.worldSetting = worldSetting.trim();
+    if (toneWhimsy > 0) settings.toneWhimsy = toneWhimsy;
+    if (contentIntensity !== "standard") settings.contentIntensity = contentIntensity;
     try {
-      const campaignId = await createCampaign(connection, character);
+      const campaignId = await createCampaign(
+        connection,
+        character,
+        Object.keys(settings).length ? settings : undefined
+      );
       await startSession(connection, campaignId);
       onCreated(campaignId);
     } catch (err) {
@@ -187,6 +212,68 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
         <div style={{ fontSize: 10.5, color: "var(--ink-faint)", fontStyle: "italic", marginTop: 8, lineHeight: 1.4 }}>
           Starting at level 1. HP and armour are derived from your class and scores; gear is
           established as your tale opens.
+        </div>
+
+        {/* Issue #48: describe the world at creation, not only later in Settings. */}
+        <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2, color: "var(--brass)", margin: "26px 0 2px" }}>
+          THE WORLD
+        </div>
+        <div style={{ fontSize: 10.5, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 4 }}>
+          Optional — you can change any of this later in Settings.
+        </div>
+
+        <div style={labelStyle}>Setting <span style={{ color: "var(--ink-faint)" }}>— empty keeps standard fantasy</span></div>
+        <input
+          value={worldSetting}
+          onChange={(e) => setWorldSetting(e.target.value)}
+          placeholder="e.g. Outer space, future, sci-fi"
+          data-testid="newchar-setting"
+          style={inputStyle}
+        />
+
+        <div style={labelStyle}>Tone &amp; whimsy</div>
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={toneWhimsy}
+          onChange={(e) => setToneWhimsy(Number(e.target.value))}
+          data-testid="newchar-tone"
+          style={{ width: "100%", accentColor: "var(--ember)" }}
+        />
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--ink-faint)", marginTop: 2 }}>
+          <span>grounded</span>
+          <span>deeply strange</span>
+        </div>
+
+        <div style={labelStyle}>Content intensity</div>
+        <div style={{ display: "flex", gap: 7 }}>
+          {INTENSITY_OPTIONS.map((option) => {
+            const selected = contentIntensity === option.id;
+            return (
+              <button
+                key={option.id}
+                data-testid="newchar-intensity"
+                data-selected={selected}
+                onClick={() => setContentIntensity(option.id)}
+                style={{
+                  flex: 1,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  padding: "11px 13px",
+                  borderRadius: 4,
+                  background: selected ? "rgba(124,61,32,.24)" : "rgba(28,20,12,.5)",
+                  border: `1px solid ${selected ? "rgba(211,112,60,.55)" : "rgba(109,90,56,.32)"}`,
+                }}
+              >
+                <div style={{ fontFamily: "var(--font-display)", fontSize: 13, color: selected ? "#efe6d2" : "var(--ink-dim)" }}>
+                  {option.label}
+                </div>
+                <div style={{ fontSize: 10.5, color: "var(--ink-faint)", marginTop: 3, lineHeight: 1.35 }}>{option.note}</div>
+              </button>
+            );
+          })}
         </div>
 
         <button

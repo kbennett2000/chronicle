@@ -64,20 +64,58 @@ function ChapterHeading({ text }: { text: string }) {
  * while it can't resolve (same graceful-empty contract as the gallery). */
 function MomentImage({ connection, campaignId, filename }: { connection: Connection; campaignId: string; filename: string }) {
   const { url } = useAuthedImage(connection, campaignId, filename);
+  const [expanded, setExpanded] = useState(false);
   if (!url) return null;
   return (
-    <img
-      src={url}
-      alt=""
-      data-testid="moment-image"
-      style={{
-        display: "block",
-        width: "100%",
-        borderRadius: 3,
-        margin: "0 0 16px",
-        boxShadow: "0 6px 16px rgba(0,0,0,.5), 0 0 0 1px rgba(184,150,90,.4)",
-      }}
-    />
+    <>
+      {/* Issue #52: scenes used to render full width with no cap, dominating
+          the screen. Bound the inline size; tap to view full. */}
+      <img
+        src={url}
+        alt=""
+        data-testid="moment-image"
+        onClick={() => setExpanded(true)}
+        style={{
+          display: "block",
+          width: "auto",
+          maxWidth: "100%",
+          maxHeight: 340,
+          borderRadius: 3,
+          margin: "0 0 16px",
+          cursor: "zoom-in",
+          boxShadow: "0 6px 16px rgba(0,0,0,.5), 0 0 0 1px rgba(184,150,90,.4)",
+        }}
+      />
+      {expanded && (
+        <div
+          data-testid="moment-lightbox"
+          onClick={() => setExpanded(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 50,
+            background: "rgba(4,2,1,.9)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+            cursor: "zoom-out",
+            animation: "fadeIn 0.25s ease",
+          }}
+        >
+          <img
+            src={url}
+            alt=""
+            style={{
+              maxWidth: "100%",
+              maxHeight: "100%",
+              borderRadius: 2,
+              boxShadow: "0 20px 50px rgba(0,0,0,.7), 0 0 0 1px rgba(184,150,90,.5)",
+            }}
+          />
+        </div>
+      )}
+    </>
   );
 }
 
@@ -205,6 +243,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   const [worldState, setWorldState] = useState<string>("");
   const [muted, setMuted] = useState(() => loadMuted());
   const logEndRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   // Self/Folk/Quest/Views all read these four fields as props — refreshed
   // after every turn (see handleSend) as well as on mount. A full played
@@ -256,6 +295,49 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ block: "end" });
   }, [turns, sending]);
+
+  // Issue #43: the mute button now controls a real ambient bed. Browsers block
+  // autoplay until a user gesture, so we try immediately (entering Play was
+  // itself a tap, which often counts) and, if that's rejected, arm a one-shot
+  // listener to start on the first interaction. Muting pauses; unmuting (always
+  // a click, so never blocked) resumes.
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    el.volume = 0.32;
+    let armed = false;
+    const start = () => {
+      if (muted || !audioRef.current) return;
+      audioRef.current.play().catch(() => {});
+    };
+    const onGesture = () => {
+      start();
+      disarm();
+    };
+    const disarm = () => {
+      if (!armed) return;
+      armed = false;
+      window.removeEventListener("pointerdown", onGesture);
+      window.removeEventListener("keydown", onGesture);
+    };
+    if (!muted) {
+      el.play().catch(() => {
+        armed = true;
+        window.addEventListener("pointerdown", onGesture);
+        window.addEventListener("keydown", onGesture);
+      });
+    }
+    return disarm;
+    // Mount once; mute changes are handled by the effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (muted) el.pause();
+    else el.play().catch(() => {});
+  }, [muted]);
 
   function toggleMute() {
     setMuted((prev) => {
@@ -339,6 +421,12 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
 
   return (
     <div className="screen leather-ground">
+      {/* Issue #43: the ambient bed the mute button controls. Loops seamlessly
+          (see web/public/audio/README.md); .ogg primary, .mp3 fallback. */}
+      <audio ref={audioRef} loop preload="auto" data-testid="ambient-audio">
+        <source src="/audio/ambient.ogg" type="audio/ogg" />
+        <source src="/audio/ambient.mp3" type="audio/mpeg" />
+      </audio>
       <div style={{ flexShrink: 0, padding: "54px 16px 10px", display: "flex", alignItems: "center", gap: 10 }}>
         <button className="icon-button" onClick={onGoHome}>
           <span className="back-chevron" />

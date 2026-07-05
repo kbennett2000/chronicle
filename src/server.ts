@@ -25,6 +25,7 @@ import {
   readCampaignSettings,
   persistCampaignSettings,
   scaffoldCampaign,
+  deleteCampaign,
   listCampaigns,
   CAMPAIGNS_ROOT,
   CONTENT_INTENSITIES,
@@ -33,7 +34,9 @@ import {
   InvalidCampaignIdError,
   CampaignNotFoundError,
   CampaignExistsError,
+  CampaignProtectedError,
   type ContentIntensity,
+  type CampaignSettings,
 } from "./campaign-store.js";
 import { generateImage } from "./image-generator.js";
 import { buildCharacterSheet, deriveCampaignId, CharacterValidationError } from "./character-gen.js";
@@ -136,7 +139,7 @@ const ROUTES: Array<{
     method: "POST",
     pattern: /^\/campaigns$/,
     async handler(req, res) {
-      const body = (await readJsonBody(req)) as { character?: unknown };
+      const body = (await readJsonBody(req)) as { character?: unknown; settings?: unknown };
       let sheet: Record<string, unknown>;
       try {
         sheet = buildCharacterSheet(body.character as never);
@@ -147,11 +150,57 @@ const ROUTES: Array<{
         }
         throw err;
       }
+
+      // Issue #48: the world can now be described at creation, not only later
+      // in Settings. Same fields and validation as POST /settings; anything
+      // omitted keeps the standard-fantasy defaults.
+      const creation = (body.settings ?? {}) as Record<string, unknown>;
+      const creationSettings: Partial<Omit<CampaignSettings, "model">> = {};
+      if (creation.worldSetting !== undefined) {
+        if (typeof creation.worldSetting !== "string") {
+          sendJson(res, 400, { error: "worldSetting must be a string" });
+          return;
+        }
+        creationSettings.worldSetting = creation.worldSetting;
+      }
+      if (creation.toneWhimsy !== undefined) {
+        if (typeof creation.toneWhimsy !== "number" || creation.toneWhimsy < 0 || creation.toneWhimsy > 1) {
+          sendJson(res, 400, { error: "toneWhimsy must be a number between 0 and 1" });
+          return;
+        }
+        creationSettings.toneWhimsy = creation.toneWhimsy;
+      }
+      if (creation.contentIntensity !== undefined) {
+        if (
+          typeof creation.contentIntensity !== "string" ||
+          !CONTENT_INTENSITIES.includes(creation.contentIntensity as ContentIntensity)
+        ) {
+          sendJson(res, 400, { error: `contentIntensity must be one of ${CONTENT_INTENSITIES.join(", ")}` });
+          return;
+        }
+        creationSettings.contentIntensity = creation.contentIntensity as ContentIntensity;
+      }
+
       const campaignId = deriveCampaignId(String(sheet.name), (id) =>
         fs.existsSync(path.join(CAMPAIGNS_ROOT, id))
       );
-      scaffoldCampaign(campaignId, sheet);
+      const dir = scaffoldCampaign(campaignId, sheet);
+      if (Object.keys(creationSettings).length > 0) {
+        persistCampaignSettings(dir, creationSettings);
+      }
       sendJson(res, 201, { campaignId });
+    },
+  },
+  {
+    // Issue #50: permanently delete a chronicle. deleteCampaign guards the id
+    // (must resolve inside campaigns/) and refuses the tracked fixtures; drop
+    // any in-memory session so a later request can't resurrect it.
+    method: "DELETE",
+    pattern: /^\/campaigns\/([^/]+)$/,
+    async handler(_req, res, [campaignId]) {
+      deleteCampaign(campaignId);
+      activeSessions.delete(campaignId);
+      sendJson(res, 200, { deleted: campaignId });
     },
   },
   {
@@ -287,6 +336,7 @@ const ROUTES: Array<{
         toneWhimsy?: number;
         contentIntensity?: ContentIntensity;
         generateImages?: boolean;
+        autoRollDice?: boolean;
       } = {};
 
       if (body.artStyle !== undefined) {
@@ -328,6 +378,13 @@ const ROUTES: Array<{
           return;
         }
         updates.generateImages = body.generateImages;
+      }
+      if (body.autoRollDice !== undefined) {
+        if (typeof body.autoRollDice !== "boolean") {
+          sendJson(res, 400, { error: "autoRollDice must be a boolean" });
+          return;
+        }
+        updates.autoRollDice = body.autoRollDice;
       }
 
       sendJson(res, 200, persistCampaignSettings(campaignDir, updates));
@@ -486,7 +543,7 @@ function applyCorsHeaders(req: IncomingMessage, res: ServerResponse): void {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
   }
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Chronicle-Token");
   res.setHeader("Access-Control-Max-Age", "600");
 }
@@ -536,6 +593,8 @@ const server = createServer(async (req, res) => {
       sendJson(res, 404, { error: err.message });
     } else if (err instanceof CampaignExistsError) {
       sendJson(res, 409, { error: err.message });
+    } else if (err instanceof CampaignProtectedError) {
+      sendJson(res, 403, { error: err.message });
     } else {
       const message = err instanceof Error ? err.message : String(err);
       sendJson(res, 500, { error: message });

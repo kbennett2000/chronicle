@@ -10,6 +10,13 @@ const CAMPAIGN_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 export class InvalidCampaignIdError extends Error {}
 export class CampaignNotFoundError extends Error {}
 export class CampaignExistsError extends Error {}
+export class CampaignProtectedError extends Error {}
+
+/** Maintained fixtures the delete endpoint refuses to remove, so the app can
+ * never nuke tracked test data (CLAUDE.md test-data hygiene / ADR-0005). The
+ * `_registry` helper dir already fails CAMPAIGN_ID_PATTERN, so only the
+ * deliberately-tracked test-campaign needs naming here. */
+const PROTECTED_CAMPAIGN_IDS = new Set(["test-campaign"]);
 
 /** Resolves a campaign id to its working directory, rejecting anything
  * that isn't a plain directory name directly under CAMPAIGNS_ROOT (no
@@ -26,6 +33,18 @@ export function resolveCampaignDir(campaignId: string): string {
     throw new CampaignNotFoundError(`campaign not found: ${campaignId}`);
   }
   return dir;
+}
+
+/** Issue #50: permanently removes a campaign's directory. resolveCampaignDir
+ * enforces the id is a plain name that exists directly under CAMPAIGNS_ROOT
+ * (no traversal), and the maintained fixtures are refused up front — so a
+ * delete can neither escape campaigns/ nor destroy tracked test data. */
+export function deleteCampaign(campaignId: string): void {
+  if (PROTECTED_CAMPAIGN_IDS.has(campaignId)) {
+    throw new CampaignProtectedError(`campaign '${campaignId}' is protected and cannot be deleted`);
+  }
+  const dir = resolveCampaignDir(campaignId);
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 // The blank state-file templates a new campaign starts from — moved here from
@@ -74,7 +93,7 @@ _(none yet)_
 export function scaffoldCampaign(
   campaignId: string,
   characterSheet: unknown,
-  settings: Record<string, unknown> = { model: DEFAULT_MODEL }
+  settings: Record<string, unknown> = { model: DEFAULT_MODEL, autoRollDice: true }
 ): string {
   if (!CAMPAIGN_ID_PATTERN.test(campaignId)) {
     throw new InvalidCampaignIdError(`invalid campaign id: ${campaignId}`);
@@ -122,6 +141,34 @@ function currentSituation(worldStateMd: string): string {
   const text = body.join(" ").replace(/\s+/g, " ").trim();
   if (!text || /^_\(.*\)_$/.test(text)) return "";
   return text;
+}
+
+export interface CharacterIdentity {
+  name: string;
+  race: string;
+  class: string;
+}
+
+/** The player character's name/race/class straight off character-sheet.json,
+ * for the DM system prompt (issues #51/#48 — the prompt used to hardcode
+ * "Kira Emberfall", so every other campaign was addressed by the wrong name
+ * and the model would drift into "this isn't my campaign" refusals). Falls
+ * back to a neutral identity if the sheet is missing/unreadable rather than
+ * throwing — a turn must still run. */
+export function readCharacterIdentity(campaignDir: string): CharacterIdentity {
+  const fallback: CharacterIdentity = { name: "the player character", race: "", class: "" };
+  const sheetPath = path.join(campaignDir, "character-sheet.json");
+  if (!fs.existsSync(sheetPath)) return fallback;
+  try {
+    const sheet = JSON.parse(fs.readFileSync(sheetPath, "utf8")) as Record<string, unknown>;
+    return {
+      name: typeof sheet.name === "string" && sheet.name.trim() ? sheet.name.trim() : fallback.name,
+      race: typeof sheet.race === "string" ? sheet.race : "",
+      class: typeof sheet.class === "string" ? sheet.class : "",
+    };
+  } catch {
+    return fallback;
+  }
 }
 
 /** Every campaign under CAMPAIGNS_ROOT (skipping the _registry helper dir and
@@ -234,6 +281,10 @@ export interface CampaignSettings {
    * depends on Grok Build/SuperGrok access being configured on the host —
    * opt-in, never assumed. */
   generateImages?: boolean;
+  /** Issue #44: when on (the default — treat absent as ON), the engine rolls
+   * dice itself via the roll_dice tool and narrates the result. When
+   * explicitly false, it reverts to asking the player to supply the value. */
+  autoRollDice?: boolean;
 }
 
 export function readCampaignSettings(campaignDir: string): CampaignSettings {
@@ -256,6 +307,9 @@ export function readCampaignSettings(campaignDir: string): CampaignSettings {
   }
   if (typeof raw.generateImages === "boolean") {
     settings.generateImages = raw.generateImages;
+  }
+  if (typeof raw.autoRollDice === "boolean") {
+    settings.autoRollDice = raw.autoRollDice;
   }
   return settings;
 }
@@ -298,11 +352,32 @@ export function startSessionLog(campaignDir: string): string {
 
 function latestSessionLogPath(campaignDir: string): string | undefined {
   const dir = path.join(campaignDir, "session-log");
+  if (!fs.existsSync(dir)) return undefined;
   const files = fs
     .readdirSync(dir)
     .filter((f) => f.endsWith(".md"))
     .sort();
   return files.length > 0 ? `session-log/${files[files.length - 1]}` : undefined;
+}
+
+/** Most recent session log that actually holds turns (a non-empty
+ * .transcript.jsonl), or undefined if none do yet. Resume and the /state
+ * fallback both want "the log holding the story," not merely the newest .md:
+ * a stray empty log from an earlier session/start would otherwise shadow the
+ * real one and surface as "the tale hasn't begun" even for a campaign with
+ * rich history (issue #49). */
+function latestSessionLogWithTurns(campaignDir: string): string | undefined {
+  const dir = path.join(campaignDir, "session-log");
+  if (!fs.existsSync(dir)) return undefined;
+  const files = fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith(".md"))
+    .sort();
+  for (let i = files.length - 1; i >= 0; i--) {
+    const rel = `session-log/${files[i]}`;
+    if (readTurnTranscript(campaignDir, rel).length > 0) return rel;
+  }
+  return undefined;
 }
 
 /** One log file per session-log/§3's actual "session," not per API call:
@@ -314,8 +389,19 @@ function latestSessionLogPath(campaignDir: string): string | undefined {
  * from earlier in the resumed conversation, not the newest one. */
 export function resolveSessionLog(campaignDir: string, resuming: boolean): string {
   if (resuming) {
+    // Continue the existing story: append to the log that actually holds
+    // turns, not merely the newest .md — a stray empty log from an earlier
+    // start would otherwise become the "current" log and hide the history (#49).
+    const withTurns = latestSessionLogWithTurns(campaignDir);
+    if (withTurns) return withTurns;
     const existing = latestSessionLogPath(campaignDir);
     if (existing) return existing;
+  } else {
+    // Starting fresh: if the newest log is still empty (a prior session/start
+    // that never took a turn), reuse it rather than piling up another empty
+    // file — the empty-.md accumulation seen in real campaign data (#49).
+    const existing = latestSessionLogPath(campaignDir);
+    if (existing && readTurnTranscript(campaignDir, existing).length === 0) return existing;
   }
   return startSessionLog(campaignDir);
 }
@@ -558,13 +644,21 @@ export function readStateSnapshot(
     model: readCampaignModel(campaignDir),
   };
 
-  if (currentSessionLogRelPath) {
-    const abs = path.join(campaignDir, currentSessionLogRelPath);
+  // Prefer the caller's active session log, but fall back to the latest log
+  // that has turns when there's no active session (server restart / deep link
+  // into Play) or when the active log is still empty — otherwise a resumed
+  // campaign with real history renders as "the tale hasn't begun" (#49).
+  let logRel = currentSessionLogRelPath;
+  if (!logRel || readTurnTranscript(campaignDir, logRel).length === 0) {
+    logRel = latestSessionLogWithTurns(campaignDir) ?? logRel;
+  }
+  if (logRel) {
+    const abs = path.join(campaignDir, logRel);
     if (fs.existsSync(abs)) {
       snapshot.currentSessionLog = {
-        path: currentSessionLogRelPath,
+        path: logRel,
         content: fs.readFileSync(abs, "utf8"),
-        transcript: readTurnTranscript(campaignDir, currentSessionLogRelPath),
+        transcript: readTurnTranscript(campaignDir, logRel),
       };
     }
   }

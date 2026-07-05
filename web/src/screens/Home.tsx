@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ConnectionStatus } from "../lib/api";
 import type { Connection } from "../lib/connection";
-import { getState, listCampaigns, startSession, type CampaignSummary, type StateSnapshot } from "../lib/campaign";
+import { getState, listCampaigns, startSession, deleteCampaign, type CampaignSummary, type StateSnapshot } from "../lib/campaign";
 import { findMarkdownSection } from "../lib/markdown";
 import { CURRENT_SITUATION_HEADING } from "../lib/state-headings";
 
@@ -12,6 +12,9 @@ interface HomeProps {
   onContinue: () => void;
   /** Switch the active campaign to `id` and enter Play (ADR-0010). */
   onEnterCampaign: (id: string) => void;
+  /** Switch the active campaign to `id` but stay on Home — used after deleting
+   * the currently-active chronicle (issue #50). */
+  onSwitchCampaign: (id: string) => void;
   onNewChronicle: () => void;
   onOpenSettings: () => void;
 }
@@ -24,6 +27,7 @@ export function Home({
   connectionStatus,
   onContinue,
   onEnterCampaign,
+  onSwitchCampaign,
   onNewChronicle,
   onOpenSettings,
 }: HomeProps) {
@@ -32,6 +36,9 @@ export function Home({
   const [startError, setStartError] = useState<string | null>(null);
   const [others, setOthers] = useState<CampaignSummary[]>([]);
   const [enteringId, setEnteringId] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +91,32 @@ export function Home({
       setStartError(err instanceof Error ? err.message : String(err));
     } finally {
       setStarting(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!confirmDelete || deleting) return;
+    const { id } = confirmDelete;
+    const wasActive = id === campaignId;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteCampaign(connection, id);
+      const remaining = await listCampaigns(connection).catch(() => [] as CampaignSummary[]);
+      setConfirmDelete(null);
+      if (wasActive) {
+        // The primary card's campaign is gone — rebind to another chronicle if
+        // one remains, otherwise send the player to create a fresh one.
+        const next = remaining.find((c) => c.id !== id);
+        if (next) onSwitchCampaign(next.id);
+        else onNewChronicle();
+      } else {
+        setOthers(remaining.filter((c) => c.id !== campaignId));
+      }
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -170,6 +203,17 @@ export function Home({
                       {load.snapshot.characterSheet.level}
                     </div>
                   </div>
+                  <button
+                    data-testid="delete-active-chronicle"
+                    aria-label={`Delete ${load.snapshot.characterSheet.name}`}
+                    onClick={() => {
+                      setDeleteError(null);
+                      setConfirmDelete({ id: campaignId, name: String(load.snapshot.characterSheet.name) });
+                    }}
+                    style={{ ...trashButtonStyle, marginLeft: "auto" }}
+                  >
+                    <TrashIcon />
+                  </button>
                 </div>
                 <div style={{ marginTop: 11, paddingTop: 11, borderTop: "1px solid rgba(109,90,56,.32)" }}>
                   <div style={{ fontFamily: "var(--font-display)", fontSize: 10, letterSpacing: 1.5, color: "var(--arcane)", opacity: 0.9 }}>
@@ -249,31 +293,43 @@ export function Home({
               OTHER CHRONICLES
             </div>
             {others.map((c) => (
-              <button
-                key={c.id}
-                data-testid="other-chronicle"
-                onClick={() => handleEnter(c.id)}
-                disabled={enteringId !== null}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  textAlign: "left",
-                  cursor: enteringId !== null ? "default" : "pointer",
-                  opacity: enteringId !== null && enteringId !== c.id ? 0.6 : 1,
-                  marginBottom: 7,
-                  padding: "11px 14px",
-                  borderRadius: 4,
-                  background: "rgba(28,20,12,.5)",
-                  border: "1px solid rgba(109,90,56,.32)",
-                }}
-              >
-                <div style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>
-                  {c.name || c.id}
-                </div>
-                <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 1 }}>
-                  {enteringId === c.id ? "Entering…" : `${c.race} ${c.class} · Level ${c.level}`}
-                </div>
-              </button>
+              <div key={c.id} style={{ display: "flex", gap: 7, marginBottom: 7 }}>
+                <button
+                  data-testid="other-chronicle"
+                  onClick={() => handleEnter(c.id)}
+                  disabled={enteringId !== null}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    textAlign: "left",
+                    cursor: enteringId !== null ? "default" : "pointer",
+                    opacity: enteringId !== null && enteringId !== c.id ? 0.6 : 1,
+                    padding: "11px 14px",
+                    borderRadius: 4,
+                    background: "rgba(28,20,12,.5)",
+                    border: "1px solid rgba(109,90,56,.32)",
+                  }}
+                >
+                  <div style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>
+                    {c.name || c.id}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 1 }}>
+                    {enteringId === c.id ? "Entering…" : `${c.race} ${c.class} · Level ${c.level}`}
+                  </div>
+                </button>
+                <button
+                  data-testid="delete-chronicle"
+                  aria-label={`Delete ${c.name || c.id}`}
+                  onClick={() => {
+                    setDeleteError(null);
+                    setConfirmDelete({ id: c.id, name: c.name || c.id });
+                  }}
+                  disabled={enteringId !== null}
+                  style={trashButtonStyle}
+                >
+                  <TrashIcon />
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -337,6 +393,132 @@ export function Home({
           SETTINGS
         </button>
       </div>
+
+      {confirmDelete && (
+        <div
+          data-testid="delete-confirm"
+          onClick={() => {
+            if (!deleting) setConfirmDelete(null);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 60,
+            background: "rgba(4,2,1,.82)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+            animation: "fadeIn 0.2s ease",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 360,
+              borderRadius: 6,
+              padding: 22,
+              background: "linear-gradient(180deg,#231810,#1a1109)",
+              border: "1px solid rgba(184,150,90,.4)",
+              boxShadow: "0 20px 50px rgba(0,0,0,.7)",
+            }}
+          >
+            <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16, letterSpacing: 0.6, color: "var(--ink)" }}>
+              Delete this chronicle?
+            </div>
+            <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--ink-dim)", marginTop: 8 }}>
+              <b style={{ color: "var(--ink)" }}>{confirmDelete.name}</b> will be gone forever — the
+              character, world, and every session. This cannot be undone.
+            </div>
+            {deleteError && (
+              <div data-testid="delete-error" style={{ fontSize: 12, color: "var(--ember)", marginTop: 10 }}>
+                {deleteError}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+              <button
+                data-testid="delete-cancel"
+                onClick={() => {
+                  setConfirmDelete(null);
+                  setDeleteError(null);
+                }}
+                disabled={deleting}
+                style={{
+                  flex: 1,
+                  cursor: deleting ? "default" : "pointer",
+                  padding: 11,
+                  borderRadius: 3,
+                  background: "rgba(28,20,12,.6)",
+                  border: "1px solid var(--brass-dim)",
+                  color: "var(--ink-dim)",
+                  fontFamily: "var(--font-display)",
+                  fontSize: 12.5,
+                  letterSpacing: 1,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                data-testid="delete-confirm-button"
+                onClick={handleDelete}
+                disabled={deleting}
+                style={{
+                  flex: 1,
+                  cursor: deleting ? "default" : "pointer",
+                  opacity: deleting ? 0.7 : 1,
+                  padding: 11,
+                  borderRadius: 3,
+                  background: "linear-gradient(180deg,#a83535,#7c2020)",
+                  border: "none",
+                  color: "#faf0e2",
+                  fontFamily: "var(--font-display)",
+                  fontWeight: 700,
+                  fontSize: 12.5,
+                  letterSpacing: 1,
+                }}
+              >
+                {deleting ? "Deleting…" : "Delete forever"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+function TrashIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 6h18" />
+      <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
+const trashButtonStyle = {
+  flexShrink: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: 34,
+  padding: "0 10px",
+  borderRadius: 4,
+  cursor: "pointer",
+  background: "rgba(28,20,12,.5)",
+  border: "1px solid rgba(109,90,56,.32)",
+  color: "var(--ink-faint)",
+} as const;

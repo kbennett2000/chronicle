@@ -82,6 +82,9 @@ export interface CampaignSettings {
   toneWhimsy?: number;
   contentIntensity?: "standard" | "low";
   generateImages?: boolean;
+  /** Issue #44: absent === on. When explicitly false, the player supplies
+   * their own dice values instead of the engine rolling. */
+  autoRollDice?: boolean;
 }
 
 export type CampaignSettingsPatch = Partial<Omit<CampaignSettings, "model">>;
@@ -133,14 +136,33 @@ export interface CharacterCreationInput {
   abilityScores: Record<"strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma", number>;
 }
 
+/** Optional world/tone fields the player can set at creation time (issue #48).
+ * Omitted fields keep the standard-fantasy defaults and stay editable later in
+ * Settings. */
+export interface CampaignCreationSettings {
+  worldSetting?: string;
+  toneWhimsy?: number;
+  contentIntensity?: "standard" | "low";
+}
+
 /** Creates a new campaign from a character-creation form (ADR-0010); the
  * server derives the authoritative sheet and returns the new campaign id. */
-export async function createCampaign(connection: Connection, character: CharacterCreationInput): Promise<string> {
+export async function createCampaign(
+  connection: Connection,
+  character: CharacterCreationInput,
+  settings?: CampaignCreationSettings
+): Promise<string> {
   const result = (await apiFetch(connection, "/campaigns", {
     method: "POST",
-    body: JSON.stringify({ character }),
+    body: JSON.stringify(settings ? { character, settings } : { character }),
   })) as { campaignId: string };
   return result.campaignId;
+}
+
+/** Permanently deletes a chronicle (issue #50). The server refuses the tracked
+ * test fixture with a 403, which surfaces here as a thrown error. */
+export async function deleteCampaign(connection: Connection, campaignId: string): Promise<void> {
+  await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}`, { method: "DELETE" });
 }
 
 export async function getState(connection: Connection, campaignId: string): Promise<StateSnapshot> {
