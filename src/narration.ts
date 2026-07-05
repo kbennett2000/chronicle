@@ -19,9 +19,13 @@ const BACKSTAGE_SIGNAL =
 
 const META_PATTERNS: RegExp[] = [
   // "Let me / I'll / I need to — update|record|save|write|log ... state|files|sheet|roster|quest log|inventory ..."
-  /\b(?:let me|i['’]ll|i will|i need to|now,?\s*(?:let me|i['’]ll)|first,?\s*let me)\b[^.!?\n]*?\b(?:update|record|save|writ(?:e|ing)|log|jot|note)\b[^.!?\n]*?\b(?:state|files?|character[-\s]?sheet|the sheet|world[-\s]?state|quest[-\s]?log|npc[-\s]?roster|inventory|hp)\b[^.!?\n]*?[.!?:]/gi,
+  /\b(?:let me|i['’]ll|i will|i need to|now,?\s*(?:let me|i['’]ll)|first,?\s*let me)\b[^.!?\n]*?\b(?:update|record|save|writ(?:e|ing)|log|jot|note)\b[^.!?\n]*?\b(?:state|files?|character[-\s]?sheet|the sheet|world[-\s]?state|quest[-\s]?log|session[-\s]?log|npc[-\s]?roster|inventory|hp)\b[^.!?\n]*?[.!?:]/gi,
   // Bare gerund bookkeeping: "Updating the character sheet now." / "Saving state."
-  /\b(?:updating|saving|recording|writing|logging)\b[^.!?\n]*?\b(?:state|files?|character[-\s]?sheet|the sheet|world[-\s]?state|quest[-\s]?log|npc[-\s]?roster)\b[^.!?\n]*?[.!?:]/gi,
+  /\b(?:updating|saving|recording|writing|logging)\b[^.!?\n]*?\b(?:state|files?|character[-\s]?sheet|the sheet|world[-\s]?state|quest[-\s]?log|session[-\s]?log|npc[-\s]?roster)\b[^.!?\n]*?[.!?:]/gi,
+  // Past-tense / asterisk-wrapped bookkeeping the model emits AFTER writing state
+  // (issue #62): "*Updated session log with this turn's action.*", "Recorded this
+  // turn's action.". Strips any surrounding markdown emphasis too.
+  /\*{0,2}\s*\b(?:updated?|saved|recorded|logged|wrote|noted|jotted)\b[^.!?\n]*?\b(?:session[-\s]?log|turn['’]s action|the log|state[-\s]?files?|world[-\s]?state|character[-\s]?sheet)\b[^.!?\n]*?[.!?]\s*\*{0,2}/gi,
   // Segues back into fiction.
   /\b(?:now\s+)?back to (?:the )?(?:story|action|game|narration|scene)\b[.!?:]?/gi,
   // Campaign-directory / tool-access / initialization meta (issue #46 extension).

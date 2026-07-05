@@ -10,6 +10,7 @@ import {
   type ModelOption,
 } from "../lib/campaign";
 import { savePreferredModel } from "../lib/modelPref";
+import { saveLookPref, type LookPrefs } from "../lib/lookPrefs";
 
 interface SettingsProps {
   onBack: () => void;
@@ -142,6 +143,21 @@ export function Settings({
       const next = await updateCampaignSettings(connection, campaignId, patch);
       setSettings(next);
       setState("saved");
+      // Issue #60: remember these look/play choices so the next NEW game
+      // defaults to them instead of reverting to images-off. Same pattern as
+      // savePreferredModel (#57). Only the keys we persist as new-game defaults.
+      const REMEMBERED: (keyof LookPrefs)[] = [
+        "generateImages",
+        "autoIllustrateTurns",
+        "artStyle",
+        "autoRollDice",
+        "contentIntensity",
+      ];
+      for (const key of REMEMBERED) {
+        if (key in patch && patch[key] !== undefined) {
+          saveLookPref(key, patch[key] as LookPrefs[typeof key]);
+        }
+      }
     } catch {
       setState("error");
     }
