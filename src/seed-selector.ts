@@ -34,7 +34,7 @@ function registryPathFor(campaignDir?: string): { dir: string; path: string } {
  * ADR-0004's toneWhimsy setting (see createSeedMcpServer below) — the env
  * var is the process-wide default; toneWhimsy is a per-campaign override
  * on top of it. */
-const WILDCARD_CHANCE = process.env.SEED_WILDCARD_CHANCE
+export const WILDCARD_CHANCE = process.env.SEED_WILDCARD_CHANCE
   ? Number(process.env.SEED_WILDCARD_CHANCE)
   : 0.175;
 
@@ -153,7 +153,7 @@ function logEntry(category: SeedCategory, value: string, campaignDir?: string): 
   fs.writeFileSync(registryPathFor(campaignDir).path, serializeRegistry(registry));
 }
 
-function pickUnused(options: string[], used: Set<string>): { value: string; exhausted: boolean } {
+export function pickUnused(options: string[], used: Set<string>): { value: string; exhausted: boolean } {
   const remaining = options.filter((o) => !used.has(o));
   if (remaining.length > 0) {
     return { value: remaining[Math.floor(Math.random() * remaining.length)], exhausted: false };
@@ -165,7 +165,7 @@ function pickUnused(options: string[], used: Set<string>): { value: string; exha
  * from the wildcard pool at WILDCARD_CHANCE, otherwise the conventional
  * pool. Dedup is checked against the full registry set regardless of which
  * pool a value came from — the registry doesn't distinguish origin. */
-function pickWithWildcard(
+export function pickWithWildcard(
   conventional: string[],
   wildcard: string[],
   used: Set<string>,

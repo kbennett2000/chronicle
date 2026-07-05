@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { createSeedMcpServer, SEED_TOOL_NAME } from "./seed-selector.js";
+import { createTextureMcpServer, TEXTURE_TOOL_NAME } from "./texture-selector.js";
 import { createImageMcpServer, GENERATE_IMAGE_TOOL_NAME } from "./image-generator.js";
 import type { CampaignSettings } from "./campaign-store.js";
 
@@ -136,6 +137,16 @@ Every turn:
     Dice/HP/death-save tally/Exhaustion level to character-sheet.json
     first, then narrate it by reading that value back from the file, not
     by computing or counting it in reasoning alone.
+15. Beyond NPCs/locations/quests (rule 10), texture beats — travel events,
+    rumors, encounter twists, emotional beats, surreal moments — are
+    available via the ${TEXTURE_TOOL_NAME} tool. Unlike rule 10, these are
+    judgment calls, not mandatory-on-creation: call it only when you
+    genuinely judge the moment fits (a travel stretch, a social/downtime
+    scene, a fresh encounter, a moment that earns emotional weight, or
+    sparingly for a surreal beat) — never on a fixed cadence, and never on
+    every travel/social/combat scene, or it will read as mechanical rather
+    than alive. Elaborate what it returns in your own words; never quote
+    its wording directly.
 
 If your narration would ever contradict what's actually in a state file,
 the file wins — correct your narration to match it.`;
@@ -206,6 +217,7 @@ export async function runTurn(
     // cwd, so they need their own read grant alongside the cwd-scoped one.
     `Read(${SRD_DIR}/**)`,
     SEED_TOOL_NAME,
+    TEXTURE_TOOL_NAME,
   ];
   // Per Slice 9: the image-generation tool is a host capability like the
   // seed-tables tool (shells out to Grok Build, outside the model's own
@@ -214,6 +226,7 @@ export async function runTurn(
   // Build/SuperGrok access being configured on the host.
   const mcpServers: Record<string, unknown> = {
     "seed-tables": createSeedMcpServer(settings.toneWhimsy, campaignDir),
+    "texture-tables": createTextureMcpServer(campaignDir, settings.toneWhimsy),
   };
   if (settings.generateImages) {
     allowedTools.push(GENERATE_IMAGE_TOOL_NAME);
