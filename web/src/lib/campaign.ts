@@ -159,6 +159,12 @@ export async function createCampaign(
   return result.campaignId;
 }
 
+/** Permanently deletes a chronicle (issue #50). The server refuses the tracked
+ * test fixture with a 403, which surfaces here as a thrown error. */
+export async function deleteCampaign(connection: Connection, campaignId: string): Promise<void> {
+  await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}`, { method: "DELETE" });
+}
+
 export async function getState(connection: Connection, campaignId: string): Promise<StateSnapshot> {
   return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/state`)) as StateSnapshot;
 }

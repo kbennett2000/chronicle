@@ -25,6 +25,7 @@ import {
   readCampaignSettings,
   persistCampaignSettings,
   scaffoldCampaign,
+  deleteCampaign,
   listCampaigns,
   CAMPAIGNS_ROOT,
   CONTENT_INTENSITIES,
@@ -33,6 +34,7 @@ import {
   InvalidCampaignIdError,
   CampaignNotFoundError,
   CampaignExistsError,
+  CampaignProtectedError,
   type ContentIntensity,
   type CampaignSettings,
 } from "./campaign-store.js";
@@ -187,6 +189,18 @@ const ROUTES: Array<{
         persistCampaignSettings(dir, creationSettings);
       }
       sendJson(res, 201, { campaignId });
+    },
+  },
+  {
+    // Issue #50: permanently delete a chronicle. deleteCampaign guards the id
+    // (must resolve inside campaigns/) and refuses the tracked fixtures; drop
+    // any in-memory session so a later request can't resurrect it.
+    method: "DELETE",
+    pattern: /^\/campaigns\/([^/]+)$/,
+    async handler(_req, res, [campaignId]) {
+      deleteCampaign(campaignId);
+      activeSessions.delete(campaignId);
+      sendJson(res, 200, { deleted: campaignId });
     },
   },
   {
@@ -529,7 +543,7 @@ function applyCorsHeaders(req: IncomingMessage, res: ServerResponse): void {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
   }
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Chronicle-Token");
   res.setHeader("Access-Control-Max-Age", "600");
 }
@@ -579,6 +593,8 @@ const server = createServer(async (req, res) => {
       sendJson(res, 404, { error: err.message });
     } else if (err instanceof CampaignExistsError) {
       sendJson(res, 409, { error: err.message });
+    } else if (err instanceof CampaignProtectedError) {
+      sendJson(res, 403, { error: err.message });
     } else {
       const message = err instanceof Error ? err.message : String(err);
       sendJson(res, 500, { error: message });

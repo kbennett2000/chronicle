@@ -10,6 +10,13 @@ const CAMPAIGN_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 export class InvalidCampaignIdError extends Error {}
 export class CampaignNotFoundError extends Error {}
 export class CampaignExistsError extends Error {}
+export class CampaignProtectedError extends Error {}
+
+/** Maintained fixtures the delete endpoint refuses to remove, so the app can
+ * never nuke tracked test data (CLAUDE.md test-data hygiene / ADR-0005). The
+ * `_registry` helper dir already fails CAMPAIGN_ID_PATTERN, so only the
+ * deliberately-tracked test-campaign needs naming here. */
+const PROTECTED_CAMPAIGN_IDS = new Set(["test-campaign"]);
 
 /** Resolves a campaign id to its working directory, rejecting anything
  * that isn't a plain directory name directly under CAMPAIGNS_ROOT (no
@@ -26,6 +33,18 @@ export function resolveCampaignDir(campaignId: string): string {
     throw new CampaignNotFoundError(`campaign not found: ${campaignId}`);
   }
   return dir;
+}
+
+/** Issue #50: permanently removes a campaign's directory. resolveCampaignDir
+ * enforces the id is a plain name that exists directly under CAMPAIGNS_ROOT
+ * (no traversal), and the maintained fixtures are refused up front — so a
+ * delete can neither escape campaigns/ nor destroy tracked test data. */
+export function deleteCampaign(campaignId: string): void {
+  if (PROTECTED_CAMPAIGN_IDS.has(campaignId)) {
+    throw new CampaignProtectedError(`campaign '${campaignId}' is protected and cannot be deleted`);
+  }
+  const dir = resolveCampaignDir(campaignId);
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 // The blank state-file templates a new campaign starts from — moved here from

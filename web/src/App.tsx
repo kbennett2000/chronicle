@@ -98,6 +98,7 @@ export function App() {
             setCampaignId(id);
             setScreen("play");
           }}
+          onSwitchCampaign={(id) => setCampaignId(id)}
           onNewChronicle={() => setScreen("newcharacter")}
           onOpenSettings={() => setScreen("settings")}
         />
