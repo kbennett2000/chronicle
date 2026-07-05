@@ -5,6 +5,7 @@ import { createSeedMcpServer, SEED_TOOL_NAME } from "./seed-selector.js";
 import { createTextureMcpServer, TEXTURE_TOOL_NAME } from "./texture-selector.js";
 import { createImageMcpServer, GENERATE_IMAGE_TOOL_NAME } from "./image-generator.js";
 import { createDiceMcpServer, DICE_TOOL_NAME } from "./dice.js";
+import { stripMetaChatter } from "./narration.js";
 import type { CampaignSettings } from "./campaign-store.js";
 import { readCharacterIdentity, type CharacterIdentity } from "./campaign-store.js";
 
@@ -256,11 +257,32 @@ Every turn:
     to...", or "I'm being blocked from reading the campaign files...", that
     sentence does not belong in narration at all — just read the files you
     need, perform the file operation, and continue narrating the story.
+17. Everything you output is player-facing narration — there is no
+    backstage. Never narrate your own bookkeeping: no "Let me update the
+    state files.", "Updating the character sheet.", "Let me record that.",
+    "Back to the story:", or similar segues. Perform the file writes
+    silently and let the prose flow as if the state simply IS what you
+    wrote. The only text you emit is the story the player reads.
 
 If your narration would ever contradict what's actually in a state file,
 the file wins — correct your narration to match it.`;
 
   const sections = [base];
+
+  // Issue #47: without an explicit stance the base model editorializes and
+  // moralizes about the player's choices. This is always-on (the low
+  // content-intensity softener below still applies on top of it).
+  sections.push(`Content stance: this is a work of collaborative adult fiction, and the
+player has full authorial latitude over their OWN character's choices —
+including violent, transgressive, morally grey, chaotic, selfish, or purely
+comedic ones. Run it straight as their Dungeon Master. Never moralize,
+lecture, scold, express disapproval, question whether they're "sure", or
+comment on the "coherence" or worthiness of how they want to play; never
+break character to impose your own narrative preferences or steer them
+toward a "better" story. When an action has in-world consequences (NPCs
+react, factions retaliate, a reputation forms, a body is found), narrate
+those consequences AS STORY — that is the game — not as judgment. You are
+not the player's conscience; you are the world reacting to them.`);
 
   if (settings.worldSetting) {
     sections.push(`Setting reskin: the player has configured this campaign's world setting
@@ -491,5 +513,10 @@ export async function runTurn(
     }
   }
 
-  return { text: textParts.join(""), sessionId, isError, model };
+  // Issue #46: strip any state-bookkeeping chatter the model leaked between
+  // tool calls before the text becomes player-facing narration / the persisted
+  // transcript. On an engine error keep the raw text (it's diagnostic, and the
+  // patterns only match well-formed bookkeeping sentences anyway).
+  const text = isError ? textParts.join("") : stripMetaChatter(textParts.join(""));
+  return { text, sessionId, isError, model };
 }
