@@ -128,6 +128,7 @@ character, faction, location, and object the setting calls for — reskin
 the property's *feel*, not its specific copyrighted content.`;
 
 function systemPrompt(
+  campaignDir: string,
   sessionLogPath: string,
   settings: CampaignSettings,
   character: CharacterIdentity
@@ -137,12 +138,25 @@ function systemPrompt(
   // to just the name rather than emitting a dangling "a  " descriptor.
   const descriptor = [character.race, character.class].filter(Boolean).join(" ").trim();
   const who = descriptor ? `${character.name}, a ${descriptor}` : character.name;
+  // Issue #63: address every state file by its ABSOLUTE path. The Agent SDK
+  // reports the enclosing git repo root — not our `cwd: campaignDir` — as the
+  // model's working directory, so a bare filename like "character-sheet.json"
+  // gets resolved against the repo root and denied by the permission gate as
+  // out-of-tree. Weaker models then break character to complain that their
+  // "file read is restricted" instead of retrying. Giving the absolute path
+  // (as the session-log line already does, which always read fine) removes the
+  // guess entirely. decidePermission allows any campaign-dir path, absolute or
+  // relative, so this is purely about telling the model WHERE the files are.
+  const stateFilePaths = STATE_FILES.map((f) => path.join(campaignDir, f));
   const base = `You are the Dungeon Master for a solo Dungeons & Dragons 5th Edition
-campaign for the player character ${who}. The working directory
-contains the campaign's persistent state as plain files — this is the
-source of truth, not your conversation memory.
+campaign for the player character ${who}. This campaign's persistent state
+lives as plain files in the campaign directory ${campaignDir} — this is the
+source of truth, not your conversation memory. Always read and write these
+files by their full absolute paths below; do NOT assume they are in your
+shell's current working directory.
 
-State files: ${STATE_FILES.join(", ")}
+State files:
+${stateFilePaths.map((p) => `- ${p}`).join("\n")}
 Current session log file (append-only): ${sessionLogPath}
 
 Every turn:
@@ -457,7 +471,7 @@ export async function runTurn(
     allowedTools,
     disallowedTools: ["Bash"],
     permissionMode: "dontAsk",
-    systemPrompt: systemPrompt(sessionLogPath, settings, character),
+    systemPrompt: systemPrompt(campaignDir, sessionLogPath, settings, character),
     // Per ADR-0004: a fresh MCP server per turn so this campaign's toneWhimsy
     // (if set) overrides the wildcard chance without touching shared state
     // another campaign's in-flight turn might be reading.
