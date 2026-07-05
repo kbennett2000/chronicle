@@ -208,6 +208,57 @@ function TurnView({
   );
 }
 
+/** Issue #59: a brand-new game's opening scene is a full DM turn that can take
+ * many seconds. The old tiny top-left "setting the scene…" line on an otherwise
+ * empty parchment left players unsure anything was happening. This is a
+ * prominent, centered, reassuring state used only for the turn-zero opening. */
+function OpeningSceneLoader() {
+  return (
+    <div
+      data-testid="opening-loader"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        textAlign: "center",
+        minHeight: "60vh",
+        gap: 18,
+        padding: "0 24px",
+      }}
+    >
+      <div
+        style={{
+          width: 22,
+          height: 32,
+          background: "var(--ember)",
+          borderRadius: "50% 50% 50% 0",
+          transform: "rotate(-45deg)",
+          animation: "flicker 2.2s ease-in-out infinite",
+          boxShadow: "0 0 26px 6px rgba(211,112,60,.35)",
+        }}
+      />
+      <div
+        style={{
+          fontFamily: "var(--font-display)",
+          fontSize: 17,
+          letterSpacing: 1,
+          color: "var(--ink)",
+        }}
+      >
+        Weaving the opening of your tale
+        <span style={{ animation: "dotPulse 1.4s infinite" }}>.</span>
+        <span style={{ animation: "dotPulse 1.4s infinite .2s" }}>.</span>
+        <span style={{ animation: "dotPulse 1.4s infinite .4s" }}>.</span>
+      </div>
+      <div style={{ fontSize: 13, fontStyle: "italic", color: "var(--ink-faint)", maxWidth: 340, lineHeight: 1.5 }}>
+        The Dungeon Master is setting the scene. This can take a moment as your
+        world takes shape — no need to do anything yet.
+      </div>
+    </div>
+  );
+}
+
 function WeavingIndicator({ label = "The Dungeon Master is weaving what happens next" }: { label?: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 11, margin: "2px 0 10px", opacity: 0.92 }}>
@@ -570,9 +621,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
           {load.status === "ready" && chapters.map((text, i) => <ChapterHeading key={i} text={text} />)}
           {/* ADR-0013: a zero-turn campaign is either having its opening scene
               woven now, or the opening failed and the player begins manually. */}
-          {load.status === "ready" && turns.length === 0 && !openingError && (
-            <WeavingIndicator label="The Dungeon Master is setting the scene" />
-          )}
+          {load.status === "ready" && turns.length === 0 && !openingError && <OpeningSceneLoader />}
           {load.status === "ready" && turns.length === 0 && openingError && (
             <p
               data-testid="opening-error"

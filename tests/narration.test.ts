@@ -54,3 +54,16 @@ test("strips directory and tool-access meta without a divider", () => {
     "I'm restricted to the active campaign's own directory. The DM tools are not available through direct tool calls. The corridor is dark ahead.";
   assert.equal(stripMetaChatter(raw), "The corridor is dark ahead.");
 });
+
+test("keeps the player-facing roll request when auto-roll is OFF (#44)", () => {
+  // With auto-roll off the DM asks the player to roll — that phrasing must NOT
+  // be stripped, or the player never gets asked for their value.
+  const raw = "The guard's eyes narrow. I'll have you roll for a Stealth check. Tell me the total.";
+  assert.equal(stripMetaChatter(raw, { autoRoll: false }), raw);
+  // But with auto-roll on (default), the same "I'll roll for stealth" backstage
+  // chatter is still scrubbed.
+  assert.equal(
+    stripMetaChatter("I'll roll for Stealth now. You slip into the shadows."),
+    "You slip into the shadows."
+  );
+});

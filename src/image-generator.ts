@@ -159,13 +159,15 @@ export async function generateImage(
         "--output-format",
         "json",
         // Issue #58: `/imagine` is a single-purpose call — the agent just needs
-        // to invoke the image tool once. All the agentic scaffolding around it
-        // (deep reasoning, plan mode, web search, subagents) is pure latency
-        // here and none of it affects the generated image, so switch it off to
-        // cut the per-image wall-clock. The image model's own render time is
-        // fixed; this trims the orchestration overhead wrapping it.
-        "--effort",
-        "low",
+        // to invoke the image tool once, so we switch off the agentic
+        // scaffolding it doesn't need (plan mode, subagents, web search) to trim
+        // per-image latency without touching the generated image.
+        //
+        // Issue #60: do NOT add `--effort` here. It maps to `reasoningEffort`,
+        // which the Grok image model (grok-composer-2.5-fast) rejects with a 400
+        // ("does not support parameter reasoningEffort") — it broke image
+        // generation entirely (auto and manual). These three flags don't inject
+        // a request parameter into the composer call, so they're safe.
         "--no-plan",
         "--no-subagents",
         "--disable-web-search",

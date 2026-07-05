@@ -146,6 +146,9 @@ export interface CampaignCreationSettings {
   worldSetting?: string;
   toneWhimsy?: number;
   contentIntensity?: "standard" | "low";
+  /** Issue #57: the model the new campaign should start on. Omitted keeps the
+   * server default (Sonnet). */
+  model?: string;
 }
 
 /** Creates a new campaign from a character-creation form (ADR-0010); the

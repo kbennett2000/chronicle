@@ -29,13 +29,20 @@ const META_PATTERNS: RegExp[] = [
   /\bi(?:'m| am) restricted to\b[^.!?\n]*?[.!?:]/gi,
   /\bthe campaign (?:must be initialized|hasn't started yet|has not started yet)\b[^.!?\n]*?[.!?:]/gi,
   /\b(?:let me|i need to|now,? let me)\b[^.!?\n]*?\b(?:set up|initialize)\b[^.!?\n]*?\b(?:character|world[-\s]?state|vex|campaign)\b[^.!?\n]*?[.!?:]/gi,
-  /\b(?:let me|i['’]ll|now i['’]ll)\b[^.!?\n]*?\b(?:roll for|call the|adjudicate)\b[^.!?\n]*?\b(?:stealth|dice|check|contested)\b[^.!?\n]*?[.!?:]/gi,
   /\b(?:the )?dm tools?\b[^.!?\n]*?\bnot available\b[^.!?\n]*?[.!?:]/gi,
   /\blet me narrate the scene and adjudicate\b[^.!?\n]*?[.!?:]/gi,
   // Inline rules math the model emits while setting up state.
   /\ba level \d+ [^.!?\n]*?\bshould have hp\b[^.!?\n]*?[.!?:]/gi,
   /\bwith (?:con|dex|str|int|wis|cha) \d+,? that'?s\b[^.!?\n]*?[.!?:]/gi,
 ];
+
+/** Issue #44: backstage "let me roll for stealth" chatter only when the engine
+ * rolls (auto-roll ON). With auto-roll OFF the DM must *ask the player* to roll,
+ * and a phrasing like "I'll have you roll for a Stealth check" is legitimate,
+ * player-facing text — stripping it here is exactly why the player "never gets
+ * asked" their roll value. So this pattern is applied only when auto-roll is on. */
+const DICE_META_PATTERN =
+  /\b(?:let me|i['’]ll|now i['’]ll)\b[^.!?\n]*?\b(?:roll for|call the|adjudicate)\b[^.!?\n]*?\b(?:stealth|dice|check|contested)\b[^.!?\n]*?[.!?:]/gi;
 
 function stripBackstagePreamble(text: string): string {
   const divider = text.indexOf("\n---\n");
@@ -54,7 +61,7 @@ function tidyWhitespace(text: string): string {
     .trim();
 }
 
-export function stripMetaChatter(text: string): string {
+export function stripMetaChatter(text: string, opts: { autoRoll?: boolean } = {}): string {
   if (!text) return text;
   // Repair the run-together join first: textParts.join("") glues a sentence's
   // end punctuation to the next block's capital ("state.Back"), which both
@@ -62,5 +69,8 @@ export function stripMetaChatter(text: string): string {
   let out = text.replace(/([.!?:])(?=[A-Z"'“‘])/g, "$1 ");
   out = stripBackstagePreamble(out);
   for (const re of META_PATTERNS) out = out.replace(re, "");
+  // Only scrub "let me roll for stealth" backstage chatter when the engine rolls
+  // (issue #44). With auto-roll off, that phrasing is the DM asking the player.
+  if (opts.autoRoll !== false) out = out.replace(DICE_META_PATTERN, "");
   return tidyWhitespace(out);
 }
