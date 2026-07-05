@@ -4,6 +4,7 @@ import { Play } from "./screens/Play";
 import { Settings } from "./screens/Settings";
 import { checkConnection, type ConnectionStatus } from "./lib/api";
 import { hasConnection, loadConnection, saveConnection, type Connection } from "./lib/connection";
+import { getCampaignId } from "./lib/campaign";
 
 type Screen = "home" | "play" | "settings";
 
@@ -30,6 +31,7 @@ export function App() {
   const [screen, setScreen] = useState<Screen>("home");
   const [connection, setConnection] = useState<Connection>(() => loadConnection());
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("unchecked");
+  const campaignId = getCampaignId();
 
   useEffect(() => {
     if (!hasConnection(connection)) {
@@ -70,10 +72,11 @@ export function App() {
       <div className="candlelight" />
       {screen === "home" && (
         <Home
+          connection={connection}
+          campaignId={campaignId}
+          connectionStatus={connectionStatus}
           onContinue={() => setScreen("play")}
           onOpenSettings={() => setScreen("settings")}
-          connectionStatus={connectionStatus}
-          serverAddress={connection.serverAddress}
         />
       )}
       {screen === "play" && <Play onGoHome={() => setScreen("home")} />}

@@ -3,6 +3,11 @@ dist/
 *.log
 npm-debug.log*
 
+# Playwright output (web/)
+test-results/
+playwright-report/
+blob-report/
+
 # Local Claude Code settings (machine-specific)
 .claude/settings.local.json
 
