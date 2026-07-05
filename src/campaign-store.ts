@@ -74,7 +74,7 @@ _(none yet)_
 export function scaffoldCampaign(
   campaignId: string,
   characterSheet: unknown,
-  settings: Record<string, unknown> = { model: DEFAULT_MODEL }
+  settings: Record<string, unknown> = { model: DEFAULT_MODEL, autoRollDice: true }
 ): string {
   if (!CAMPAIGN_ID_PATTERN.test(campaignId)) {
     throw new InvalidCampaignIdError(`invalid campaign id: ${campaignId}`);
@@ -262,6 +262,10 @@ export interface CampaignSettings {
    * depends on Grok Build/SuperGrok access being configured on the host —
    * opt-in, never assumed. */
   generateImages?: boolean;
+  /** Issue #44: when on (the default — treat absent as ON), the engine rolls
+   * dice itself via the roll_dice tool and narrates the result. When
+   * explicitly false, it reverts to asking the player to supply the value. */
+  autoRollDice?: boolean;
 }
 
 export function readCampaignSettings(campaignDir: string): CampaignSettings {
@@ -284,6 +288,9 @@ export function readCampaignSettings(campaignDir: string): CampaignSettings {
   }
   if (typeof raw.generateImages === "boolean") {
     settings.generateImages = raw.generateImages;
+  }
+  if (typeof raw.autoRollDice === "boolean") {
+    settings.autoRollDice = raw.autoRollDice;
   }
   return settings;
 }

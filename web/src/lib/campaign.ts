@@ -82,6 +82,9 @@ export interface CampaignSettings {
   toneWhimsy?: number;
   contentIntensity?: "standard" | "low";
   generateImages?: boolean;
+  /** Issue #44: absent === on. When explicitly false, the player supplies
+   * their own dice values instead of the engine rolling. */
+  autoRollDice?: boolean;
 }
 
 export type CampaignSettingsPatch = Partial<Omit<CampaignSettings, "model">>;

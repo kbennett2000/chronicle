@@ -4,6 +4,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { createSeedMcpServer, SEED_TOOL_NAME } from "./seed-selector.js";
 import { createTextureMcpServer, TEXTURE_TOOL_NAME } from "./texture-selector.js";
 import { createImageMcpServer, GENERATE_IMAGE_TOOL_NAME } from "./image-generator.js";
+import { createDiceMcpServer, DICE_TOOL_NAME } from "./dice.js";
 import type { CampaignSettings } from "./campaign-store.js";
 import { readCharacterIdentity, type CharacterIdentity } from "./campaign-store.js";
 
@@ -293,6 +294,23 @@ the same discipline as ${SEED_TOOL_NAME}. If it fails, continue narrating
 normally without an image; never let it block or delay your response.`);
   }
 
+  if (settings.autoRollDice !== false) {
+    sections.push(`Dice: whenever the rules call for a roll — an ability check, attack roll,
+saving throw, damage roll, initiative, death save, or any d20 test — call the
+${DICE_TOOL_NAME} tool and use its result as the authoritative outcome. Never
+invent the number yourself, and never ask the player what they rolled: you
+roll for them now. Pass standard notation (e.g. "1d20+5", "2d6", "d100") and
+use the mode argument for advantage/disadvantage. Apply the natural-20 /
+natural-1 flags for critical hits/misses per the SRD. Roll before you narrate
+the outcome, then narrate what the result means in the fiction.`);
+  } else {
+    sections.push(`Dice: auto-roll is OFF for this campaign — the player supplies their own
+roll values. When the rules call for a roll, tell the player exactly what to
+roll (e.g. "roll a d20 and add your Stealth modifier") and wait for their
+number; do not invent it or assume a value. Once they give you a total,
+adjudicate the outcome against the appropriate DC/AC.`);
+  }
+
   return sections.join("\n\n");
 }
 
@@ -341,6 +359,15 @@ export async function runTurn(
   if (settings.generateImages) {
     allowedTools.push(GENERATE_IMAGE_TOOL_NAME);
     mcpServers["image-tools"] = createImageMcpServer(campaignDir, settings);
+  }
+  // Issue #44: auto-roll defaults ON (absent === on); only an explicit false
+  // reverts to the player supplying roll values. When on, the engine gets a
+  // real host-side dice roller; when off, the tool isn't offered and the
+  // system prompt tells the model to ask the player instead.
+  const autoRollDice = settings.autoRollDice !== false;
+  if (autoRollDice) {
+    allowedTools.push(DICE_TOOL_NAME);
+    mcpServers["dice"] = createDiceMcpServer();
   }
 
   const options: Record<string, unknown> = {

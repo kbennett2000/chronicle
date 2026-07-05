@@ -287,6 +287,7 @@ const ROUTES: Array<{
         toneWhimsy?: number;
         contentIntensity?: ContentIntensity;
         generateImages?: boolean;
+        autoRollDice?: boolean;
       } = {};
 
       if (body.artStyle !== undefined) {
@@ -328,6 +329,13 @@ const ROUTES: Array<{
           return;
         }
         updates.generateImages = body.generateImages;
+      }
+      if (body.autoRollDice !== undefined) {
+        if (typeof body.autoRollDice !== "boolean") {
+          sendJson(res, 400, { error: "autoRollDice must be a boolean" });
+          return;
+        }
+        updates.autoRollDice = body.autoRollDice;
       }
 
       sendJson(res, 200, persistCampaignSettings(campaignDir, updates));
