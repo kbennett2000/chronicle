@@ -64,20 +64,58 @@ function ChapterHeading({ text }: { text: string }) {
  * while it can't resolve (same graceful-empty contract as the gallery). */
 function MomentImage({ connection, campaignId, filename }: { connection: Connection; campaignId: string; filename: string }) {
   const { url } = useAuthedImage(connection, campaignId, filename);
+  const [expanded, setExpanded] = useState(false);
   if (!url) return null;
   return (
-    <img
-      src={url}
-      alt=""
-      data-testid="moment-image"
-      style={{
-        display: "block",
-        width: "100%",
-        borderRadius: 3,
-        margin: "0 0 16px",
-        boxShadow: "0 6px 16px rgba(0,0,0,.5), 0 0 0 1px rgba(184,150,90,.4)",
-      }}
-    />
+    <>
+      {/* Issue #52: scenes used to render full width with no cap, dominating
+          the screen. Bound the inline size; tap to view full. */}
+      <img
+        src={url}
+        alt=""
+        data-testid="moment-image"
+        onClick={() => setExpanded(true)}
+        style={{
+          display: "block",
+          width: "auto",
+          maxWidth: "100%",
+          maxHeight: 340,
+          borderRadius: 3,
+          margin: "0 0 16px",
+          cursor: "zoom-in",
+          boxShadow: "0 6px 16px rgba(0,0,0,.5), 0 0 0 1px rgba(184,150,90,.4)",
+        }}
+      />
+      {expanded && (
+        <div
+          data-testid="moment-lightbox"
+          onClick={() => setExpanded(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 50,
+            background: "rgba(4,2,1,.9)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+            cursor: "zoom-out",
+            animation: "fadeIn 0.25s ease",
+          }}
+        >
+          <img
+            src={url}
+            alt=""
+            style={{
+              maxWidth: "100%",
+              maxHeight: "100%",
+              borderRadius: 2,
+              boxShadow: "0 20px 50px rgba(0,0,0,.7), 0 0 0 1px rgba(184,150,90,.5)",
+            }}
+          />
+        </div>
+      )}
+    </>
   );
 }
 
