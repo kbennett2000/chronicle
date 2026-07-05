@@ -1,3 +1,10 @@
+// Side-effecting import, deliberately first: module-graph evaluation order
+// runs an import's own top-level code before the importing module's code,
+// so this must load .env before dm-engine.js -> seed-selector.js reads
+// process.env.SEED_WILDCARD_CHANCE at its own module scope. A later
+// loadDotenv() call in this file's body would run too late for that.
+import "dotenv/config";
+import { config as loadDotenv } from "dotenv";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -21,6 +28,13 @@ import {
   CampaignNotFoundError,
   type ContentIntensity,
 } from "./campaign-store.js";
+
+const dotenvResult = loadDotenv();
+if (dotenvResult.error) {
+  console.log("No .env file found — reading config from shell environment only.");
+} else {
+  console.log(`Loaded .env from ${process.cwd()} (${Object.keys(dotenvResult.parsed ?? {}).length} vars).`);
+}
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4317;
 // Per ADR-0003: default stays localhost-only. Set HOST to the machine's
