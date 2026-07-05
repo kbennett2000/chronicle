@@ -377,7 +377,16 @@ export interface TurnResult {
   text: string;
   sessionId: string | undefined;
   isError: boolean;
+  /** The model actually used by the Agent SDK this turn, read from the raw
+   * Anthropic message the SDK wraps (issue #57). Falls back to the requested
+   * model if the stream yielded no assistant message to read it from. This is
+   * the *real* model, not the one we asked for — so a mismatch (e.g. a resumed
+   * session ignoring a mid-campaign model change) is visible instead of hidden
+   * behind an echo of the request. */
   model: string;
+  /** The model that was requested for this turn (what we passed to query()),
+   * so callers can compare requested-vs-actual without re-deriving it. */
+  requestedModel: string;
 }
 
 export async function runTurn(
@@ -391,6 +400,9 @@ export async function runTurn(
 ): Promise<TurnResult> {
   let sessionId: string | undefined;
   let isError = false;
+  // Issue #57: the model the SDK actually ran, read off the raw Anthropic
+  // message each assistant turn carries (message.message.model). Last one wins.
+  let actualModel: string | undefined;
   const textParts: string[] = [];
   // Issues #51/#48: the DM addresses whoever the sheet says, in this exact dir.
   const character = readCharacterIdentity(campaignDir);
@@ -512,6 +524,12 @@ export async function runTurn(
 
   for await (const message of query({ prompt: userInput, options })) {
     if (message.type === "assistant" && message.message?.content) {
+      // Issue #57: record the real model the SDK used (the raw Anthropic
+      // message's own `model` field), so the choice is verifiable rather than
+      // an echo of what we asked for.
+      if (typeof (message.message as { model?: unknown }).model === "string") {
+        actualModel = (message.message as { model: string }).model;
+      }
       const toolUseBlocks: { type: string; name: string }[] = message.message.content.filter(
         (b: unknown): b is { type: string; name: string } =>
           typeof b === "object" && b !== null && (b as { type?: string }).type === "tool_use"
@@ -555,5 +573,15 @@ export async function runTurn(
   // transcript. On an engine error keep the raw text (it's diagnostic, and the
   // patterns only match well-formed bookkeeping sentences anyway).
   const text = isError ? textParts.join("") : stripMetaChatter(textParts.join(""));
-  return { text, sessionId, isError, model };
+  // Issue #57: surface requested-vs-actual so an ignored model choice is loud
+  // in the server log instead of silently echoed back as if it were obeyed.
+  const resolvedModel = actualModel ?? model;
+  if (actualModel && actualModel !== model) {
+    console.error(
+      `[dm-engine] MODEL MISMATCH: requested "${model}" but the SDK ran "${actualModel}"`
+    );
+  } else {
+    console.error(`[dm-engine] model obeyed: "${resolvedModel}"`);
+  }
+  return { text, sessionId, isError, model: resolvedModel, requestedModel: model };
 }

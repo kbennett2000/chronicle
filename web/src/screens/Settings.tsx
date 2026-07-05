@@ -272,6 +272,61 @@ export function Settings({
               </button>
             </div>
 
+            {/* Issue #56: auto-illustrate each turn — only meaningful (and only
+                shown) when scene art is on, since it needs Grok Build too. */}
+            {settings.generateImages && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "11px 14px",
+                  borderRadius: 4,
+                  background: "rgba(28,20,12,.55)",
+                  border: "1px solid rgba(109,90,56,.36)",
+                  marginTop: 8,
+                }}
+              >
+                <div>
+                  <div style={{ fontFamily: "var(--font-display)", fontSize: 13.5, color: "var(--ink)" }}>
+                    Auto-illustrate each turn
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 2 }}>
+                    Draws every DM reply · the image appears a moment after the text
+                  </div>
+                </div>
+                <button
+                  data-testid="auto-illustrate-toggle"
+                  aria-pressed={!!settings.autoIllustrateTurns}
+                  onClick={() => patchSettings({ autoIllustrateTurns: !settings.autoIllustrateTurns }, setLookSave)}
+                  style={{
+                    width: 46,
+                    height: 26,
+                    borderRadius: 20,
+                    cursor: "pointer",
+                    border: `1px solid ${settings.autoIllustrateTurns ? "rgba(211,112,60,.9)" : "rgba(109,90,56,.4)"}`,
+                    background: settings.autoIllustrateTurns ? "rgba(211,112,60,.85)" : "rgba(12,8,5,.6)",
+                    position: "relative",
+                    transition: "background 0.2s, border-color 0.2s",
+                    flexShrink: 0,
+                  }}
+                >
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: 2,
+                      left: settings.autoIllustrateTurns ? 24 : 2,
+                      width: 20,
+                      height: 20,
+                      borderRadius: "50%",
+                      background: settings.autoIllustrateTurns ? "#fbeede" : "#8c7c62",
+                      transition: "left 0.2s, background 0.2s",
+                    }}
+                  />
+                </button>
+              </div>
+            )}
+
             <div style={{ fontSize: 12, color: "var(--ink-dim)", margin: "12px 0 7px" }}>
               Art style <span style={{ color: "var(--ink-faint)" }}>— appended to every image prompt</span>
             </div>

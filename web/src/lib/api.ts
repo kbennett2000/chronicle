@@ -8,6 +8,26 @@ export class AuthError extends Error {
 
 export class ApiError extends Error {}
 
+/** Issue #55: a rejected `fetch()` surfaces as the browser's raw
+ * `TypeError: Failed to fetch` (or "Load failed" on Safari / "NetworkError" on
+ * Firefox) — an opaque, unactionable string that got painted straight into the
+ * turn as its error narration when the home server was killed mid-turn. Map
+ * those network failures to one clear, actionable message instead. Domain
+ * results (a 502 turn body, a 401) never reach here — only a genuinely dropped
+ * connection does. */
+const CONNECTION_LOST_MESSAGE =
+  "Lost the connection to your home server — it may have restarted or stopped. Check that it's running, then try again.";
+
+function connectionError(err: unknown): ApiError {
+  const raw = err instanceof Error ? err.message : "";
+  // The exact text differs per browser; any of these means the request never
+  // completed a round trip, which for this app means the LAN server is gone.
+  if (/failed to fetch|load failed|networkerror|network request failed/i.test(raw) || raw === "") {
+    return new ApiError(CONNECTION_LOST_MESSAGE);
+  }
+  return new ApiError(raw);
+}
+
 /** Lowest-level call: attaches the auth header (every route but static
  * asset serving requires it, per ADR-0003) and surfaces network failures
  * / a 401 as thrown errors, but returns any other status as-is. Most
@@ -31,7 +51,7 @@ export async function apiFetchRaw(
       },
     });
   } catch (err) {
-    throw new ApiError(err instanceof Error ? err.message : "could not reach the server");
+    throw connectionError(err);
   }
 
   if (res.status === 401) throw new AuthError();
@@ -56,7 +76,7 @@ export async function fetchImageBlob(connection: Connection, path: string): Prom
       headers: { "X-Chronicle-Token": connection.passphrase },
     });
   } catch (err) {
-    throw new ApiError(err instanceof Error ? err.message : "could not reach the server");
+    throw connectionError(err);
   }
   if (res.status === 401) throw new AuthError();
   if (!res.ok) throw new ApiError(`request failed (${res.status})`);

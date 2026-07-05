@@ -1,15 +1,21 @@
 # Ambient audio
 
 `ambient.ogg` / `ambient.mp3` — Chronicle's candlelit ambient music bed
-(issues #43, #53). A calm, warm 48-second pad that moves through a slow
-Am→F→C→G chord progression with gentle chorus and a low airy wash. Vite copies
-this `web/public/` tree into the build output (`../public/audio/`), which
-`server.ts` serves.
+(issues #43, #53). A calm, warm 48-second piece: a low Am→F→C→G chord *pad*
+with a **plucked arpeggio melody** over it and a **soft rhythmic pulse**
+underneath. Vite copies this `web/public/` tree into the build output
+(`../public/audio/`), which `server.ts` serves.
 
-Issue #53 note: the first version was seven sine partials that were all
-harmonics of one 27.5 Hz fundamental, so they fused into a single static
-organ-like tone. This version plays a real chord *voicing* and *progression*
-instead, so it reads as evolving music rather than a drone.
+Issue #53 history: v1 (#43) was harmonics of one fundamental → a fused organ
+tone. v2 (#53) added a chord progression but every voice still *sustained*, so
+it read as one morphing drone. v3 (this file) adds discrete, enveloped events —
+plucked notes with a fast attack + decay give audible onsets, and a slow pulse
+gives tempo — so it reads as actual music, not a tone.
+
+**Cache-busting:** the `<audio>` `<source>` URLs in `web/src/screens/Play.tsx`
+carry a `?v=N`. The filename is fixed (not content-hashed), so **bump that `N`
+every time you regenerate** — otherwise browsers keep playing the cached old
+bed. `server.ts` also serves these with `Cache-Control: no-cache`.
 
 ## Licensing
 **Original work, released as CC0 / public domain.** It contains no third-party

@@ -285,6 +285,11 @@ export interface CampaignSettings {
    * dice itself via the roll_dice tool and narrates the result. When
    * explicitly false, it reverts to asking the player to supply the value. */
   autoRollDice?: boolean;
+  /** Issue #56: when on, the app auto-illustrates every DM response (the same
+   * on-demand moment illustration a player can trigger by hand). Defaults to
+   * false (absent) and is only meaningful when `generateImages` is on — it
+   * needs Grok Build configured just the same. */
+  autoIllustrateTurns?: boolean;
 }
 
 export function readCampaignSettings(campaignDir: string): CampaignSettings {
@@ -310,6 +315,9 @@ export function readCampaignSettings(campaignDir: string): CampaignSettings {
   }
   if (typeof raw.autoRollDice === "boolean") {
     settings.autoRollDice = raw.autoRollDice;
+  }
+  if (typeof raw.autoIllustrateTurns === "boolean") {
+    settings.autoIllustrateTurns = raw.autoIllustrateTurns;
   }
   return settings;
 }

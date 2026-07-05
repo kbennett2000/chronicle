@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import type { Connection } from "../lib/connection";
-import { getState, sendTurn, generateOpening, illustrateMoment, type CharacterSheet, type StateSnapshot } from "../lib/campaign";
+import {
+  getState,
+  sendTurn,
+  generateOpening,
+  illustrateMoment,
+  getCampaignSettings,
+  type CharacterSheet,
+  type StateSnapshot,
+} from "../lib/campaign";
 import { useAuthedImage } from "../lib/useAuthedImage";
 import { parseChapterHeadings } from "../lib/session-log";
 import { BottomSheet } from "../components/BottomSheet";
@@ -249,6 +257,10 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   // generating, and any error to show under that turn's button.
   const [illustratingTurn, setIllustratingTurn] = useState<number | null>(null);
   const [illustrateErrors, setIllustrateErrors] = useState<Record<number, string>>({});
+  // Issue #56: whether each turn should auto-illustrate. Held in a ref so
+  // handleSend/generateOpening read the current value without being re-created
+  // or racing a state update.
+  const autoIllustrateRef = useRef(false);
   const [characterSheet, setCharacterSheet] = useState<CharacterSheet | null>(null);
   const [npcRoster, setNpcRoster] = useState<string>("");
   const [questLog, setQuestLog] = useState<string>("");
@@ -272,6 +284,21 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
     setQuestLog(snapshot.questLog);
     setWorldState(snapshot.worldState);
   }
+
+  // Issue #56: load campaign settings so we know whether to auto-illustrate
+  // each turn. Best-effort — a failed fetch just leaves auto-illustration off.
+  useEffect(() => {
+    let cancelled = false;
+    getCampaignSettings(connection, campaignId)
+      .then((s) => {
+        if (cancelled) return;
+        autoIllustrateRef.current = Boolean(s.autoIllustrateTurns && s.generateImages);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [connection, campaignId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -332,6 +359,10 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
         // Current Situation / gear the opening just established need to reach
         // the Self/Views panels, same as after a normal turn.
         getState(connection, campaignId).then(applyPanelState).catch(() => {});
+        // Issue #56: auto-illustrate the opening scene (turn 0) too, if on.
+        if (autoIllustrateRef.current) {
+          void handleIllustrateMoment(0);
+        }
       })
       .catch((err) => {
         if (!cancelled) setOpeningError(err instanceof Error ? err.message : String(err));
@@ -403,6 +434,9 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   async function handleSend() {
     const message = input.trim();
     if (!message || sending) return;
+    // The turn we're about to append lands at this index (array index === turn
+    // index, same mapping the manual "Illustrate this moment" button uses).
+    const newTurnIndex = turns.length;
     setTurns((prev) => [...prev, { playerMessage: message, narration: null }]);
     setInput("");
     setSending(true);
@@ -424,6 +458,13 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
             // Panel data just stays at its last-known-good snapshot; the
             // turn itself already succeeded and is on screen.
           });
+        // Issue #56: reply-first auto-illustration. The narration is already on
+        // screen; kick off the same on-demand moment illustration a player can
+        // trigger by hand. It's best-effort and single-flighted by
+        // handleIllustrateMoment's own `illustratingTurn` guard.
+        if (autoIllustrateRef.current) {
+          void handleIllustrateMoment(newTurnIndex);
+        }
       }
     } catch (err) {
       setTurns((prev) => {
@@ -476,9 +517,13 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
     <div className="screen leather-ground">
       {/* Issue #43: the ambient bed the mute button controls. Loops seamlessly
           (see web/public/audio/README.md); .ogg primary, .mp3 fallback. */}
+      {/* Issue #53: `?v=` cache-busts the fixed filename. The URL never changes
+          on its own, and the server sends no content-hash, so without this bump
+          a browser keeps playing the previously-cached bed after a re-record.
+          Bump the number whenever ambient.ogg/.mp3 are regenerated. */}
       <audio ref={audioRef} loop preload="auto" data-testid="ambient-audio">
-        <source src="/audio/ambient.ogg" type="audio/ogg" />
-        <source src="/audio/ambient.mp3" type="audio/mpeg" />
+        <source src="/audio/ambient.ogg?v=3" type="audio/ogg" />
+        <source src="/audio/ambient.mp3?v=3" type="audio/mpeg" />
       </audio>
       <div style={{ flexShrink: 0, padding: "54px 16px 10px", display: "flex", alignItems: "center", gap: 10 }}>
         <button className="icon-button" onClick={onGoHome}>

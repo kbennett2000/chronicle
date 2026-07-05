@@ -151,7 +151,25 @@ export async function generateImage(
   try {
     const result = await execFileAsync(
       "grok",
-      ["--cwd", campaignDir, "-p", `/imagine ${prompt}`, "--output-format", "json"],
+      [
+        "--cwd",
+        campaignDir,
+        "-p",
+        `/imagine ${prompt}`,
+        "--output-format",
+        "json",
+        // Issue #58: `/imagine` is a single-purpose call — the agent just needs
+        // to invoke the image tool once. All the agentic scaffolding around it
+        // (deep reasoning, plan mode, web search, subagents) is pure latency
+        // here and none of it affects the generated image, so switch it off to
+        // cut the per-image wall-clock. The image model's own render time is
+        // fixed; this trims the orchestration overhead wrapping it.
+        "--effort",
+        "low",
+        "--no-plan",
+        "--no-subagents",
+        "--disable-web-search",
+      ],
       { timeout: GROK_TIMEOUT_MS, killSignal: "SIGKILL", maxBuffer: 10 * 1024 * 1024 }
     );
     stdout = result.stdout;
