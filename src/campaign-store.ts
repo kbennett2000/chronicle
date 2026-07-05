@@ -413,6 +413,11 @@ export function resolveSessionLog(campaignDir: string, resuming: boolean): strin
 export interface TurnTranscriptRecord {
   turnIndex: number;
   timestamp: string;
+  /** The player's action for this turn. ADR-0013: an **empty string** marks a
+   * DM-initiated turn with no player action — specifically the opening scene
+   * (turn-zero) generated when a campaign begins. Consumers must treat "" as
+   * "the DM spoke unprompted" (the UI omits the "YOU" block), not as missing
+   * data. Every ordinary turn carries a non-empty player message. */
   playerMessage: string;
   narration: string;
   /** ADR-0009 addendum (additive): a user-triggered "illustrate this moment"

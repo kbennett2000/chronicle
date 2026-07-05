@@ -50,11 +50,16 @@ test.describe("New character / new campaign (issue #36)", () => {
       const res = await createResponse;
       expect(res.status()).toBe(201);
 
-      // Lands in Play on the brand-new campaign.
+      // Lands in Play on the brand-new campaign. Issue #54: instead of a
+      // blank "the tale hasn't begun" screen, the DM immediately begins
+      // setting the opening scene (turn-zero, ADR-0013).
       await expect(page.getByText("ACTIVE PLAY")).toBeVisible();
-      await expect(page.getByText("The tale hasn't begun — say what you do.")).toBeVisible();
+      await expect(page.getByText("The Dungeon Master is setting the scene")).toBeVisible();
 
       // The new character is really on disk with derived, authoritative stats.
+      // Read right after landing, before the opening turn could write anything
+      // — creation (scaffoldCampaign) persisted the sheet synchronously during
+      // the POST, well ahead of any DM narration.
       expect(createdId).toBeTruthy();
       const sheet = JSON.parse(
         fs.readFileSync(path.join(REPO_ROOT, "campaigns", createdId!, "character-sheet.json"), "utf8")
