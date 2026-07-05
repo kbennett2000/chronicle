@@ -7,6 +7,12 @@ import { z } from "zod";
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import type { CampaignSettings } from "./campaign-store.js";
 import { buildImagePrompt } from "./image-prompt.js";
+import { stripMetaChatter } from "./narration.js";
+
+/** Hard cap on the /imagine prompt length. A scene description is at most a few
+ * sentences; anything longer is almost certainly leaked context, and a shorter
+ * prompt also keeps Grok focused on generating rather than "understanding". */
+const MAX_IMAGE_PROMPT_CHARS = 500;
 
 const execFileAsync = promisify(execFile);
 
@@ -27,6 +33,22 @@ export interface ImageGenResult {
   /** Path relative to campaignDir, e.g. "images/npc-barrow.jpg" */
   relPath?: string;
   error?: string;
+}
+
+/** Turns a raw entity/scene description into the `/imagine` prompt. Sanitizes
+ * first: leaked DM planning chatter must never reach Grok — it makes a nonsense
+ * image and, worse, reads as a coding instruction (see generateImage). Strips
+ * recognized meta-chatter, hard-caps length, falls back to the raw description
+ * (then a generic scene) if stripping leaves nothing, and appends the art style.
+ * Exported for unit testing without a live Grok. Note this is one layer: the
+ * temp-dir isolation + `--deny` tool restrictions in generateImage are what make
+ * even an imperfectly-stripped prompt harmless. */
+export function sanitizeImagePrompt(description: string, settings: CampaignSettings): string {
+  const cleaned =
+    stripMetaChatter(description).trim().slice(0, MAX_IMAGE_PROMPT_CHARS) ||
+    description.trim().slice(0, MAX_IMAGE_PROMPT_CHARS) ||
+    "a scene from the story";
+  return buildImagePrompt(cleaned, settings);
 }
 
 function slugify(name: string): string {
@@ -133,7 +155,23 @@ export function newestImageUnder(sessionsBase: string, sinceMs: number): string 
  * images/ directory. Never throws — every failure mode (Grok Build not
  * installed/authenticated, timeout, unparseable output, no locatable image
  * file) is caught and returned as a clear failure result, since an image is
- * best-effort per §8 and must never block a turn from completing. */
+ * best-effort per §8 and must never block a turn from completing.
+ *
+ * Issue #60 (the real fix): Grok Build is a full agentic *coding* assistant,
+ * not a bare image endpoint. Run before with `--cwd <campaignDir>` — which
+ * lives INSIDE this git repo — it would read a stray prompt (e.g. leaked DM
+ * planning chatter like "let me read the campaign files") as a coding task,
+ * explore src/, edit files, and even `git commit`/`git push` to master on its
+ * own (that is how rogue commit 0982eb6 landed). The prompt was also polluted
+ * with that same meta-chatter instead of a scene description. So we now:
+ *   1. run Grok in a throwaway temp dir with NO repo to touch (isolation is the
+ *      real safety boundary — Grok can't wreck a repo that isn't there);
+ *   2. `--deny` the mutating tools as defense-in-depth;
+ *   3. strip meta-chatter from the description so the prompt is a scene, not an
+ *      instruction — which also cuts latency (issue #58): a clean prompt in an
+ *      empty dir generates in ~15-20s vs. minutes spent "exploring" the repo.
+ * Do NOT restore `--cwd campaignDir`, and do NOT add `--effort` (it maps to
+ * reasoningEffort, which grok-composer-2.5-fast rejects with a 400). */
 export async function generateImage(
   campaignDir: string,
   entityType: ImageEntityType,
@@ -141,104 +179,123 @@ export async function generateImage(
   description: string,
   settings: CampaignSettings
 ): Promise<ImageGenResult> {
-  const prompt = buildImagePrompt(description, settings);
+  const prompt = sanitizeImagePrompt(description, settings);
   const slug = slugify(name);
 
+  // Isolated, empty, non-repo working directory: Grok is keyed to this cwd for
+  // both its tool sandbox and where it records the session/image, so locating
+  // the result below uses `workDir`, not `campaignDir`.
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "chronicle-img-"));
   // Marks which images belong to THIS call for the timeout-salvage path below.
   const startedAt = Date.now();
-  let stdout: string | undefined;
-  let timedOut = false;
   try {
-    const result = await execFileAsync(
-      "grok",
-      [
-        "--cwd",
-        campaignDir,
-        "-p",
-        `/imagine ${prompt}`,
-        "--output-format",
-        "json",
-        // Issue #58: `/imagine` is a single-purpose call — the agent just needs
-        // to invoke the image tool once, so we switch off the agentic
-        // scaffolding it doesn't need (plan mode, subagents, web search) to trim
-        // per-image latency without touching the generated image.
-        //
-        // Issue #60: do NOT add `--effort` here. It maps to `reasoningEffort`,
-        // which the Grok image model (grok-composer-2.5-fast) rejects with a 400
-        // ("does not support parameter reasoningEffort") — it broke image
-        // generation entirely (auto and manual). These three flags don't inject
-        // a request parameter into the composer call, so they're safe.
-        "--no-plan",
-        "--no-subagents",
-        "--disable-web-search",
-      ],
-      { timeout: GROK_TIMEOUT_MS, killSignal: "SIGKILL", maxBuffer: 10 * 1024 * 1024 }
-    );
-    stdout = result.stdout;
-  } catch (err) {
-    const e = err as NodeJS.ErrnoException & { killed?: boolean; stderr?: string };
-    if (e.code === "ENOENT") {
-      console.error(`[image-generator] grok CLI not found on PATH for "${name}"`);
-      return { ok: false, error: "Grok Build invocation failed: grok CLI not found on PATH" };
-    }
-    // A timeout (killed) is NOT terminal: Grok may have already written the
-    // image before we killed it (issue #52). Fall through to the salvage scan.
-    if (e.killed) {
-      timedOut = true;
-      console.error(`[image-generator] grok timed out after ${GROK_TIMEOUT_MS}ms for "${name}" — attempting to salvage`);
-    } else {
-      const reason = e.stderr?.trim() || e.message || String(err);
-      console.error(`[image-generator] grok invocation failed for "${name}": ${reason}`);
-      return { ok: false, error: `Grok Build invocation failed: ${reason}` };
-    }
-  }
-
-  // Preferred: the exact path Grok recorded in this session's chat history.
-  // Fallback/salvage: the newest image file written during this call (works
-  // even when we have no sessionId because Grok was killed on timeout).
-  let sourcePath: string | undefined;
-  if (stdout) {
+    let stdout: string | undefined;
+    let timedOut = false;
     try {
-      const parsed = JSON.parse(stdout);
-      if (typeof parsed.sessionId === "string") {
-        sourcePath = findGeneratedImagePath(campaignDir, parsed.sessionId);
+      const result = await execFileAsync(
+        "grok",
+        [
+          "--cwd",
+          workDir,
+          "-p",
+          `/imagine ${prompt}`,
+          "--output-format",
+          "json",
+          // Trim the agentic scaffolding a one-shot image call doesn't need.
+          "--no-plan",
+          "--no-subagents",
+          "--disable-web-search",
+          // Defense-in-depth: even in the temp dir, forbid the tools Grok would
+          // use to explore/mutate a filesystem or repo, so it can only generate.
+          "--deny",
+          "Bash",
+          "--deny",
+          "Shell",
+          "--deny",
+          "Terminal",
+          "--deny",
+          "Edit",
+          "--deny",
+          "Write",
+        ],
+        { timeout: GROK_TIMEOUT_MS, killSignal: "SIGKILL", maxBuffer: 10 * 1024 * 1024 }
+      );
+      stdout = result.stdout;
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException & { killed?: boolean; stderr?: string };
+      if (e.code === "ENOENT") {
+        console.error(`[image-generator] grok CLI not found on PATH for "${name}"`);
+        return { ok: false, error: "Grok Build invocation failed: grok CLI not found on PATH" };
       }
+      // A timeout (killed) is NOT terminal: Grok may have already written the
+      // image before we killed it (issue #52). Fall through to the salvage scan.
+      if (e.killed) {
+        timedOut = true;
+        console.error(`[image-generator] grok timed out after ${GROK_TIMEOUT_MS}ms for "${name}" — attempting to salvage`);
+      } else {
+        const reason = e.stderr?.trim() || e.message || String(err);
+        console.error(`[image-generator] grok invocation failed for "${name}": ${reason}`);
+        return { ok: false, error: `Grok Build invocation failed: ${reason}` };
+      }
+    }
+
+    // Preferred: the exact path Grok recorded in this session's chat history.
+    // Fallback/salvage: the newest image file written during this call (works
+    // even when we have no sessionId because Grok was killed on timeout). Both
+    // are keyed to workDir, the cwd Grok actually ran under.
+    let sourcePath: string | undefined;
+    if (stdout) {
+      try {
+        const parsed = JSON.parse(stdout);
+        if (typeof parsed.sessionId === "string") {
+          sourcePath = findGeneratedImagePath(workDir, parsed.sessionId);
+        }
+      } catch {
+        // Unparseable stdout just means we lean on the salvage scan below.
+      }
+    }
+    if (!sourcePath) {
+      sourcePath = findLatestGeneratedImage(workDir, startedAt);
+    }
+    if (!sourcePath) {
+      console.error(`[image-generator] no image file located for "${name}"${timedOut ? " (timed out)" : ""}`);
+      return {
+        ok: false,
+        error: timedOut
+          ? `Grok Build timed out after ${GROK_TIMEOUT_MS}ms and produced no image`
+          : "Grok Build did not produce a locatable image file",
+      };
+    }
+
+    const ext = path.extname(sourcePath) || ".jpg";
+    const imagesDir = path.join(campaignDir, "images");
+    const filename = `${entityType}-${slug}${ext}`;
+    const destPath = path.join(imagesDir, filename);
+    try {
+      fs.mkdirSync(imagesDir, { recursive: true });
+      fs.copyFileSync(sourcePath, destPath);
+      // Guard against a truncated file if Grok was killed mid-write.
+      if (fs.statSync(destPath).size < MIN_IMAGE_BYTES) {
+        fs.rmSync(destPath, { force: true });
+        return { ok: false, error: "Grok Build produced an incomplete image file" };
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error(`[image-generator] failed to save image for "${name}": ${reason}`);
+      return { ok: false, error: `Failed to save generated image: ${reason}` };
+    }
+
+    return { ok: true, relPath: path.join("images", filename) };
+  } finally {
+    // Best-effort cleanup — the image is already copied into the campaign, and
+    // Grok's own copy persists under ~/.grok/sessions, so removing the empty
+    // cwd is safe and never affects the result.
+    try {
+      fs.rmSync(workDir, { recursive: true, force: true });
     } catch {
-      // Unparseable stdout just means we lean on the salvage scan below.
+      /* ignore */
     }
   }
-  if (!sourcePath) {
-    sourcePath = findLatestGeneratedImage(campaignDir, startedAt);
-  }
-  if (!sourcePath) {
-    console.error(`[image-generator] no image file located for "${name}"${timedOut ? " (timed out)" : ""}`);
-    return {
-      ok: false,
-      error: timedOut
-        ? `Grok Build timed out after ${GROK_TIMEOUT_MS}ms and produced no image`
-        : "Grok Build did not produce a locatable image file",
-    };
-  }
-
-  const ext = path.extname(sourcePath) || ".jpg";
-  const imagesDir = path.join(campaignDir, "images");
-  const filename = `${entityType}-${slug}${ext}`;
-  const destPath = path.join(imagesDir, filename);
-  try {
-    fs.mkdirSync(imagesDir, { recursive: true });
-    fs.copyFileSync(sourcePath, destPath);
-    // Guard against a truncated file if Grok was killed mid-write.
-    if (fs.statSync(destPath).size < MIN_IMAGE_BYTES) {
-      fs.rmSync(destPath, { force: true });
-      return { ok: false, error: "Grok Build produced an incomplete image file" };
-    }
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    console.error(`[image-generator] failed to save image for "${name}": ${reason}`);
-    return { ok: false, error: `Failed to save generated image: ${reason}` };
-  }
-
-  return { ok: true, relPath: path.join("images", filename) };
 }
 
 export const GENERATE_IMAGE_TOOL_NAME = "mcp__image-tools__generate_image";
