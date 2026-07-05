@@ -15,7 +15,7 @@
 
 /** Signals that text before a `---` divider is backstage reasoning, not fiction. */
 const BACKSTAGE_SIGNAL =
-  /(?:campaign directory|working directory|character sheet shows|initialize the (?:character|campaign)|dm tools|not available through|restricted to the active campaign|set up .{0,60}character sheet|set up the world-state|dice tool directly|adjudicate the outcome directly)/i;
+  /(?:campaign directory|working directory|character sheet shows|initialize the (?:character|campaign)|dm tools|not available through|restricted to the active campaign|set up .{0,60}character sheet|set up the world-state|dice tool directly|seed-tables tool|roll_seed|listed as deferred|adjudicate the outcome directly)/i;
 
 const META_PATTERNS: RegExp[] = [
   // "Let me / I'll / I need to — update|record|save|write|log ... state|files|sheet|roster|quest log|inventory ..."
@@ -29,6 +29,9 @@ const META_PATTERNS: RegExp[] = [
   /\bi(?:'m| am) restricted to\b[^.!?\n]*?[.!?:]/gi,
   /\bthe campaign (?:must be initialized|hasn't started yet|has not started yet)\b[^.!?\n]*?[.!?:]/gi,
   /\b(?:let me|i need to|now,? let me)\b[^.!?\n]*?\b(?:set up|initialize)\b[^.!?\n]*?\b(?:character|world[-\s]?state|vex|campaign)\b[^.!?\n]*?[.!?:]/gi,
+  /\b(?:let me|i need to|now,? let me)\b[^.!?\n]*?\b(?:call|invoke|fetch|try calling)\b[^.!?\n]*?\b(?:seed[-\s]?tables?|roll_seed|dice)\b[^.!?\n]*?[.!?:]/gi,
+  /\b(?:they(?:'re| are)|tools? (?:are|is))\b[^.!?\n]*?\b(?:listed as )?deferred\b[^.!?\n]*?[.!?:]/gi,
+  /\b(?:let me|i['’]ll)\b[^.!?\n]*?\b(?:craft|create)\b[^.!?\n]*?\bopening scene\b[^.!?\n]*?[.!?:]/gi,
   /\b(?:the )?dm tools?\b[^.!?\n]*?\bnot available\b[^.!?\n]*?[.!?:]/gi,
   /\blet me narrate the scene and adjudicate\b[^.!?\n]*?[.!?:]/gi,
   // Inline rules math the model emits while setting up state.

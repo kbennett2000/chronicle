@@ -49,6 +49,12 @@ test("strips backstage preamble before a --- divider (#46 extension)", () => {
   );
 });
 
+test("strips seed-tables / deferred-tool planning from opening turns (pete-the-orc leak)", () => {
+  const raw =
+    "I need to identify the active campaign directory first. Let me call the seed-tables tool for a compelling opening scenario. They're listed as deferred but should be available now.\n\n---\n\nThe midday sun hangs low over Thornhaven.";
+  assert.equal(stripMetaChatter(raw), "The midday sun hangs low over Thornhaven.");
+});
+
 test("strips directory and tool-access meta without a divider", () => {
   const raw =
     "I'm restricted to the active campaign's own directory. The DM tools are not available through direct tool calls. The corridor is dark ahead.";
