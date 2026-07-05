@@ -1,0 +1,19 @@
+{
+  "name": "chronicle",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mobile-first solo D&D 5e app with a file-backed Claude Agent SDK DM engine.",
+  "type": "module",
+  "scripts": {
+    "dm": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.201"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

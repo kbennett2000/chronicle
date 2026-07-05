@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.log
+npm-debug.log*
+
+# Local Claude Code settings (machine-specific)
+.claude/settings.local.json
+
+# Never commit auth/keys
+.env
+.env.*
+.grok/
+.credentials.json
+
+# Agent SDK session pointers (local runtime state, not source)
+**/.session-id
