@@ -1,0 +1,31 @@
+{
+  "name": "Kira Emberfall",
+  "race": "Human",
+  "class": "Rogue",
+  "level": 2,
+  "hp": {
+    "current": 16,
+    "max": 16
+  },
+  "armorClass": 13,
+  "abilityScores": {
+    "strength": 10,
+    "dexterity": 16,
+    "constitution": 13,
+    "intelligence": 12,
+    "wisdom": 11,
+    "charisma": 14
+  },
+  "conditions": [],
+  "inventory": [
+    { "item": "Shortsword", "quantity": 1 },
+    { "item": "Shortbow", "quantity": 1 },
+    { "item": "Arrows", "quantity": 20 },
+    { "item": "Thieves' tools", "quantity": 1 },
+    { "item": "Leather armor", "quantity": 1 },
+    { "item": "Rations", "quantity": 5 },
+    { "item": "Gold pieces", "quantity": 21 }
+  ],
+  "xp": 300,
+  "spellSlots": {}
+}
