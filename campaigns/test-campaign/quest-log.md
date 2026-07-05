@@ -24,6 +24,23 @@
     and its tainted egg-brood remain in the guardroom. To fully end the
     threat: destroy/cleanse the egg sacs and deal with the spider. Whatever
     corruption caused this (and what it did to Tobin) is unexplained.
+  - Day 4 (morning, at the Gilded Antler): Barrow relays two new bits of
+    town rumor. (1) Old Mother Yarrow claims the tower wasn't merely
+    abandoned but deliberately SEALED generations ago by a circle of
+    hedge-wardens warding against "the creeping dark" — a possible lead on
+    the corruption's origin. (2) A Hollis boy reports the blue-green lights
+    were still burning last night, confirming the threat is unresolved and
+    ongoing despite Tobin's rescue.
+  - Day 5 (morning): Fenn Hollis reports (via Barrow) that overnight the
+    tower lights PULSED slowly and grew brighter — "like the whole tower was
+    drawing breath." The corruption appears to be escalating; the town is
+    frightened. Barrow urges Kira to finish it soon.
+  - Day 4 (visiting the miller's house): Tobin's fever has broken somewhat;
+    he's coherent enough to describe small eyes watching from within the
+    silk/walls (distinct from the spider) and a quiet voice urging him not
+    to struggle. He now believes the spider is feeding off the green light
+    rather than being its source — suggesting something else is the true
+    cause of the corruption, tying in with Mother Yarrow's sealing story.
 
 ## Completed
 _(none yet)_

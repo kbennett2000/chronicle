@@ -1,18 +1,15 @@
 # World State
 
 ## Current Situation
-Morning of day 4, in Millhaven. Kira cut Tobin fully free, hauled him onto
-her shoulder, and broke for the stair; the spider lunged but missed (tangled
-in its own webs) and would not follow into daylight. She carried Tobin south
-through the Greywood to Millhaven, where Garrick and the miller took him in.
-Tobin is alive but feverish and shaken, babbling about "the green light in
-the walls"; his family is tending him. Kira took a long rest at the Gilded
-Antler (–2 gp, care for both; 21→19 gp) and is fully healed (16/16 HP). She
-is unwounded and back at Millhaven's gate/main street after a short,
-uneventful stroll out the south road and back (Garrick on the gate, a bit
-puzzled). She is deciding her next move. UNRESOLVED: the watchtower still glows,
-and the corrupted giant spider and its tainted egg-brood remain nesting in
-the second-floor guardroom.
+Morning of day 5, at the Gilded Antler, talking with Barrow. He's just
+shared alarming news from Fenn Hollis: last night the tower lights didn't
+merely burn but PULSED — slow, "like the whole tower was drawing breath" —
+and brighter than ever. The town is frightened; Barrow urges Kira not to
+wait too long to finish it. She is fully healed (16/16 HP, 18 gp). She knows
+from Tobin the spider isn't the source of the green light — something deeper
+feeds it. UNRESOLVED: the tower's corruption is escalating; the giant spider
+and its tainted egg-brood remain in the guardroom, and the true source of
+corruption waits to be discovered.
 
 ## Locations Visited
 - **Millhaven (main street / gate)** — a small trade town on the edge of
@@ -21,6 +18,9 @@ the second-floor guardroom.
   the Greywood. First visited this session.
 - **The Gilded Antler (tavern)** — warm, low-beamed common room; kept by
   Barrow. A handful of quiet locals. Kira has a rented room upstairs.
+- **Millhaven market square** — a modest cluster of stalls off the main
+  street: a general goods cart, a fletcher's stand, a small apothecary
+  table.
 - **The Greywood (north road)** — old, close forest between Millhaven and
   the watchtower. Safe by day. An unnatural hush and no birdsong near the
   tower's clearing.

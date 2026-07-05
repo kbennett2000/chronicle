@@ -27,11 +27,13 @@ introduction, in this format:)_
 - **Description:** The miller's boy, a young teen. Found cocooned upright in
   glowing silk in the tower's second-floor guardroom, drained and grey but
   still breathing (shallow, slow). Went up on a dare two nights ago.
-- **Disposition:** RESCUED by Kira and returned to Millhaven; alive but
-  feverish and corruption-touched, tended by his family. Grateful (as is the
-  town), though not yet coherent enough for a real conversation.
-- **Knows:** Was up in the tower; babbles about "the green light in the
-  walls." May have more to tell once he recovers.
+- **Disposition:** RESCUED by Kira and returned to Millhaven; fever broke a
+  little overnight, now weak but conscious and coherent enough to talk.
+  Grateful, as is his family.
+- **Knows:** Recalls small eyes watching from within the walls' silk (not
+  the spider's own) and a quiet voice telling him to stop struggling. Now
+  believes the spider is merely living in/feeding off the green light, not
+  the source of it himself.
 - **Portrait asset ID:** (none yet)
 
 ## Barrow
@@ -42,5 +44,16 @@ introduction, in this format:)_
 - **Knows:** The watchtower was a border beacon abandoned generations ago
   after a "bad winter." Local lore says it was sealed for a reason. The
   blue-green lights are new and unnatural. Worried for Tobin, the miller's
-  boy who vanished there.
+  boy who vanished there. Relays town rumors he hears at the bar (e.g. from
+  Mother Yarrow and the Hollis boy).
+- **Portrait asset ID:** (none yet)
+
+## Mother Yarrow
+- **Description:** An elderly Millhaven woman; not yet met directly, known
+  so far only through Barrow's secondhand account.
+- **Disposition:** Unknown — no direct interaction yet.
+- **Knows:** Recounts her grandmother's stories that the watchtower was
+  deliberately SEALED generations ago by a circle of hedge-wardens, warding
+  against "the creeping dark" — a possible origin for the tower's
+  corruption.
 - **Portrait asset ID:** (none yet)

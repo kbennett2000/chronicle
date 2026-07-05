@@ -4,17 +4,20 @@ import {
   resolveCampaignDir,
   readPersistedSessionId,
   persistSessionId,
-  startSessionLog,
+  resolveSessionLog,
+  readCampaignModel,
 } from "./campaign-store.js";
 
 const campaignDir = resolveCampaignDir("test-campaign");
-const sessionLogRelPath = startSessionLog(campaignDir);
+const model = readCampaignModel(campaignDir);
 
 let resumeSessionId = readPersistedSessionId(campaignDir);
+const sessionLogRelPath = resolveSessionLog(campaignDir, Boolean(resumeSessionId));
 
 console.log("Chronicle DM engine — CLI harness");
 console.log(`Campaign dir: ${campaignDir}`);
 console.log(`Session log: ${sessionLogRelPath}`);
+console.log(`Model: ${model}`);
 if (resumeSessionId) {
   console.log(`Resuming prior session: ${resumeSessionId}`);
 }
@@ -39,6 +42,7 @@ async function promptLoop() {
       sessionLogRelPath,
       input,
       resumeSessionId,
+      model,
       (chunk) => process.stdout.write(chunk)
     );
     process.stdout.write("\n\n");

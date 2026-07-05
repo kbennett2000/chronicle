@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Chronicle</title>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <h1>Chronicle</h1>
+      <nav class="tabs">
+        <button type="button" class="tab-button" data-view="chat" aria-current="true">Story</button>
+        <button type="button" class="tab-button" data-view="settings">Settings</button>
+      </nav>
+    </header>
+
+    <main id="chat-view" class="view">
+      <div id="session-banner" class="session-banner" hidden></div>
+      <div id="chat-log" class="chat-log" aria-live="polite"></div>
+      <form id="chat-form" class="chat-form">
+        <textarea
+          id="chat-input"
+          class="chat-input"
+          rows="1"
+          placeholder="What do you do?"
+          autocomplete="off"
+        ></textarea>
+        <button type="submit" id="chat-send" class="send-button">Send</button>
+      </form>
+    </main>
+
+    <main id="settings-view" class="view" hidden>
+      <section class="settings-section">
+        <h2>DM Model</h2>
+        <p class="settings-hint">
+          Applies to the next session you start (existing session keeps its
+          current model until you restart it).
+        </p>
+        <div id="model-options" class="model-options"></div>
+        <button type="button" id="apply-model" class="apply-button">
+          Apply &amp; start new session
+        </button>
+        <p id="model-status" class="model-status" hidden></p>
+      </section>
+
+      <section class="settings-section">
+        <h2>Images</h2>
+        <label class="toggle-row toggle-disabled">
+          <span>Generate Images</span>
+          <span class="toggle-switch" aria-disabled="true"></span>
+        </label>
+        <p class="settings-hint">Coming soon — not available yet.</p>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

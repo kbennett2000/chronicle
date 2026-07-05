@@ -52,6 +52,7 @@ export interface TurnResult {
   text: string;
   sessionId: string | undefined;
   isError: boolean;
+  model: string;
 }
 
 export async function runTurn(
@@ -59,6 +60,7 @@ export async function runTurn(
   sessionLogPath: string,
   userInput: string,
   resumeSessionId: string | undefined,
+  model: string,
   onText: (chunk: string) => void
 ): Promise<TurnResult> {
   let sessionId: string | undefined;
@@ -74,6 +76,7 @@ export async function runTurn(
     disallowedTools: ["Bash"],
     permissionMode: "dontAsk",
     systemPrompt: systemPrompt(sessionLogPath),
+    model,
   };
   if (resumeSessionId) {
     options.resume = resumeSessionId;
@@ -96,5 +99,5 @@ export async function runTurn(
     }
   }
 
-  return { text: textParts.join(""), sessionId, isError };
+  return { text: textParts.join(""), sessionId, isError, model };
 }

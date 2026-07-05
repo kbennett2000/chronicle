@@ -136,7 +136,17 @@ Fires only on **first creation** of a registry entry, not every mention:
 - A boss/major antagonist's reveal
 
 Settings screen: single **Generate Images** toggle (video toggle stubbed,
-hidden/off, for later).
+hidden/off, for later), plus a **model selector**:
+- Default: `claude-sonnet-5` — matched to this workload (narrative +
+  rules-following state management), not a cost compromise.
+- Optional upgrade: `claude-opus-4-8`, labeled for players who want maximum
+  rules/narrative fidelity and don't mind a higher per-session cost.
+- Optional budget option: `claude-haiku-4-5`, labeled honestly as
+  faster/cheaper but less precise on rules — a testing/casual-session
+  option, not the recommended default.
+- Model choice is per-campaign (stored alongside campaign state), not
+  global — a long-running campaign shouldn't silently change adjudication
+  quality mid-story unless the player chooses to switch it.
 
 ## 9. Open Decisions To Confirm With Her Directly
 - How much visual competes with prose — dashboard-heavy vs. book-with-a-dice-tray.
