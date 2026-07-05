@@ -24,7 +24,9 @@ test.describe("Cross-origin connection (issue #34)", () => {
     });
 
     await page.getByRole("button", { name: "SAVE & RECONNECT" }).click();
-    await expect(page.getByText("Connected to the hearth")).toBeVisible({ timeout: 10_000 });
+    // Issue #35: a successful (cross-origin, CORS-clean) reconnect now lands
+    // on Home directly rather than staying on Settings.
+    await expect(page.getByText("CHRONICLE", { exact: true })).toBeVisible({ timeout: 10_000 });
     expect(corsErrors).toEqual([]);
   });
 

@@ -28,14 +28,12 @@ test.describe("First real connection — brand-new campaign (issue #33)", () => 
     await page.locator('input[placeholder="192.168.1.24:4317"]').fill(bareAddress);
     await page.locator('input[type="password"]').fill(freshChronicleServer.token);
     await page.getByRole("button", { name: "SAVE & RECONNECT" }).click();
-    await expect(page.getByText("Connected to the hearth")).toBeVisible();
 
-    // Save & Reconnect only updates the stored connection — it doesn't
-    // navigate away from Settings on its own. Going back is what lands on
-    // Home with the now-valid connection, which is where issue #33's crash
-    // actually happened (Home's own GET /state fetch over the same
-    // previously-broken serverOrigin() URL).
-    await page.getByTestId("settings-back").click();
+    // Issue #35: a successful Save & Reconnect now lands on Home directly
+    // (it used to stay on Settings and require a manual Back). Home is still
+    // where issue #33's crash happened — Home's own GET /state fetch over the
+    // same previously-broken serverOrigin() URL — so the regression guard
+    // below is unchanged, just reached automatically now.
 
     // The actual regression: this used to throw (Cannot read properties of
     // undefined, reading 'replace'/'map') and take down the whole React
