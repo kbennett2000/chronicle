@@ -208,7 +208,7 @@ design for, not an edge case.
 
 ## 8. Known Mockup-vs-Real-Schema Divergences
 
-Found during panel implementation (Slices 20, 22) — the design mockup
+Found during panel implementation (Slices 20, 22-24) — the design mockup
 invented structure the backend schema doesn't actually have. In both
 cases the real, un-fabricated shape was implemented instead of inventing
 data to match the mockup:
@@ -226,6 +226,33 @@ data to match the mockup:
   (Active/Completed), each holding freeform prose bullets with nested
   progress notes — no structured step-completion state exists anywhere.
   Built around the real two-section freeform shape instead.
+- **Views (gallery) panel:** mockup's lightbox showed a "first drawn ·
+  Session N" caption. `image-generator.ts` never records when an image
+  was generated — that data doesn't exist anywhere — so it's not
+  rendered. Third instance of this same pattern; if a future slice ever
+  wants generation-timestamp captions, that's a real (small) addition to
+  `image-generator.ts` itself, not something to fake client-side.
+
+- **Settings screen:** not a fabrication case, but a real endpoint-shape
+  gotcha the mockup's flat data model hides — `model` (Engine) only ever
+  changes via `POST /session/start`, while every other Engine/Look/World
+  field (artStyle, worldSetting, toneWhimsy, contentIntensity,
+  generateImages) goes through `GET`/`POST /campaigns/:id/settings`.
+  Rather than one "Save" button quietly firing two different kinds of
+  requests, every control applies itself immediately on interaction
+  (click a model row, click an art chip, flip the images toggle, move
+  the whimsy slider, blur a text field) with its own small inline
+  save-status line — matching the mockup's own auto-apply interaction
+  pattern for these sections, which turns out to have been the right
+  call for exactly this reason, not just a style choice.
+
+Related, found during Views: **NPC and location image/description
+recording aren't structurally consistent.** NPCs get a fixed `## <Name>`
+heading with a `Portrait asset ID` field; locations only get a freeform
+"Image" line under a bullet, no fixed heading. A tolerant parser handles
+this today, but it's worth a future consistency pass in
+`image-generator.ts`'s recording convention rather than leaving two
+different shapes for what's conceptually the same kind of data.
 
 ## 9. Known Constraints Worth Knowing
 
@@ -250,4 +277,5 @@ data to match the mockup:
   network-bound Agent SDK call in the suite intermittently fail under a
   full run while passing reliably alone. Fixed by spawning detached and
   killing the whole process group on teardown; confirmed clean (zero
-  leaked processes, 19/19 passing) across 4 consecutive full-suite runs.
+  leaked processes, all tests passing) across several consecutive
+  full-suite runs since, most recently after Slice 24.

@@ -64,6 +64,49 @@ export interface SessionStartResult {
   model: string;
 }
 
+/** Mirrors src/campaign-store.ts's CampaignSettings. `model` is included
+ * in GET's response (readCampaignSettings always reads/returns it) but
+ * per the backend contract §5 it can never be changed via POST here —
+ * server.ts's POST /settings handler never even reads a `model` field
+ * off the request body. The only way to change it is
+ * POST /campaigns/:id/session/start (see startSession above) — that
+ * split is real, not a frontend simplification, so CampaignSettingsPatch
+ * below deliberately excludes it rather than silently no-opping it. */
+export interface CampaignSettings {
+  model: string;
+  artStyle?: string;
+  worldSetting?: string;
+  toneWhimsy?: number;
+  contentIntensity?: "standard" | "low";
+  generateImages?: boolean;
+}
+
+export type CampaignSettingsPatch = Partial<Omit<CampaignSettings, "model">>;
+
+export interface ModelOption {
+  id: string;
+  label: string;
+}
+
+export async function getCampaignSettings(connection: Connection, campaignId: string): Promise<CampaignSettings> {
+  return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/settings`)) as CampaignSettings;
+}
+
+export async function updateCampaignSettings(
+  connection: Connection,
+  campaignId: string,
+  patch: CampaignSettingsPatch
+): Promise<CampaignSettings> {
+  return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/settings`, {
+    method: "POST",
+    body: JSON.stringify(patch),
+  })) as CampaignSettings;
+}
+
+export async function getModels(connection: Connection): Promise<{ models: ModelOption[]; default: string }> {
+  return (await apiFetch(connection, "/models")) as { models: ModelOption[]; default: string };
+}
+
 export async function getState(connection: Connection, campaignId: string): Promise<StateSnapshot> {
   return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/state`)) as StateSnapshot;
 }
