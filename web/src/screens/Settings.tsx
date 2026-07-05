@@ -157,7 +157,7 @@ export function Settings({
           borderBottom: "1px solid rgba(109,90,56,.3)",
         }}
       >
-        <button className="icon-button" onClick={onBack}>
+        <button className="icon-button" data-testid="settings-back" onClick={onBack}>
           <span className="back-chevron" />
         </button>
         <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, letterSpacing: 2, color: "var(--ink)" }}>

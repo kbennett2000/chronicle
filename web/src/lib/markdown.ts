@@ -26,7 +26,13 @@ function stripHtmlComments(markdown: string): string {
   return markdown.replace(/<!--[\s\S]*?-->/g, "");
 }
 
+/** rawMarkdown is whatever a StateSnapshot field turned out to hold — a
+ * malformed/unexpected API response (see connection.ts's serverOrigin fix,
+ * issue #33) can hand this a non-string. Treat that as "no content" rather
+ * than throwing, since every caller already renders an empty result as a
+ * legitimate not-started-yet state. */
 export function parseMarkdownSections(rawMarkdown: string): MarkdownSection[] {
+  if (typeof rawMarkdown !== "string") return [];
   const markdown = stripHtmlComments(rawMarkdown);
   const lines = markdown.split(/\r?\n/);
   const sections: MarkdownSection[] = [];

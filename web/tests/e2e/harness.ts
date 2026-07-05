@@ -117,39 +117,52 @@ _(none established yet)_
  * because it was fresh several tests ago, not anymore. One server+
  * campaign per test costs a few extra seconds of boot time; it buys
  * actual isolation. */
-export const test = base.extend<{ chronicleServer: ChronicleTestServer }, object>({
+async function bootServer(campaignId: string, use: (server: ChronicleTestServer) => Promise<void>): Promise<void> {
+  const port = 4500 + Math.floor(Math.random() * 400);
+  const baseURL = `http://127.0.0.1:${port}`;
+  // detached: true makes this process the leader of its own process
+  // group (pid === pgid) — see killServerTree below for why that matters.
+  const proc: ChildProcess = spawn("npx", ["tsx", "src/server.ts"], {
+    cwd: REPO_ROOT,
+    env: { ...process.env, CHRONICLE_SHARED_SECRET: TOKEN, PORT: String(port), HOST: "127.0.0.1" },
+    stdio: "pipe",
+    detached: true,
+  });
+
+  let stderr = "";
+  proc.stderr?.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+
+  try {
+    await waitForReady(baseURL, TOKEN);
+  } catch (err) {
+    killServerTree(proc);
+    runScratchScript(["delete", campaignId]);
+    throw new Error(`${(err as Error).message}\n${stderr}`);
+  }
+
+  await use({ baseURL, token: TOKEN, campaignId });
+
+  killServerTree(proc);
+  runScratchScript(["delete", campaignId]);
+}
+
+export const test = base.extend<{ chronicleServer: ChronicleTestServer; freshChronicleServer: ChronicleTestServer }, object>({
   chronicleServer: async ({}, use) => {
     const campaignId = runScratchScript(["create"]);
     seedCampaignContent(campaignId);
+    await bootServer(campaignId, use);
+  },
 
-    const port = 4500 + Math.floor(Math.random() * 400);
-    const baseURL = `http://127.0.0.1:${port}`;
-    // detached: true makes this process the leader of its own process
-    // group (pid === pgid) — see killServerTree below for why that matters.
-    const proc: ChildProcess = spawn("npx", ["tsx", "src/server.ts"], {
-      cwd: REPO_ROOT,
-      env: { ...process.env, CHRONICLE_SHARED_SECRET: TOKEN, PORT: String(port), HOST: "127.0.0.1" },
-      stdio: "pipe",
-      detached: true,
-    });
-
-    let stderr = "";
-    proc.stderr?.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    try {
-      await waitForReady(baseURL, TOKEN);
-    } catch (err) {
-      killServerTree(proc);
-      runScratchScript(["delete", campaignId]);
-      throw new Error(`${(err as Error).message}\n${stderr}`);
-    }
-
-    await use({ baseURL, token: TOKEN, campaignId });
-
-    killServerTree(proc);
-    runScratchScript(["delete", campaignId]);
+  // Deliberately unseeded — scratch-campaign.ts's own blank defaults, not
+  // seedCampaignContent's fixture prose. Some scenarios (issue #33's
+  // black-screen-on-first-connect) only reproduce against a campaign that
+  // has genuinely never been touched, since seeded content or a stored
+  // client-side connection can mask the exact bug being verified.
+  freshChronicleServer: async ({}, use) => {
+    const campaignId = runScratchScript(["create"]);
+    await bootServer(campaignId, use);
   },
 });
 
