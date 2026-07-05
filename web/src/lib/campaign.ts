@@ -45,6 +45,9 @@ export interface TurnTranscriptRecord {
   timestamp: string;
   playerMessage: string;
   narration: string;
+  /** ADR-0009: a user-illustrated moment records its scene image's relative
+   * path here; absent on turns never illustrated. */
+  image?: string;
 }
 
 export interface StateSnapshot {
@@ -153,4 +156,38 @@ export async function sendTurn(connection: Connection, campaignId: string, messa
     throw new ApiError((body as { error?: string }).error ?? `request failed (${status})`);
   }
   return body as TurnResult;
+}
+
+/** ADR-0009 on-demand illustration. `ok:false` is a domain result carrying the
+ * exact Grok failure reason (returned at HTTP 200), not an exception — so the
+ * UI can show *why* nothing was drawn instead of failing silently. */
+export interface IllustrateResult {
+  ok: boolean;
+  relPath?: string;
+  error?: string;
+  turnIndex?: number;
+}
+
+export async function illustrateEntity(
+  connection: Connection,
+  campaignId: string,
+  entityType: "character" | "npc" | "location",
+  name: string,
+  description: string
+): Promise<IllustrateResult> {
+  return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/illustrate`, {
+    method: "POST",
+    body: JSON.stringify({ kind: "entity", entityType, name, description }),
+  })) as IllustrateResult;
+}
+
+export async function illustrateMoment(
+  connection: Connection,
+  campaignId: string,
+  turnIndex: number
+): Promise<IllustrateResult> {
+  return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/illustrate`, {
+    method: "POST",
+    body: JSON.stringify({ kind: "moment", turnIndex }),
+  })) as IllustrateResult;
 }

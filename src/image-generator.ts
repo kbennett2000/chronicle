@@ -15,7 +15,7 @@ const execFileAsync = promisify(execFile);
  * indefinitely if Grok Build wedges. */
 const GROK_TIMEOUT_MS = 90_000;
 
-export type ImageEntityType = "character" | "npc" | "location" | "item" | "boss";
+export type ImageEntityType = "character" | "npc" | "location" | "item" | "boss" | "scene";
 
 export interface ImageGenResult {
   ok: boolean;

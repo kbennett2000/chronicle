@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Connection } from "../lib/connection";
 import { useAuthedImage } from "../lib/useAuthedImage";
 import { buildGallery, type GalleryItem } from "../lib/gallery";
-import type { CharacterSheet } from "../lib/campaign";
+import { illustrateEntity, type CharacterSheet } from "../lib/campaign";
 
 interface GalleryPanelProps {
   connection: Connection;
@@ -10,6 +10,9 @@ interface GalleryPanelProps {
   characterSheet: CharacterSheet;
   npcRoster: string;
   worldState: string;
+  /** Called after a successful on-demand illustration so Play can re-fetch
+   * state and the newly-recorded image shows up (ADR-0009). */
+  onIllustrated: () => void;
 }
 
 interface LightboxState {
@@ -23,14 +26,41 @@ function GalleryTile({
   item,
   onOpen,
   onLoadedChange,
+  onIllustrated,
 }: {
   connection: Connection;
   campaignId: string;
   item: GalleryItem;
   onOpen: (item: GalleryItem, url: string) => void;
   onLoadedChange: (loaded: boolean) => void;
+  onIllustrated: () => void;
 }) {
   const { url, status } = useAuthedImage(connection, campaignId, item.image);
+  const [drawing, setDrawing] = useState(false);
+  const [drawError, setDrawError] = useState<string | null>(null);
+
+  async function draw() {
+    setDrawing(true);
+    setDrawError(null);
+    try {
+      const result = await illustrateEntity(
+        connection,
+        campaignId,
+        item.type,
+        item.name,
+        item.description || item.name
+      );
+      if (result.ok) {
+        onIllustrated();
+      } else {
+        setDrawError(result.error || "Grok Build couldn't draw this.");
+      }
+    } catch (err) {
+      setDrawError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDrawing(false);
+    }
+  }
 
   // Reported so the "N of M illustrated" header counts images that
   // actually resolved, not just entities with a filename recorded — a
@@ -80,7 +110,7 @@ function GalleryTile({
     <div
       data-testid="gallery-tile-empty"
       style={{
-        height: 110,
+        minHeight: 110,
         borderRadius: 2,
         background: "rgba(20,12,6,.35)",
         border: "1px dashed rgba(109,90,56,.4)",
@@ -89,7 +119,7 @@ function GalleryTile({
         alignItems: "center",
         justifyContent: "center",
         textAlign: "center",
-        padding: "0 8px",
+        padding: "10px 8px",
       }}
     >
       <div style={{ fontFamily: "var(--font-display)", fontSize: 9, letterSpacing: 1, color: "var(--ink-faint)", opacity: 0.7 }}>
@@ -99,6 +129,30 @@ function GalleryTile({
         {item.name}
       </div>
       <div style={{ fontSize: 9, color: "var(--ink-faint)", opacity: 0.6, marginTop: 5 }}>— no likeness —</div>
+      <button
+        data-testid="gallery-draw"
+        onClick={draw}
+        disabled={drawing}
+        style={{
+          marginTop: 7,
+          cursor: drawing ? "default" : "pointer",
+          padding: "5px 11px",
+          borderRadius: 20,
+          background: drawing ? "rgba(28,20,12,.5)" : "rgba(124,61,32,.28)",
+          border: "1px solid rgba(211,112,60,.5)",
+          color: drawing ? "var(--ink-faint)" : "var(--ember)",
+          fontFamily: "var(--font-display)",
+          fontSize: 10,
+          letterSpacing: 0.5,
+        }}
+      >
+        {drawing ? "Drawing…" : "✎ Draw this"}
+      </button>
+      {drawError && (
+        <div data-testid="gallery-draw-error" style={{ fontSize: 9.5, color: "var(--ember)", marginTop: 5, lineHeight: 1.3 }}>
+          {drawError}
+        </div>
+      )}
     </div>
   );
 }
@@ -109,7 +163,7 @@ function GalleryTile({
  * always renders one tile per known entity (character/NPC/location)
  * rather than collapsing down to a single "nothing here" message the way
  * Folk/Quest do when they have zero entries at all. */
-export function GalleryPanel({ connection, campaignId, characterSheet, npcRoster, worldState }: GalleryPanelProps) {
+export function GalleryPanel({ connection, campaignId, characterSheet, npcRoster, worldState, onIllustrated }: GalleryPanelProps) {
   const items = useMemo(
     () => buildGallery(characterSheet, npcRoster, worldState),
     [characterSheet, npcRoster, worldState]
@@ -122,7 +176,7 @@ export function GalleryPanel({ connection, campaignId, characterSheet, npcRoster
   return (
     <div>
       <div data-testid="gallery-count" style={{ fontSize: 12, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 12 }}>
-        {illustratedCount} of {items.length} illustrated · most faces and places are never drawn
+        {illustratedCount} of {items.length} illustrated · tap “Draw this” to illustrate one
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         {items.map((item, i) => (
@@ -135,6 +189,7 @@ export function GalleryPanel({ connection, campaignId, characterSheet, npcRoster
             onLoadedChange={(loaded) =>
               setLoadedFlags((prev) => (prev[i] === loaded ? prev : { ...prev, [i]: loaded }))
             }
+            onIllustrated={onIllustrated}
           />
         ))}
       </div>

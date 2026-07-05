@@ -17,6 +17,9 @@ import {
   resolveSessionLog,
   readStateSnapshot,
   appendTurnTranscript,
+  readTurnTranscript,
+  setTranscriptRecordImage,
+  recordEntityImage,
   readCampaignModel,
   persistCampaignModel,
   readCampaignSettings,
@@ -28,6 +31,7 @@ import {
   CampaignNotFoundError,
   type ContentIntensity,
 } from "./campaign-store.js";
+import { generateImage } from "./image-generator.js";
 
 const dotenvResult = loadDotenv();
 if (dotenvResult.error) {
@@ -289,6 +293,75 @@ const ROUTES: Array<{
       }
 
       sendJson(res, 200, persistCampaignSettings(campaignDir, updates));
+    },
+  },
+  {
+    // Per ADR-0009: user-triggered on-demand image generation, outside a turn
+    // and independent of the generateImages auto-toggle. Reuses generateImage
+    // directly (no model round-trip); returns its { ok, relPath?, error? }
+    // verbatim at HTTP 200 so the client can show the exact failure reason
+    // instead of a silent no-op.
+    method: "POST",
+    pattern: /^\/campaigns\/([^/]+)\/illustrate$/,
+    async handler(req, res, [campaignId]) {
+      const campaignDir = resolveCampaignDir(campaignId);
+      const body = (await readJsonBody(req)) as Record<string, unknown>;
+      const settings = readCampaignSettings(campaignDir);
+
+      if (body.kind === "entity") {
+        const entityType = body.entityType;
+        if (entityType !== "character" && entityType !== "npc" && entityType !== "location") {
+          sendJson(res, 400, { error: "entityType must be one of character, npc, location" });
+          return;
+        }
+        if (typeof body.name !== "string" || body.name.trim() === "") {
+          sendJson(res, 400, { error: "name must be a non-empty string" });
+          return;
+        }
+        const description =
+          typeof body.description === "string" && body.description.trim() ? body.description.trim() : body.name.trim();
+
+        const result = await generateImage(campaignDir, entityType, body.name.trim(), description, settings);
+        if (result.ok && result.relPath) {
+          recordEntityImage(campaignDir, entityType, body.name.trim(), result.relPath);
+        }
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (body.kind === "moment") {
+        const active = activeSessions.get(campaignId);
+        if (!active) {
+          sendJson(res, 409, {
+            error: `no active session for campaign '${campaignId}' — start one before illustrating a moment`,
+          });
+          return;
+        }
+        if (typeof body.turnIndex !== "number" || !Number.isInteger(body.turnIndex) || body.turnIndex < 0) {
+          sendJson(res, 400, { error: "turnIndex must be a non-negative integer" });
+          return;
+        }
+        const record = readTurnTranscript(campaignDir, active.sessionLogPath).find(
+          (r) => r.turnIndex === body.turnIndex
+        );
+        if (!record) {
+          sendJson(res, 404, { error: `no turn ${body.turnIndex} in the active session` });
+          return;
+        }
+        // The narration is the scene description; keep the /imagine prompt sane.
+        const description = record.narration.trim().slice(0, 500) || "a scene from the story";
+        const sessionBase = path.basename(active.sessionLogPath).replace(/\.md$/, "");
+        const name = `${sessionBase}-turn-${body.turnIndex}`;
+
+        const result = await generateImage(campaignDir, "scene", name, description, settings);
+        if (result.ok && result.relPath) {
+          setTranscriptRecordImage(campaignDir, active.sessionLogPath, body.turnIndex, result.relPath);
+        }
+        sendJson(res, 200, { ...result, turnIndex: body.turnIndex });
+        return;
+      }
+
+      sendJson(res, 400, { error: "body.kind must be 'entity' or 'moment'" });
     },
   },
   {

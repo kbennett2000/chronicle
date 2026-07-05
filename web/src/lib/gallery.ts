@@ -9,6 +9,9 @@ export interface GalleryItem {
   type: GalleryEntityType;
   name: string;
   image?: string;
+  /** A short visual description used to seed on-demand illustration
+   * (ADR-0009). Best-effort — falls back to the name if none is recorded. */
+  description?: string;
 }
 
 const TOP_BULLET_RE = /^-\s*\*\*([^*]+)\*\*\s*(?:[—-]\s*)?(.*)$/;
@@ -33,9 +36,9 @@ function normalizeImageValue(raw: string | undefined): string | undefined {
  * location's name and (if ever generated) image path matter for the
  * gallery, so this doesn't carry the full continuation-line reassembly
  * quest-log.ts needs for its prose detail/progress fields. */
-function parseLocations(body: string): Array<{ name: string; image?: string }> {
-  const entries: Array<{ name: string; image?: string }> = [];
-  let current: { name: string; image?: string } | null = null;
+function parseLocations(body: string): Array<{ name: string; image?: string; description?: string }> {
+  const entries: Array<{ name: string; image?: string; description?: string }> = [];
+  let current: { name: string; image?: string; description?: string } | null = null;
 
   const flush = () => {
     if (current) entries.push(current);
@@ -51,7 +54,9 @@ function parseLocations(body: string): Array<{ name: string; image?: string }> {
       if (!line.startsWith("-")) continue;
       flush();
       const match = TOP_BULLET_RE.exec(line);
-      current = { name: match ? match[1].trim() : line.replace(/^-\s*/, "").trim() };
+      current = match
+        ? { name: match[1].trim(), description: match[2].trim() || undefined }
+        : { name: line.replace(/^-\s*/, "").trim() };
       continue;
     }
 
@@ -71,18 +76,26 @@ function parseLocations(body: string): Array<{ name: string; image?: string }> {
  * are already fetched by Play.tsx for their own panels — this just
  * re-reads them into one flat list, entity-type-tagged. */
 export function buildGallery(characterSheet: CharacterSheet, npcRoster: string, worldState: string): GalleryItem[] {
+  const characterDescription = [characterSheet.name, "a", `level ${characterSheet.level}`, characterSheet.race, characterSheet.class]
+    .filter(Boolean)
+    .join(" ");
   const items: GalleryItem[] = [
-    { type: "character", name: characterSheet.name, image: normalizeImageValue(characterSheet.portraitImage) },
+    {
+      type: "character",
+      name: characterSheet.name,
+      image: normalizeImageValue(characterSheet.portraitImage),
+      description: characterDescription,
+    },
   ];
 
   for (const npc of parseNpcRoster(npcRoster)) {
-    items.push({ type: "npc", name: npc.name, image: npc.portraitImage });
+    items.push({ type: "npc", name: npc.name, image: npc.portraitImage, description: npc.description });
   }
 
   const locations = findMarkdownSection(worldState, LOCATIONS_VISITED_HEADING);
   if (locations) {
     for (const location of parseLocations(locations.body)) {
-      items.push({ type: "location", name: location.name, image: location.image });
+      items.push({ type: "location", name: location.name, image: location.image, description: location.description });
     }
   }
 

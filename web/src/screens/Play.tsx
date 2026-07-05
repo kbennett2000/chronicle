@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Connection } from "../lib/connection";
-import { getState, sendTurn, type CharacterSheet, type StateSnapshot } from "../lib/campaign";
+import { getState, sendTurn, illustrateMoment, type CharacterSheet, type StateSnapshot } from "../lib/campaign";
+import { useAuthedImage } from "../lib/useAuthedImage";
 import { parseChapterHeadings } from "../lib/session-log";
 import { BottomSheet } from "../components/BottomSheet";
 import { SelfPanel } from "../panels/SelfPanel";
@@ -25,6 +26,8 @@ interface DisplayTurn {
   playerMessage: string;
   narration: string | null;
   isError?: boolean;
+  /** ADR-0009: the scene image a user illustrated for this moment, if any. */
+  image?: string;
 }
 
 const TABS = ["Self", "Folk", "Quest", "Views"] as const;
@@ -57,7 +60,46 @@ function ChapterHeading({ text }: { text: string }) {
   );
 }
 
-function TurnView({ turn }: { turn: DisplayTurn }) {
+/** Renders a moment's illustrated scene as an authed blob image; nothing
+ * while it can't resolve (same graceful-empty contract as the gallery). */
+function MomentImage({ connection, campaignId, filename }: { connection: Connection; campaignId: string; filename: string }) {
+  const { url } = useAuthedImage(connection, campaignId, filename);
+  if (!url) return null;
+  return (
+    <img
+      src={url}
+      alt=""
+      data-testid="moment-image"
+      style={{
+        display: "block",
+        width: "100%",
+        borderRadius: 3,
+        margin: "0 0 16px",
+        boxShadow: "0 6px 16px rgba(0,0,0,.5), 0 0 0 1px rgba(184,150,90,.4)",
+      }}
+    />
+  );
+}
+
+function TurnView({
+  turn,
+  connection,
+  campaignId,
+  onIllustrate,
+  drawing,
+  drawError,
+}: {
+  turn: DisplayTurn;
+  connection: Connection;
+  campaignId: string;
+  onIllustrate: () => void;
+  drawing: boolean;
+  drawError: string | null;
+}) {
+  // A moment can be illustrated once it has real (non-error) narration and
+  // has been persisted server-side (i.e. it's a settled turn, not the one
+  // still weaving). Already-illustrated moments show the image instead.
+  const canIllustrate = turn.narration !== null && !turn.isError;
   return (
     <>
       <div style={{ margin: "0 0 16px", paddingLeft: 12, borderLeft: "2px solid var(--ember-deep)" }}>
@@ -84,6 +126,33 @@ function TurnView({ turn }: { turn: DisplayTurn }) {
         >
           {turn.narration}
         </p>
+      )}
+      {turn.image && <MomentImage connection={connection} campaignId={campaignId} filename={turn.image} />}
+      {canIllustrate && !turn.image && (
+        <div style={{ margin: "-6px 0 18px" }}>
+          <button
+            data-testid="illustrate-moment"
+            onClick={onIllustrate}
+            disabled={drawing}
+            style={{
+              cursor: drawing ? "default" : "pointer",
+              background: "none",
+              border: "none",
+              padding: 0,
+              color: drawing ? "var(--ink-faint)" : "var(--brass)",
+              fontFamily: "var(--font-display)",
+              fontSize: 11,
+              letterSpacing: 0.5,
+            }}
+          >
+            {drawing ? "Illustrating…" : "⟢ Illustrate this moment"}
+          </button>
+          {drawError && (
+            <div data-testid="illustrate-error" style={{ fontSize: 11, color: "var(--ember)", marginTop: 4 }}>
+              {drawError}
+            </div>
+          )}
+        </div>
       )}
     </>
   );
@@ -126,6 +195,10 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [openTab, setOpenTab] = useState<Tab | null>(null);
+  // Per-turn illustration state (ADR-0009): which turn index is currently
+  // generating, and any error to show under that turn's button.
+  const [illustratingTurn, setIllustratingTurn] = useState<number | null>(null);
+  const [illustrateErrors, setIllustrateErrors] = useState<Record<number, string>>({});
   const [characterSheet, setCharacterSheet] = useState<CharacterSheet | null>(null);
   const [npcRoster, setNpcRoster] = useState<string>("");
   const [questLog, setQuestLog] = useState<string>("");
@@ -163,6 +236,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
             snapshot.currentSessionLog.transcript.map((record) => ({
               playerMessage: record.playerMessage,
               narration: record.narration,
+              image: record.image,
             }))
           );
         } else {
@@ -231,6 +305,38 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
     }
   }
 
+  // ADR-0009: illustrate a settled turn on demand. On success the server
+  // persisted the path on the transcript record; we set it on the turn so it
+  // renders immediately (and survives reload via hydration). On failure we
+  // show the returned Grok reason under that turn, never a silent no-op.
+  async function handleIllustrateMoment(index: number) {
+    if (illustratingTurn !== null) return;
+    setIllustratingTurn(index);
+    setIllustrateErrors((prev) => {
+      const { [index]: _removed, ...rest } = prev;
+      return rest;
+    });
+    try {
+      const result = await illustrateMoment(connection, campaignId, index);
+      if (result.ok && result.relPath) {
+        const relPath = result.relPath;
+        setTurns((prev) => prev.map((t, i) => (i === index ? { ...t, image: relPath } : t)));
+      } else {
+        setIllustrateErrors((prev) => ({ ...prev, [index]: result.error || "Grok Build couldn't draw this." }));
+      }
+    } catch (err) {
+      setIllustrateErrors((prev) => ({ ...prev, [index]: err instanceof Error ? err.message : String(err) }));
+    } finally {
+      setIllustratingTurn(null);
+    }
+  }
+
+  // Re-fetch state after a gallery illustration so the newly-recorded portrait
+  // reaches the panels that read it.
+  function refreshPanels() {
+    getState(connection, campaignId).then(applyPanelState).catch(() => {});
+  }
+
   return (
     <div className="screen leather-ground">
       <div style={{ flexShrink: 0, padding: "54px 16px 10px", display: "flex", alignItems: "center", gap: 10 }}>
@@ -281,7 +387,18 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
               The tale hasn't begun — say what you do.
             </p>
           )}
-          {load.status === "ready" && turns.map((turn, i) => <TurnView key={i} turn={turn} />)}
+          {load.status === "ready" &&
+            turns.map((turn, i) => (
+              <TurnView
+                key={i}
+                turn={turn}
+                connection={connection}
+                campaignId={campaignId}
+                onIllustrate={() => handleIllustrateMoment(i)}
+                drawing={illustratingTurn === i}
+                drawError={illustrateErrors[i] ?? null}
+              />
+            ))}
           {sending && <WeavingIndicator />}
           <div ref={logEndRef} />
         </div>
@@ -380,6 +497,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
               characterSheet={characterSheet}
               npcRoster={npcRoster}
               worldState={worldState}
+              onIllustrated={refreshPanels}
             />
           ) : (
             <p style={{ fontStyle: "italic", color: "var(--ink-dim)", fontSize: 15, textAlign: "center", marginTop: 40 }}>

@@ -200,6 +200,12 @@ export interface TurnTranscriptRecord {
   timestamp: string;
   playerMessage: string;
   narration: string;
+  /** ADR-0009 addendum (additive): a user-triggered "illustrate this moment"
+   * records the generated scene image's relative path here. Absent on every
+   * record predating that action and on turns never illustrated — the field
+   * being missing means exactly "no image," same as an entity with no
+   * portrait. */
+  image?: string;
 }
 
 /** session-log/session-<ts>.md -> session-log/session-<ts>.transcript.jsonl */
@@ -237,6 +243,167 @@ export function appendTurnTranscript(
   };
   fs.appendFileSync(abs, JSON.stringify(record) + "\n");
   return record;
+}
+
+/** ADR-0009: attach a generated scene image to one already-recorded turn.
+ * Rewrites the JSONL (rather than appending) because it's mutating an
+ * existing record's `image` field — safe under the same single-turn-at-a-time
+ * assumption appendTurnTranscript relies on. Throws if the turn isn't found. */
+export function setTranscriptRecordImage(
+  campaignDir: string,
+  sessionLogRelPath: string,
+  turnIndex: number,
+  image: string
+): TurnTranscriptRecord {
+  const records = readTurnTranscript(campaignDir, sessionLogRelPath);
+  const record = records.find((r) => r.turnIndex === turnIndex);
+  if (!record) {
+    throw new Error(`no transcript record at turn ${turnIndex} for ${sessionLogRelPath}`);
+  }
+  record.image = image;
+  const abs = path.join(campaignDir, transcriptPathFor(sessionLogRelPath));
+  fs.writeFileSync(abs, records.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  return record;
+}
+
+// The literal field/heading names the frontend parser reads back (mirrored
+// from web/src/lib/state-headings.ts, cross-checked in
+// web/tests/heading-consistency.spec.ts). A server-side image write must
+// produce exactly these so buildGallery/parseNpcRoster pick it up.
+const NPC_PORTRAIT_FIELD = "Portrait asset ID";
+const LOCATIONS_VISITED_HEADING = "Locations Visited";
+const HEADING_LINE_RE = /^(#{1,6})\s+(.*\S)\s*$/;
+
+/** Insert or replace the `- **Portrait asset ID:** <relPath>` bullet under the
+ * given NPC's `## <name>` heading in npc-roster.md — the same bullet the model
+ * is told to write (image-generator.ts). Pure string transform; unit-tested. */
+export function withNpcPortrait(rosterMd: string, npcName: string, relPath: string): string {
+  const bullet = `- **${NPC_PORTRAIT_FIELD}:** ${relPath}`;
+  const lines = rosterMd.split(/\r?\n/);
+  const target = npcName.trim().toLowerCase();
+
+  let headingIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const m = HEADING_LINE_RE.exec(lines[i]);
+    if (m && m[1].length === 2 && m[2].trim().toLowerCase() === target) {
+      headingIdx = i;
+      break;
+    }
+  }
+
+  if (headingIdx === -1) {
+    const suffix = rosterMd.endsWith("\n") ? "" : "\n";
+    return `${rosterMd}${suffix}\n## ${npcName.trim()}\n${bullet}\n`;
+  }
+
+  let sectionEnd = lines.length;
+  for (let i = headingIdx + 1; i < lines.length; i++) {
+    if (HEADING_LINE_RE.test(lines[i])) {
+      sectionEnd = i;
+      break;
+    }
+  }
+  const portraitRe = new RegExp(`^-\\s*\\*\\*${NPC_PORTRAIT_FIELD}:\\*\\*`, "i");
+  for (let i = headingIdx + 1; i < sectionEnd; i++) {
+    if (portraitRe.test(lines[i].trim())) {
+      lines[i] = bullet;
+      return lines.join("\n");
+    }
+  }
+  lines.splice(headingIdx + 1, 0, bullet);
+  return lines.join("\n");
+}
+
+/** Insert or replace an indented `- Image: <relPath>` line under the named
+ * location's bullet in world-state.md's "## Locations Visited" section —
+ * matching gallery.ts's IMAGE_LINE_RE. Pure string transform; unit-tested. */
+export function withLocationImage(worldStateMd: string, locationName: string, relPath: string): string {
+  const imageLine = `  - Image: ${relPath}`;
+  const lines = worldStateMd.split(/\r?\n/);
+  const target = locationName.trim().toLowerCase();
+
+  let secStart = -1;
+  let secEnd = lines.length;
+  for (let i = 0; i < lines.length; i++) {
+    const m = HEADING_LINE_RE.exec(lines[i]);
+    if (m && m[2].trim().toLowerCase() === LOCATIONS_VISITED_HEADING.toLowerCase()) {
+      secStart = i + 1;
+      for (let j = i + 1; j < lines.length; j++) {
+        if (HEADING_LINE_RE.test(lines[j])) {
+          secEnd = j;
+          break;
+        }
+      }
+      break;
+    }
+  }
+  if (secStart === -1) return worldStateMd; // no section to attach to — leave untouched
+
+  const topBulletRe = /^-\s*\*\*([^*]+)\*\*\s*(?:[—-]\s*)?(.*)$/;
+  let bulletIdx = -1;
+  for (let i = secStart; i < secEnd; i++) {
+    const raw = lines[i];
+    if (/^[ \t]/.test(raw)) continue; // indented continuation, not a top bullet
+    const line = raw.trim();
+    if (!line.startsWith("-")) continue;
+    const mm = topBulletRe.exec(line);
+    const name = mm ? mm[1].trim() : line.replace(/^-\s*/, "").trim();
+    if (name.toLowerCase() === target) {
+      bulletIdx = i;
+      break;
+    }
+  }
+
+  if (bulletIdx === -1) {
+    lines.splice(secEnd, 0, `- **${locationName.trim()}**`, imageLine);
+    return lines.join("\n");
+  }
+
+  let blockEnd = secEnd;
+  for (let i = bulletIdx + 1; i < secEnd; i++) {
+    const raw = lines[i];
+    if (HEADING_LINE_RE.test(raw)) {
+      blockEnd = i;
+      break;
+    }
+    if (!/^[ \t]/.test(raw) && raw.trim().startsWith("-")) {
+      blockEnd = i;
+      break;
+    }
+  }
+  const imageRe = /^-?\s*\*{0,2}Image\*{0,2}:\s*(.+)$/i;
+  for (let i = bulletIdx + 1; i < blockEnd; i++) {
+    if (imageRe.test(lines[i].trim())) {
+      lines[i] = imageLine;
+      return lines.join("\n");
+    }
+  }
+  lines.splice(bulletIdx + 1, 0, imageLine);
+  return lines.join("\n");
+}
+
+/** ADR-0009: record an on-demand entity image into its state file, so the
+ * gallery/portrait code (which reads images out of state files) shows it with
+ * no other change. item/scene aren't recorded here — an item has no gallery
+ * entry and a scene lives on the transcript record instead. */
+export function recordEntityImage(
+  campaignDir: string,
+  entityType: "character" | "npc" | "boss" | "location",
+  name: string,
+  relPath: string
+): void {
+  if (entityType === "character") {
+    const p = path.join(campaignDir, "character-sheet.json");
+    const sheet = JSON.parse(fs.readFileSync(p, "utf8"));
+    sheet.portraitImage = relPath;
+    fs.writeFileSync(p, JSON.stringify(sheet, null, 2) + "\n");
+  } else if (entityType === "npc" || entityType === "boss") {
+    const p = path.join(campaignDir, "npc-roster.md");
+    fs.writeFileSync(p, withNpcPortrait(fs.readFileSync(p, "utf8"), name, relPath));
+  } else if (entityType === "location") {
+    const p = path.join(campaignDir, "world-state.md");
+    fs.writeFileSync(p, withLocationImage(fs.readFileSync(p, "utf8"), name, relPath));
+  }
 }
 
 export interface StateSnapshot {

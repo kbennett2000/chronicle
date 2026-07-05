@@ -119,6 +119,30 @@ _(none established yet)_
     await expect(page.getByText("— no likeness —")).toBeVisible();
   });
 
+  test("Draw this surfaces the Grok failure reason instead of failing silently (issues #37/#42)", async ({
+    page,
+    chronicleServer,
+  }) => {
+    // The whole point of on-demand illustration (ADR-0009) is that a Grok
+    // failure is visible. Mock the endpoint's domain error (HTTP 200 with
+    // ok:false) so this stays deterministic without invoking the real
+    // grok CLI, and assert the exact reason renders under the tile.
+    await page.route(`**/campaigns/${chronicleServer.campaignId}/illustrate`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: false, error: "Grok Build invocation failed: grok CLI not found on PATH" }),
+      });
+    });
+
+    await seedConnection(page, chronicleServer.baseURL, chronicleServer.token);
+    await page.goto(`${chronicleServer.baseURL}/?campaign=${chronicleServer.campaignId}`);
+    await openGalleryPanel(page);
+
+    await page.getByTestId("gallery-draw").click();
+    await expect(page.getByTestId("gallery-draw-error")).toContainText("grok CLI not found");
+  });
+
   test("sabotage: an image path with no file on disk falls back to a clean empty tile, not a broken image", async ({
     page,
     chronicleServer,
