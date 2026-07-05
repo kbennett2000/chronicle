@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Home } from "./screens/Home";
 import { Play } from "./screens/Play";
 import { Settings } from "./screens/Settings";
@@ -33,8 +33,15 @@ export function App() {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("unchecked");
   const campaignId = getCampaignId();
 
+  // Set by "Save & Reconnect" (issue #35): a deliberate reconnect from
+  // Settings should, on success, drop the player back on Home rather than
+  // silently leaving them staring at the Settings screen. The boot check and
+  // the TEST button leave this false, so they don't navigate.
+  const pendingReconnect = useRef(false);
+
   useEffect(() => {
     if (!hasConnection(connection)) {
+      pendingReconnect.current = false;
       setScreen("settings");
       return;
     }
@@ -43,12 +50,19 @@ export function App() {
       setConnectionStatus(status);
       // The 401/unreachable -> Settings redirect: nothing else in the app
       // works without a valid connection, so send the player straight to
-      // where they can fix it.
-      if (status !== "connected") setScreen("settings");
+      // where they can fix it. A successful *deliberate* reconnect instead
+      // returns them Home, ready to play.
+      if (status !== "connected") {
+        setScreen("settings");
+      } else if (pendingReconnect.current) {
+        setScreen("home");
+      }
+      pendingReconnect.current = false;
     });
   }, [connection]);
 
   function handleSaveConnection(next: Connection) {
+    pendingReconnect.current = true;
     saveConnection(next);
     setConnection(next);
   }

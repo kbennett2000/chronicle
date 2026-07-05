@@ -148,6 +148,22 @@ test.describe("Settings screen", () => {
     );
   });
 
+  test("Hearth: Save & Reconnect gives feedback and returns Home on success (issue #35)", async ({
+    page,
+    chronicleServer,
+  }) => {
+    await seedConnection(page, chronicleServer.baseURL, chronicleServer.token);
+    await page.goto(`${chronicleServer.baseURL}/?campaign=${chronicleServer.campaignId}`);
+    await expect(page.getByTestId("campaign-card")).toBeVisible();
+    await page.getByText("SETTINGS", { exact: true }).click();
+
+    // The button was previously inert when already connected: it re-checked
+    // silently and never navigated. Now it must show feedback and land Home.
+    await expect(page.getByTestId("save-reconnect")).toBeVisible();
+    await page.getByTestId("save-reconnect").click();
+    await expect(page.getByTestId("campaign-card")).toBeVisible();
+  });
+
   test("a failed settings save surfaces its own error status, not a silent no-op", async ({ page, chronicleServer }) => {
     await seedConnection(page, chronicleServer.baseURL, chronicleServer.token);
     await page.goto(`${chronicleServer.baseURL}/?campaign=${chronicleServer.campaignId}`);

@@ -99,6 +99,20 @@ export function Settings({
   const [lookSave, setLookSave] = useState<SaveState>("idle");
   const [worldSave, setWorldSave] = useState<SaveState>("idle");
 
+  // Issue #35: the button used to persist creds + re-check silently, giving
+  // no sign it did anything. Track that a reconnect was requested so we can
+  // show "Reconnecting…/Reconnected ✓/error" right under the button; on
+  // success App navigates Home, so "done" only shows if we linger here.
+  const [reconnectMsg, setReconnectMsg] = useState<null | "pending" | "done" | "error">(null);
+  useEffect(() => {
+    setReconnectMsg((prev) => {
+      if (prev === null) return null; // no reconnect requested this visit
+      if (connectionStatus === "checking") return "pending";
+      if (connectionStatus === "connected") return "done";
+      return "error";
+    });
+  }, [connectionStatus]);
+
   useEffect(() => {
     let cancelled = false;
     Promise.all([getModels(connection), getCampaignSettings(connection, campaignId)])
@@ -466,11 +480,17 @@ export function Settings({
         </div>
 
         <button
-          onClick={() => onSaveConnection({ serverAddress, passphrase })}
+          data-testid="save-reconnect"
+          disabled={connectionStatus === "checking"}
+          onClick={() => {
+            setReconnectMsg("pending");
+            onSaveConnection({ serverAddress, passphrase });
+          }}
           style={{
             marginTop: 18,
             width: "100%",
-            cursor: "pointer",
+            cursor: connectionStatus === "checking" ? "default" : "pointer",
+            opacity: connectionStatus === "checking" ? 0.7 : 1,
             padding: 12,
             borderRadius: 3,
             background: "linear-gradient(180deg,#d8743e,#a8511f)",
@@ -482,8 +502,23 @@ export function Settings({
             letterSpacing: 1.5,
           }}
         >
-          SAVE & RECONNECT
+          {connectionStatus === "checking" ? "RECONNECTING…" : "SAVE & RECONNECT"}
         </button>
+        {reconnectMsg && (
+          <div
+            data-testid="reconnect-status"
+            style={{
+              marginTop: 8,
+              fontSize: 11.5,
+              textAlign: "center",
+              color: reconnectMsg === "error" ? "var(--ember)" : "var(--ink-faint)",
+            }}
+          >
+            {reconnectMsg === "pending" && "Reconnecting…"}
+            {reconnectMsg === "done" && "Reconnected ✓"}
+            {reconnectMsg === "error" && STATUS_LABEL[connectionStatus]}
+          </div>
+        )}
       </div>
     </div>
   );
