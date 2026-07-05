@@ -115,6 +115,14 @@ Every turn:
     spell slots, active Concentration, and per-rest feature-use counts in
     character-sheet.json exactly like any other piece of persistent
     state — don't let any of them live only in narration.
+13. Whenever your narration states a resulting numeric total after a
+    state-changing action — HP, a spell slot count, a currency
+    denomination, or any other value tracked in character-sheet.json —
+    write the state file update first, then state the number by reading
+    it back from the file you just wrote, not by computing it yourself
+    from the prior value plus the change. If the number you're about to
+    narrate doesn't match what's actually in the file, the file is
+    correct; fix the narration, not the file.
 
 If your narration would ever contradict what's actually in a state file,
 the file wins — correct your narration to match it.`;
