@@ -1,11 +1,14 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Connection } from "../lib/connection";
 import {
   createCampaign,
   startSession,
+  getModels,
   type CharacterCreationInput,
   type CampaignCreationSettings,
+  type ModelOption,
 } from "../lib/campaign";
+import { loadPreferredModel, savePreferredModel } from "../lib/modelPref";
 
 interface NewCharacterProps {
   connection: Connection;
@@ -76,6 +79,26 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
   const [contentIntensity, setContentIntensity] = useState<"standard" | "low">("standard");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Issue #57: pick the model at new-game time, defaulting to the last one the
+  // player chose (or the models-list default) — so a new game doesn't silently
+  // start on Sonnet after they set, say, Haiku.
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [model, setModel] = useState<string | null>(loadPreferredModel() ?? null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getModels(connection)
+      .then((result) => {
+        if (cancelled) return;
+        setModels(result.models);
+        // Fall back to the server default only if nothing was remembered.
+        setModel((prev) => prev ?? result.default);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [connection]);
 
   const spent = useMemo(() => ABILITIES.reduce((sum, a) => sum + POINT_COST[scores[a.key]], 0), [scores]);
   const remaining = POINT_BUY_BUDGET - spent;
@@ -105,6 +128,12 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
     if (worldSetting.trim()) settings.worldSetting = worldSetting.trim();
     if (toneWhimsy > 0) settings.toneWhimsy = toneWhimsy;
     if (contentIntensity !== "standard") settings.contentIntensity = contentIntensity;
+    // Issue #57: seed the new campaign with the chosen model and remember it for
+    // next time.
+    if (model) {
+      settings.model = model;
+      savePreferredModel(model);
+    }
     try {
       const campaignId = await createCampaign(
         connection,
@@ -213,6 +242,58 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
           Starting at level 1. HP and armour are derived from your class and scores; gear is
           established as your tale opens.
         </div>
+
+        {/* Issue #57: choose the model for this game up front. Defaults to the
+            last-chosen model so it doesn't silently revert to Sonnet. */}
+        {models.length > 0 && (
+          <>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2, color: "var(--brass)", margin: "26px 0 6px" }}>
+              THE ENGINE
+            </div>
+            {models.map((option) => {
+              const selected = model === option.id;
+              return (
+                <button
+                  key={option.id}
+                  data-testid="newchar-model-option"
+                  data-selected={selected}
+                  onClick={() => setModel(option.id)}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    marginBottom: 7,
+                    padding: "12px 14px",
+                    borderRadius: 4,
+                    background: selected ? "rgba(124,61,32,.24)" : "rgba(28,20,12,.5)",
+                    border: `1px solid ${selected ? "rgba(211,112,60,.55)" : "rgba(109,90,56,.32)"}`,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>
+                      {option.label}
+                    </span>
+                    <span
+                      style={{
+                        width: 15,
+                        height: 15,
+                        borderRadius: "50%",
+                        border: `1.5px solid ${selected ? "#d3703c" : "#6d5a38"}`,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: selected ? "#d3703c" : "transparent" }} />
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </>
+        )}
 
         {/* Issue #48: describe the world at creation, not only later in Settings. */}
         <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2, color: "var(--brass)", margin: "26px 0 2px" }}>

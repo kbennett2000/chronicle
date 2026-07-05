@@ -9,6 +9,7 @@ import {
   type CampaignSettings,
   type ModelOption,
 } from "../lib/campaign";
+import { savePreferredModel } from "../lib/modelPref";
 
 interface SettingsProps {
   onBack: () => void;
@@ -127,6 +128,8 @@ export function Settings({
     try {
       await startSession(connection, campaignId, modelId);
       setSettings((prev) => (prev ? { ...prev, model: modelId } : prev));
+      // Issue #57: remember the choice so the next new game defaults to it.
+      savePreferredModel(modelId);
       setModelSave("saved");
     } catch {
       setModelSave("error");

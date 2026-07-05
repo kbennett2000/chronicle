@@ -331,10 +331,14 @@ natural-1 flags for critical hits/misses per the SRD. Roll before you narrate
 the outcome, then narrate what the result means in the fiction.`);
   } else {
     sections.push(`Dice: auto-roll is OFF for this campaign — the player supplies their own
-roll values. When the rules call for a roll, tell the player exactly what to
-roll (e.g. "roll a d20 and add your Stealth modifier") and wait for their
-number; do not invent it or assume a value. Once they give you a total,
-adjudicate the outcome against the appropriate DC/AC.`);
+roll values, and you have no dice tool. When the rules call for a roll, you MUST
+stop and ask the player for it: address them directly with a plain imperative
+("Roll a d20 and add your Stealth modifier, then tell me the total."), then END
+YOUR RESPONSE THERE and wait for their number in their next message. Do NOT
+invent, assume, or narrate the outcome in the same turn — the roll request is
+the whole response. Only once they reply with a total do you adjudicate it
+against the appropriate DC/AC and narrate what happens. Never phrase this as
+your own action ("let me roll…"); it is always a request to the player.`);
   }
 
   return sections.join("\n\n");
@@ -572,11 +576,13 @@ export async function runTurn(
   // tool calls before the text becomes player-facing narration / the persisted
   // transcript. On an engine error keep the raw text (it's diagnostic, and the
   // patterns only match well-formed bookkeeping sentences anyway).
-  const text = isError ? textParts.join("") : stripMetaChatter(textParts.join(""));
+  const text = isError
+    ? textParts.join("")
+    : stripMetaChatter(textParts.join(""), { autoRoll: settings.autoRollDice !== false });
   // Issue #57: surface requested-vs-actual so an ignored model choice is loud
   // in the server log instead of silently echoed back as if it were obeyed.
   const resolvedModel = actualModel ?? model;
-  if (actualModel && actualModel !== model) {
+  if (actualModel && !modelsMatch(model, actualModel)) {
     console.error(
       `[dm-engine] MODEL MISMATCH: requested "${model}" but the SDK ran "${actualModel}"`
     );
@@ -584,4 +590,16 @@ export async function runTurn(
     console.error(`[dm-engine] model obeyed: "${resolvedModel}"`);
   }
   return { text, sessionId, isError, model: resolvedModel, requestedModel: model };
+}
+
+/** Issue #57: the SDK resolves an alias to its dated snapshot id — e.g.
+ * "claude-haiku-4-5" runs as "claude-haiku-4-5-20251001". That is the *same*
+ * model obeyed, not a mismatch, so treat one being the alias-prefix of the
+ * other as a match. Only a genuinely different model family is a real mismatch. */
+export function modelsMatch(requested: string, actual: string): boolean {
+  return (
+    actual === requested ||
+    actual.startsWith(requested + "-") ||
+    requested.startsWith(actual + "-")
+  );
 }

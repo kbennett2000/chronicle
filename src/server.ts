@@ -9,7 +9,7 @@ import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runTurn, openingDirective } from "./dm-engine.js";
+import { runTurn, openingDirective, modelsMatch } from "./dm-engine.js";
 import {
   resolveCampaignDir,
   readPersistedSessionId,
@@ -164,7 +164,20 @@ const ROUTES: Array<{
       // in Settings. Same fields and validation as POST /settings; anything
       // omitted keeps the standard-fantasy defaults.
       const creation = (body.settings ?? {}) as Record<string, unknown>;
-      const creationSettings: Partial<Omit<CampaignSettings, "model">> = {};
+      const creationSettings: Partial<CampaignSettings> = {};
+      // Issue #57: a new game can carry the player's chosen model, so it starts
+      // on that model instead of always defaulting to Sonnet. (POST /settings
+      // still can't change model on an existing campaign — that path is
+      // session/start; this is only the create-time seed.)
+      if (creation.model !== undefined) {
+        if (typeof creation.model !== "string" || !isValidModelId(creation.model)) {
+          sendJson(res, 400, {
+            error: `invalid model — must be one of ${MODEL_OPTIONS.map((m) => m.id).join(", ")}`,
+          });
+          return;
+        }
+        creationSettings.model = creation.model;
+      }
       if (creation.worldSetting !== undefined) {
         if (typeof creation.worldSetting !== "string") {
           sendJson(res, 400, { error: "worldSetting must be a string" });
@@ -194,8 +207,15 @@ const ROUTES: Array<{
         fs.existsSync(path.join(CAMPAIGNS_ROOT, id))
       );
       const dir = scaffoldCampaign(campaignId, sheet);
-      if (Object.keys(creationSettings).length > 0) {
-        persistCampaignSettings(dir, creationSettings);
+      // Model is persisted via persistCampaignModel (it's excluded from the
+      // POST /settings update type); the world fields go through
+      // persistCampaignSettings. Split them out so both are seeded at create.
+      const { model: creationModel, ...worldSettings } = creationSettings;
+      if (creationModel) {
+        persistCampaignModel(dir, creationModel);
+      }
+      if (Object.keys(worldSettings).length > 0) {
+        persistCampaignSettings(dir, worldSettings);
       }
       sendJson(res, 201, { campaignId });
     },
@@ -306,7 +326,7 @@ const ROUTES: Array<{
           active.sessionModel = active.model;
           persistSessionId(campaignDir, result.sessionId);
         }
-        if (result.model !== result.requestedModel) {
+        if (!modelsMatch(result.requestedModel, result.model)) {
           console.warn(
             `[${campaignId}] model NOT obeyed: requested ${result.requestedModel}, ran ${result.model}`
           );
@@ -639,11 +659,14 @@ function serveStatic(req: IncomingMessage, res: ServerResponse): boolean {
   const headers: Record<string, string> = {
     "Content-Type": STATIC_CONTENT_TYPES[ext] ?? "application/octet-stream",
   };
-  // Issue #53: the ambient audio has a fixed (non-content-hashed) filename, so a
-  // stale copy can be served from cache indefinitely after a re-record. Ask the
-  // browser to revalidate media on each load so a `?v=` bump (or even a same-URL
-  // swap) actually takes effect. Hashed JS/CSS bundles don't need this.
-  if (ext === ".ogg" || ext === ".mp3") {
+  // Issue #53: two non-content-hashed things can otherwise be served stale from
+  // the browser cache forever — the app shell (index.html) and the ambient audio
+  // (fixed filename). Send `no-cache` (revalidate every load) for both, so a new
+  // bundle hash or a re-recorded audio file actually reaches the player. The
+  // content-hashed /assets/* (their names change on every build) stay cacheable.
+  // Note: a shell already cached *before* this header existed still needs one
+  // hard-refresh; after that it self-updates.
+  if (ext === ".ogg" || ext === ".mp3" || ext === ".html") {
     headers["Cache-Control"] = "no-cache";
   }
   res.writeHead(200, headers);
