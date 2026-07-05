@@ -213,7 +213,7 @@ export async function runTurn(
   // — generateImages defaults to false since it depends on Grok
   // Build/SuperGrok access being configured on the host.
   const mcpServers: Record<string, unknown> = {
-    "seed-tables": createSeedMcpServer(settings.toneWhimsy),
+    "seed-tables": createSeedMcpServer(settings.toneWhimsy, campaignDir),
   };
   if (settings.generateImages) {
     allowedTools.push(GENERATE_IMAGE_TOOL_NAME);

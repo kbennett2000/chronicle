@@ -10,6 +10,24 @@ const SEED_TABLES_PATH = path.resolve(__dirname, "../data/seed-tables.json");
 const REGISTRY_DIR = path.join(CAMPAIGNS_ROOT, "_registry");
 const REGISTRY_PATH = path.join(REGISTRY_DIR, "content-registry.md");
 
+/** Scratch campaigns (per scratch-campaign.ts's own naming convention) are
+ * wholesale-created and -deleted for one-off validation runs. Rolling seeds
+ * against the shared global registry during those runs pollutes it with
+ * throwaway entries that then need a manual git revert before every commit.
+ * Routing a scratch campaign's registry reads/writes to a file inside its
+ * own directory instead means the registry is deleted along with the
+ * campaign — no separate cleanup step, ever. */
+function isScratchCampaign(campaignDir: string): boolean {
+  return path.basename(campaignDir).startsWith("scratch-");
+}
+
+function registryPathFor(campaignDir?: string): { dir: string; path: string } {
+  if (campaignDir && isScratchCampaign(campaignDir)) {
+    return { dir: campaignDir, path: path.join(campaignDir, "content-registry.md") };
+  }
+  return { dir: REGISTRY_DIR, path: REGISTRY_PATH };
+}
+
 /** Chance a roll draws from a wildcard pool instead of the conventional one,
  * per design doc §4 ("~15-20%, so strangeness punctuates rather than
  * saturates"). Overridable via env for tuning/testing, and per-campaign via
@@ -117,21 +135,22 @@ instant they're rolled, before use, so a crash mid-turn can't lose the log.
   return header + sections.join("");
 }
 
-function readRegistry(): RegistryData {
-  fs.mkdirSync(REGISTRY_DIR, { recursive: true });
-  if (!fs.existsSync(REGISTRY_PATH)) {
-    fs.writeFileSync(REGISTRY_PATH, serializeRegistry(emptyRegistry()));
+function readRegistry(campaignDir?: string): RegistryData {
+  const { dir, path: registryPath } = registryPathFor(campaignDir);
+  fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(registryPath)) {
+    fs.writeFileSync(registryPath, serializeRegistry(emptyRegistry()));
   }
-  return parseRegistry(fs.readFileSync(REGISTRY_PATH, "utf8"));
+  return parseRegistry(fs.readFileSync(registryPath, "utf8"));
 }
 
 /** Appends `value` to `category`'s section. Synchronous, no `await` between
  * the read and the write, so no other campaign's turn can interleave and
  * lose this update within this process. */
-function logEntry(category: SeedCategory, value: string): void {
-  const registry = readRegistry();
+function logEntry(category: SeedCategory, value: string, campaignDir?: string): void {
+  const registry = readRegistry(campaignDir);
   registry[category].push(value);
-  fs.writeFileSync(REGISTRY_PATH, serializeRegistry(registry));
+  fs.writeFileSync(registryPathFor(campaignDir).path, serializeRegistry(registry));
 }
 
 function pickUnused(options: string[], used: Set<string>): { value: string; exhausted: boolean } {
@@ -225,14 +244,20 @@ function pickComboWithWildcard(
 }
 
 /** Rolls a fresh seed for `category`, excluding anything already logged in
- * the global registry, and logs the result immediately (before the caller
- * has done anything with it). `wildcardChance` defaults to the module-wide
+ * the registry, and logs the result immediately (before the caller has done
+ * anything with it). `wildcardChance` defaults to the module-wide
  * WILDCARD_CHANCE but can be overridden per call — this is how ADR-0004's
  * per-campaign toneWhimsy setting reaches the roll without forking any of
- * the table/registry logic itself. */
-export function rollSeed(category: SeedCategory, wildcardChance: number = WILDCARD_CHANCE): SeedResult {
+ * the table/registry logic itself. `campaignDir`, when given, routes a
+ * scratch- campaign to its own isolated registry file instead of the
+ * shared global one (see registryPathFor). */
+export function rollSeed(
+  category: SeedCategory,
+  wildcardChance: number = WILDCARD_CHANCE,
+  campaignDir?: string
+): SeedResult {
   const tables = loadSeedTables();
-  const registry = readRegistry();
+  const registry = readRegistry(campaignDir);
 
   let picked: { value: string; exhausted: boolean };
   switch (category) {
@@ -278,7 +303,7 @@ export function rollSeed(category: SeedCategory, wildcardChance: number = WILDCA
       break;
   }
 
-  logEntry(category, picked.value);
+  logEntry(category, picked.value, campaignDir);
   return { category, value: picked.value, exhausted: picked.exhausted };
 }
 
@@ -294,8 +319,10 @@ const CATEGORY_FIELD_LABELS: Record<SeedCategory, string> = {
  * roll_seed tool. A fresh server is built per turn (see dm-engine.ts) so
  * each campaign's ADR-0004 toneWhimsy setting — if any — applies without
  * mutating shared module state that other campaigns' in-flight turns might
- * be reading. */
-export function createSeedMcpServer(wildcardChance: number = WILDCARD_CHANCE) {
+ * be reading. `campaignDir`, when given, is threaded into rollSeed so a
+ * scratch- campaign's rolls land in its own isolated registry file instead
+ * of the shared global one. */
+export function createSeedMcpServer(wildcardChance: number = WILDCARD_CHANCE, campaignDir?: string) {
   const rollSeedTool = tool(
     "roll_seed",
     `Roll a fresh story seed before creating a genuinely NEW npc-roster.md
@@ -313,7 +340,7 @@ all campaigns, so it won't repeat something already used elsewhere.`,
         ),
     },
     async ({ category }) => {
-      const result = rollSeed(category, wildcardChance);
+      const result = rollSeed(category, wildcardChance, campaignDir);
       const label = CATEGORY_FIELD_LABELS[result.category];
       return {
         content: [
