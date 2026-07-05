@@ -47,5 +47,13 @@ export function parseMarkdownSections(markdown: string): MarkdownSection[] {
  * anything more load-bearing than display copy. */
 export function findMarkdownSection(markdown: string, heading: string): MarkdownSection | undefined {
   const target = heading.trim().toLowerCase();
-  return parseMarkdownSections(markdown).find((s) => s.heading.trim().toLowerCase() === target);
+  const found = parseMarkdownSections(markdown).find((s) => s.heading.trim().toLowerCase() === target);
+  if (!found) {
+    // Not an error (the file is still valid markdown) but not silent
+    // either — this is the one thing standing between a renamed heading
+    // in the DM engine's system prompt and this just quietly rendering
+    // nothing, forever.
+    console.warn(`[markdown] expected heading "${heading}" not found`);
+  }
+  return found;
 }

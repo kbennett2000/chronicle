@@ -79,7 +79,9 @@ export function App() {
           onOpenSettings={() => setScreen("settings")}
         />
       )}
-      {screen === "play" && <Play onGoHome={() => setScreen("home")} />}
+      {screen === "play" && (
+        <Play connection={connection} campaignId={campaignId} onGoHome={() => setScreen("home")} />
+      )}
       {screen === "settings" && (
         <Settings
           onBack={() => setScreen(hasConnection(connection) ? "home" : "settings")}

@@ -3,6 +3,7 @@ import type { ConnectionStatus } from "../lib/api";
 import type { Connection } from "../lib/connection";
 import { getState, startSession, type StateSnapshot } from "../lib/campaign";
 import { findMarkdownSection } from "../lib/markdown";
+import { CURRENT_SITUATION_HEADING } from "../lib/state-headings";
 
 interface HomeProps {
   connection: Connection;
@@ -48,7 +49,7 @@ export function Home({ connection, campaignId, connectionStatus, onContinue, onO
   }
 
   const situation =
-    load.status === "ready" ? findMarkdownSection(load.snapshot.worldState, "Current Situation")?.body : undefined;
+    load.status === "ready" ? findMarkdownSection(load.snapshot.worldState, CURRENT_SITUATION_HEADING)?.body : undefined;
 
   return (
     <div className="screen leather-ground">

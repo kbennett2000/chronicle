@@ -8,12 +8,18 @@ export class AuthError extends Error {
 
 export class ApiError extends Error {}
 
-/** Every route but static asset serving requires this header (ADR-0003). */
-export async function apiFetch(
+/** Lowest-level call: attaches the auth header (every route but static
+ * asset serving requires it, per ADR-0003) and surfaces network failures
+ * / a 401 as thrown errors, but returns any other status as-is. Most
+ * callers want apiFetch below, which also throws on other non-2xx
+ * responses — this exists for routes like POST /turns, where a non-2xx
+ * (502, "isError": true) is a normal domain response the caller needs to
+ * render, not a fetch failure. */
+export async function apiFetchRaw(
   connection: Connection,
   path: string,
   options?: RequestInit
-): Promise<unknown> {
+): Promise<{ status: number; body: unknown }> {
   let res: Response;
   try {
     res = await fetch(`${serverOrigin(connection)}${path}`, {
@@ -31,8 +37,13 @@ export async function apiFetch(
   if (res.status === 401) throw new AuthError();
 
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new ApiError((body as { error?: string }).error ?? `request failed (${res.status})`);
+  return { status: res.status, body };
+}
+
+export async function apiFetch(connection: Connection, path: string, options?: RequestInit): Promise<unknown> {
+  const { status, body } = await apiFetchRaw(connection, path, options);
+  if (status < 200 || status >= 300) {
+    throw new ApiError((body as { error?: string }).error ?? `request failed (${status})`);
   }
   return body;
 }

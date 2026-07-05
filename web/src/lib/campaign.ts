@@ -1,4 +1,4 @@
-import { apiFetch } from "./api";
+import { apiFetch, apiFetchRaw } from "./api";
 import type { Connection } from "./connection";
 
 /** No "list campaigns" endpoint exists (per the Slice 14 plan) — the old
@@ -41,9 +41,38 @@ export async function getState(connection: Connection, campaignId: string): Prom
   return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/state`)) as StateSnapshot;
 }
 
-export async function startSession(connection: Connection, campaignId: string): Promise<SessionStartResult> {
+export async function startSession(
+  connection: Connection,
+  campaignId: string,
+  model?: string
+): Promise<SessionStartResult> {
   return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/session/start`, {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify(model ? { model } : {}),
   })) as SessionStartResult;
+}
+
+export interface TurnResult {
+  narration: string;
+  sessionId: string | null;
+  model: string;
+  isError: boolean;
+}
+
+/** No sessionId is sent here, and none is required — the active Agent SDK
+ * session (if any) is tracked server-side per campaign, keyed off the
+ * POST /session/start call Home already makes before entering Play. A
+ * fresh campaign's first turn works with no prior sessionId at all: the
+ * server lazily assigns one once the engine actually runs (confirmed in
+ * Slice 16 and again by tests/e2e/turn.spec.ts here).
+ *
+ * Uses apiFetchRaw, not apiFetch: a failed turn comes back as HTTP 502
+ * with a valid { narration, isError: true } body (see server.ts) — that's
+ * a domain result to render, not a fetch failure to throw on. */
+export async function sendTurn(connection: Connection, campaignId: string, message: string): Promise<TurnResult> {
+  const { body } = await apiFetchRaw(connection, `/campaigns/${encodeURIComponent(campaignId)}/turns`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+  return body as TurnResult;
 }

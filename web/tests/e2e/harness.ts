@@ -63,6 +63,15 @@ _(none yet)_
 _(none established yet)_
 `
   );
+
+  // Haiku, not the scratch template's sonnet default — this campaign is
+  // disposable test fixture data, not a real story, so the fastest/
+  // cheapest model is the right call for e2e turns that hit the real
+  // Agent SDK (see tests/e2e/turn.spec.ts).
+  fs.writeFileSync(
+    path.join(dir, "campaign-settings.json"),
+    JSON.stringify({ model: "claude-haiku-4-5" }, null, 2) + "\n"
+  );
 }
 
 /** Reusable worker-scoped fixture: boots a real chronicle backend against a
