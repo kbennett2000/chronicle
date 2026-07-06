@@ -8,8 +8,10 @@ import {
   type CharacterCreationInput,
   type CampaignCreationSettings,
   type ModelOption,
+  type ResponseLength,
 } from "../lib/campaign";
 import { ToggleRow, ArtStylePicker } from "../components/LookControls";
+import { SKILLS } from "../lib/character-derive";
 
 interface NewCharacterProps {
   connection: Connection;
@@ -26,6 +28,33 @@ const CLASS_HIT_DICE: Record<string, number> = {
   Sorcerer: 6, Wizard: 6,
 };
 const CLASSES = Object.keys(CLASS_HIT_DICE);
+// Mirrors MAX_APPEARANCE_CHARS in src/character-gen.ts (server is authoritative).
+const MAX_APPEARANCE_CHARS = 600;
+
+// Mirrors src/character-gen.ts CLASS_SKILL_CHOICES / CLASS_SAVE_PROFICIENCIES
+// (ADR-0015). Server validates on submit; these drive the picker + preview.
+const CLASS_SKILL_CHOICES: Record<string, { list: string[]; choose: number }> = {
+  Barbarian: { list: ["animalHandling", "athletics", "intimidation", "nature", "perception", "survival"], choose: 2 },
+  Bard: { list: SKILLS.map((s) => s.key), choose: 3 },
+  Cleric: { list: ["history", "insight", "medicine", "persuasion", "religion"], choose: 2 },
+  Druid: { list: ["arcana", "animalHandling", "insight", "medicine", "nature", "perception", "religion", "survival"], choose: 2 },
+  Fighter: { list: ["acrobatics", "animalHandling", "athletics", "history", "insight", "intimidation", "perception", "survival"], choose: 2 },
+  Monk: { list: ["acrobatics", "athletics", "history", "insight", "religion", "stealth"], choose: 2 },
+  Paladin: { list: ["athletics", "insight", "intimidation", "medicine", "persuasion", "religion"], choose: 2 },
+  Ranger: { list: ["animalHandling", "athletics", "insight", "investigation", "nature", "perception", "stealth", "survival"], choose: 3 },
+  Rogue: { list: ["acrobatics", "athletics", "deception", "insight", "intimidation", "investigation", "perception", "performance", "persuasion", "sleightOfHand", "stealth"], choose: 4 },
+  Sorcerer: { list: ["arcana", "deception", "insight", "intimidation", "persuasion", "religion"], choose: 2 },
+  Warlock: { list: ["arcana", "deception", "history", "intimidation", "investigation", "nature", "religion"], choose: 2 },
+  Wizard: { list: ["arcana", "history", "insight", "investigation", "medicine", "religion"], choose: 2 },
+};
+const CLASS_SAVE_PROFICIENCIES: Record<string, string[]> = {
+  Barbarian: ["STR", "CON"], Bard: ["DEX", "CHA"], Cleric: ["WIS", "CHA"], Druid: ["INT", "WIS"],
+  Fighter: ["STR", "CON"], Monk: ["STR", "DEX"], Paladin: ["WIS", "CHA"], Ranger: ["STR", "DEX"],
+  Rogue: ["DEX", "INT"], Sorcerer: ["CON", "CHA"], Warlock: ["WIS", "CHA"], Wizard: ["INT", "WIS"],
+};
+// Rogue gets 2 expertise picks at level 1; others 0 (ADR-0015 rules-review item 11).
+const EXPERTISE_COUNT: Record<string, number> = { Rogue: 2 };
+const skillLabel = (key: string) => SKILLS.find((s) => s.key === key)?.label ?? key;
 
 type Ability = "strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma";
 const ABILITIES: Array<{ key: Ability; label: string }> = [
@@ -68,6 +97,13 @@ const INTENSITY_OPTIONS: Array<{ id: "standard" | "low"; label: string; note: st
   { id: "low", label: "Low", note: "No crude humour; violence stays non-graphic." },
 ];
 
+// Issue #69: how long/detailed the DM's replies run. Absent === "detailed".
+const LENGTH_OPTIONS: Array<{ id: ResponseLength; label: string; note: string }> = [
+  { id: "concise", label: "Concise", note: "Short replies that mirror your input." },
+  { id: "standard", label: "Standard", note: "A paragraph or two per scene." },
+  { id: "detailed", label: "Detailed", note: "Rich, immersive narration." },
+];
+
 export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterProps) {
   const [name, setName] = useState("");
   const [race, setRace] = useState(RACES[0]);
@@ -75,9 +111,19 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
   const [scores, setScores] = useState<Record<Ability, number>>({
     strength: 8, dexterity: 8, constitution: 8, intelligence: 8, wisdom: 8, charisma: 8,
   });
+  // Issue #71: free-text look, fed to the character's portrait prompt.
+  const [appearance, setAppearance] = useState("");
+  // Issue #67 (ADR-0015): class skill picks, optional expertise, identity.
+  const [skillProficiencies, setSkillProficiencies] = useState<string[]>([]);
+  const [expertise, setExpertise] = useState<string[]>([]);
+  const [background, setBackground] = useState("");
+  const [alignment, setAlignment] = useState("");
+  const [personality, setPersonality] = useState({ traits: "", ideals: "", bonds: "", flaws: "" });
   const [worldSetting, setWorldSetting] = useState("");
   const [toneWhimsy, setToneWhimsy] = useState(0);
   const [contentIntensity, setContentIntensity] = useState<"standard" | "low">("standard");
+  // Issue #69: reply length, pre-filled from the last game; default detailed.
+  const [responseLength, setResponseLength] = useState<ResponseLength>("detailed");
   // Issue #64: look/play dials, surfaced here and pre-filled from the last game
   // (GET /new-game-defaults) so a new game starts like the one you already play,
   // instead of reverting to images-off / auto-roll-on and forcing a reconfigure.
@@ -107,6 +153,7 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
         setArtStyle(defaults.artStyle ?? "");
         setAutoRollDice(defaults.autoRollDice ?? true);
         if (defaults.contentIntensity) setContentIntensity(defaults.contentIntensity);
+        if (defaults.responseLength) setResponseLength(defaults.responseLength);
         if (defaults.toneWhimsy !== undefined) setToneWhimsy(defaults.toneWhimsy);
       })
       .catch(() => {});
@@ -117,6 +164,34 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
 
   const spent = useMemo(() => ABILITIES.reduce((sum, a) => sum + POINT_COST[scores[a.key]], 0), [scores]);
   const remaining = POINT_BUY_BUDGET - spent;
+
+  // Issue #67: skills depend on class; changing class clears prior picks.
+  const skillChoice = CLASS_SKILL_CHOICES[klass];
+  const expertiseCount = EXPERTISE_COUNT[klass] ?? 0;
+  function selectClass(next: string) {
+    setKlass(next);
+    setSkillProficiencies([]);
+    setExpertise([]);
+  }
+  function toggleSkill(key: string) {
+    setSkillProficiencies((prev) => {
+      if (prev.includes(key)) {
+        setExpertise((ex) => ex.filter((k) => k !== key)); // expertise can't outlive its proficiency
+        return prev.filter((k) => k !== key);
+      }
+      if (prev.length >= skillChoice.choose) return prev; // at the cap; ignore
+      return [...prev, key];
+    });
+  }
+  function toggleExpertise(key: string) {
+    setExpertise((prev) => {
+      if (prev.includes(key)) return prev.filter((k) => k !== key);
+      if (prev.length >= expertiseCount) return prev;
+      return [...prev, key];
+    });
+  }
+  const skillsComplete = skillProficiencies.length === skillChoice.choose;
+  const expertiseComplete = expertise.length === expertiseCount;
 
   function adjust(ability: Ability, delta: number) {
     setScores((prev) => {
@@ -130,13 +205,32 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
 
   const maxHp = Math.max(1, CLASS_HIT_DICE[klass] + modifier(scores.constitution));
   const armorClass = 10 + modifier(scores.dexterity);
-  const canCreate = name.trim().length > 0 && remaining >= 0 && !creating;
+  // Issue #67 derived preview (all flagged for rules review, see ADR-0015).
+  const raceSpeed: Record<string, number> = { Goliath: 35 };
+  const speed = raceSpeed[race] ?? 30;
+  const initiativeMod = modifier(scores.dexterity);
+  const perceptionProficient = skillProficiencies.includes("perception");
+  const passivePerception = 10 + modifier(scores.wisdom) + (perceptionProficient ? 2 : 0);
+  const canCreate = name.trim().length > 0 && remaining >= 0 && skillsComplete && expertiseComplete && !creating;
 
   async function submit() {
     if (!canCreate) return;
     setCreating(true);
     setError(null);
     const character: CharacterCreationInput = { name: name.trim(), race, class: klass, abilityScores: scores };
+    if (appearance.trim()) character.appearance = appearance.trim();
+    // Issue #67: send the class skill picks (+ any expertise) and identity.
+    character.skillProficiencies = skillProficiencies;
+    if (expertise.length) character.expertise = expertise;
+    if (background.trim()) character.background = background.trim();
+    if (alignment.trim()) character.alignment = alignment.trim();
+    const perso = {
+      traits: personality.traits.trim(),
+      ideals: personality.ideals.trim(),
+      bonds: personality.bonds.trim(),
+      flaws: personality.flaws.trim(),
+    };
+    if (Object.values(perso).some(Boolean)) character.personality = perso;
     // Issue #64: send every dial explicitly from the form so the new game stores
     // its own complete copy of look/play/model (no reliance on a per-device
     // cache, and no seed-then-override asymmetry that once let a stale
@@ -147,6 +241,7 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
       autoIllustrateTurns,
       autoRollDice,
       contentIntensity,
+      responseLength,
       toneWhimsy,
     };
     if (artStyle.trim()) settings.artStyle = artStyle.trim();
@@ -200,11 +295,25 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
         </select>
 
         <div style={labelStyle}>Calling</div>
-        <select value={klass} onChange={(e) => setKlass(e.target.value)} data-testid="newchar-class" style={inputStyle}>
+        <select value={klass} onChange={(e) => selectClass(e.target.value)} data-testid="newchar-class" style={inputStyle}>
           {CLASSES.map((c) => (
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
+
+        <div style={labelStyle}>Appearance</div>
+        <textarea
+          value={appearance}
+          onChange={(e) => setAppearance(e.target.value)}
+          placeholder="e.g. A tall female goliath with grey skin, dark braided hair, and pale eyes"
+          data-testid="newchar-appearance"
+          rows={3}
+          maxLength={MAX_APPEARANCE_CHARS}
+          style={{ ...inputStyle, resize: "vertical", fontFamily: "var(--font-body)" }}
+        />
+        <div style={{ fontSize: 10.5, color: "var(--ink-faint)", marginTop: 3, lineHeight: 1.35 }}>
+          Used to generate portraits and scenes that look like your character. You can edit this later.
+        </div>
 
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "22px 0 6px" }}>
           <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2, color: "var(--brass)" }}>ABILITIES</div>
@@ -252,10 +361,119 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
             <div style={derivedLabelStyle}>ARMOUR</div>
           </div>
         </div>
-        <div style={{ fontSize: 10.5, color: "var(--ink-faint)", fontStyle: "italic", marginTop: 8, lineHeight: 1.4 }}>
-          Starting at level 1. HP and armour are derived from your class and scores; gear is
-          established as your tale opens.
+        <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+          <div style={derivedTileStyle}><div style={derivedNumStyle}>+2</div><div style={derivedLabelStyle}>PROF</div></div>
+          <div style={derivedTileStyle}><div style={derivedNumStyle}>{fmtMod(initiativeMod)}</div><div style={derivedLabelStyle}>INIT</div></div>
+          <div style={derivedTileStyle}><div style={derivedNumStyle}>{speed}</div><div style={derivedLabelStyle}>SPEED</div></div>
+          <div style={derivedTileStyle}><div style={derivedNumStyle} data-testid="newchar-passive">{passivePerception}</div><div style={derivedLabelStyle}>PASSIVE</div></div>
         </div>
+        <div style={{ fontSize: 10.5, color: "var(--ink-faint)", fontStyle: "italic", marginTop: 8, lineHeight: 1.4 }}>
+          Starting at level 1. HP, armour, and these totals are derived from your class and scores;
+          gear is established as your tale opens.
+        </div>
+
+        {/* Issue #67: class saving throws (derived) and skill picks (chosen). */}
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "26px 0 4px" }}>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2, color: "var(--brass)" }}>SKILLS</div>
+          <div data-testid="newchar-skills-remaining" style={{ fontSize: 11.5, color: skillsComplete ? "var(--ink-faint)" : "var(--ember)" }}>
+            choose {skillChoice.choose - skillProficiencies.length} more
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--ink-faint)", marginBottom: 8 }}>
+          Saving throws: <span style={{ color: "var(--arcane)" }}>{(CLASS_SAVE_PROFICIENCIES[klass] ?? []).join(" · ")}</span> (from your calling)
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+          {skillChoice.list.map((key) => {
+            const selected = skillProficiencies.includes(key);
+            const atCap = !selected && skillProficiencies.length >= skillChoice.choose;
+            return (
+              <button
+                key={key}
+                data-testid="newchar-skill"
+                data-selected={selected}
+                onClick={() => toggleSkill(key)}
+                disabled={atCap}
+                style={{
+                  cursor: atCap ? "default" : "pointer",
+                  textAlign: "left",
+                  padding: "8px 10px",
+                  borderRadius: 4,
+                  fontSize: 12.5,
+                  color: selected ? "#efe6d2" : atCap ? "var(--ink-faint)" : "var(--ink-dim)",
+                  background: selected ? "rgba(124,61,32,.24)" : "rgba(28,20,12,.5)",
+                  border: `1px solid ${selected ? "rgba(211,112,60,.55)" : "rgba(109,90,56,.32)"}`,
+                }}
+              >
+                {selected ? "◆ " : "◇ "}{skillLabel(key)}
+              </button>
+            );
+          })}
+        </div>
+
+        {expertiseCount > 0 && (
+          <>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "18px 0 4px" }}>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2, color: "var(--brass)" }}>EXPERTISE</div>
+              <div style={{ fontSize: 11.5, color: expertiseComplete ? "var(--ink-faint)" : "var(--ember)" }}>
+                choose {expertiseCount - expertise.length} more
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: "var(--ink-faint)", marginBottom: 8 }}>Double your proficiency in two chosen skills.</div>
+            {skillProficiencies.length === 0 ? (
+              <div style={{ fontSize: 12, fontStyle: "italic", color: "var(--ink-faint)" }}>Pick skills above first.</div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                {skillProficiencies.map((key) => {
+                  const selected = expertise.includes(key);
+                  const atCap = !selected && expertise.length >= expertiseCount;
+                  return (
+                    <button
+                      key={key}
+                      data-testid="newchar-expertise"
+                      data-selected={selected}
+                      onClick={() => toggleExpertise(key)}
+                      disabled={atCap}
+                      style={{
+                        cursor: atCap ? "default" : "pointer",
+                        textAlign: "left",
+                        padding: "8px 10px",
+                        borderRadius: 4,
+                        fontSize: 12.5,
+                        color: selected ? "#efe6d2" : atCap ? "var(--ink-faint)" : "var(--ink-dim)",
+                        background: selected ? "rgba(124,61,32,.24)" : "rgba(28,20,12,.5)",
+                        border: `1px solid ${selected ? "rgba(211,112,60,.55)" : "rgba(109,90,56,.32)"}`,
+                      }}
+                    >
+                      {selected ? "★ " : "☆ "}{skillLabel(key)}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Issue #67: optional roleplay identity — all can be left blank. */}
+        <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2, color: "var(--brass)", margin: "26px 0 6px" }}>
+          THE CHARACTER <span style={{ fontSize: 10, letterSpacing: 0, color: "var(--ink-faint)" }}>· optional</span>
+        </div>
+        <div style={labelStyle}>Background</div>
+        <input value={background} onChange={(e) => setBackground(e.target.value)} placeholder="e.g. Soldier, Outlander, Sage" data-testid="newchar-background" maxLength={120} style={inputStyle} />
+        <div style={labelStyle}>Alignment</div>
+        <input value={alignment} onChange={(e) => setAlignment(e.target.value)} placeholder="e.g. Chaotic Good" data-testid="newchar-alignment" maxLength={40} style={inputStyle} />
+        {(["traits", "ideals", "bonds", "flaws"] as const).map((field) => (
+          <div key={field}>
+            <div style={labelStyle}>{field[0].toUpperCase() + field.slice(1)}</div>
+            <textarea
+              value={personality[field]}
+              onChange={(e) => setPersonality((p) => ({ ...p, [field]: e.target.value }))}
+              data-testid={`newchar-${field}`}
+              rows={2}
+              maxLength={400}
+              style={{ ...inputStyle, resize: "vertical", fontFamily: "var(--font-body)" }}
+            />
+          </div>
+        ))}
 
         {/* Issue #57: choose the model for this game up front. Defaults to the
             last-chosen model so it doesn't silently revert to Sonnet. */}
@@ -385,6 +603,35 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
                 data-testid="newchar-intensity"
                 data-selected={selected}
                 onClick={() => setContentIntensity(option.id)}
+                style={{
+                  flex: 1,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  padding: "11px 13px",
+                  borderRadius: 4,
+                  background: selected ? "rgba(124,61,32,.24)" : "rgba(28,20,12,.5)",
+                  border: `1px solid ${selected ? "rgba(211,112,60,.55)" : "rgba(109,90,56,.32)"}`,
+                }}
+              >
+                <div style={{ fontFamily: "var(--font-display)", fontSize: 13, color: selected ? "#efe6d2" : "var(--ink-dim)" }}>
+                  {option.label}
+                </div>
+                <div style={{ fontSize: 10.5, color: "var(--ink-faint)", marginTop: 3, lineHeight: 1.35 }}>{option.note}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={labelStyle}>Reply length</div>
+        <div style={{ display: "flex", gap: 7 }}>
+          {LENGTH_OPTIONS.map((option) => {
+            const selected = responseLength === option.id;
+            return (
+              <button
+                key={option.id}
+                data-testid="newchar-length"
+                data-selected={selected}
+                onClick={() => setResponseLength(option.id)}
                 style={{
                   flex: 1,
                   cursor: "pointer",

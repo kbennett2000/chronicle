@@ -31,6 +31,23 @@ export interface CharacterSheet {
   spellSlots?: Record<string, { total: number; used: number }>;
   currency?: { cp: number; sp: number; ep: number; gp: number; pp: number };
   portraitImage?: string;
+  /** Issue #71: free-text physical description (sex, build, hair, marks). Feeds
+   * the character's image prompt so a portrait matches the player's intent. */
+  appearance?: string;
+  /** Issue #67 (ADR-0015): full-sheet fields. All optional and degrade
+   * gracefully — old sheets and DM writes may omit any of them. Derived numbers
+   * (proficiency bonus, saves, skills, passive perception, initiative) are NOT
+   * stored; compute them via lib/character-derive.ts. */
+  speed?: number;
+  savingThrowProficiencies?: string[];
+  skillProficiencies?: string[];
+  expertise?: string[];
+  languages?: string[];
+  otherProficiencies?: string[];
+  featuresAndTraits?: Array<{ name: string; description?: string; source?: string }>;
+  background?: string;
+  alignment?: string;
+  personality?: { traits?: string; ideals?: string; bonds?: string; flaws?: string };
 }
 
 /** Per ADR-0007: the server's own deterministic record of who said what
@@ -75,12 +92,17 @@ export interface SessionStartResult {
  * POST /campaigns/:id/session/start (see startSession above) — that
  * split is real, not a frontend simplification, so CampaignSettingsPatch
  * below deliberately excludes it rather than silently no-opping it. */
+/** Issue #69: narration length/detail. Absent is treated as "detailed" by the
+ * server, so the UI shows "detailed" as the effective value when unset. */
+export type ResponseLength = "concise" | "standard" | "detailed";
+
 export interface CampaignSettings {
   model: string;
   artStyle?: string;
   worldSetting?: string;
   toneWhimsy?: number;
   contentIntensity?: "standard" | "low";
+  responseLength?: ResponseLength;
   generateImages?: boolean;
   /** Issue #44: absent === on. When explicitly false, the player supplies
    * their own dice values instead of the engine rolling. */
@@ -110,6 +132,20 @@ export async function updateCampaignSettings(
     method: "POST",
     body: JSON.stringify(patch),
   })) as CampaignSettings;
+}
+
+/** Issue #71: set (or clear, with "") the player character's free-text
+ * appearance on an existing sheet. Returns the stored value (null when cleared). */
+export async function setCharacterAppearance(
+  connection: Connection,
+  campaignId: string,
+  appearance: string
+): Promise<string | null> {
+  const result = (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/character/appearance`, {
+    method: "POST",
+    body: JSON.stringify({ appearance }),
+  })) as { appearance: string | null };
+  return result.appearance;
 }
 
 export async function getModels(connection: Connection): Promise<{ models: ModelOption[]; default: string }> {
@@ -146,6 +182,16 @@ export interface CharacterCreationInput {
   race: string;
   class: string;
   abilityScores: Record<"strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma", number>;
+  /** Issue #71: optional free-text physical description captured at creation
+   * and fed to the character's image prompt. */
+  appearance?: string;
+  /** Issue #67 (ADR-0015): class skill picks (exactly the class's choose-count),
+   * optional expertise (subset of picks), and authored identity fields. */
+  skillProficiencies?: string[];
+  expertise?: string[];
+  background?: string;
+  alignment?: string;
+  personality?: { traits?: string; ideals?: string; bonds?: string; flaws?: string };
 }
 
 /** Optional world/tone fields the player can set at creation time (issue #48).
@@ -155,6 +201,9 @@ export interface CampaignCreationSettings {
   worldSetting?: string;
   toneWhimsy?: number;
   contentIntensity?: "standard" | "low";
+  /** Issue #69: how long/detailed the DM's replies run. Omitted → server
+   * default ("detailed"). Inherited from the last game via new-game-defaults. */
+  responseLength?: ResponseLength;
   /** Issue #57: the model the new campaign should start on. Omitted keeps the
    * server default (Sonnet). */
   model?: string;
@@ -236,6 +285,32 @@ export async function sendTurn(connection: Connection, campaignId: string, messa
   return body as TurnResult;
 }
 
+export interface EditTurnResult extends TurnResult {
+  turnIndex: number;
+  discardedCount: number;
+}
+
+/** Issue #68 (ADR-0016): edit a past player message and re-run from there,
+ * discarding every turn after it. Like sendTurn, 200/502 are domain results;
+ * a 409 (busy, or a turn played before snapshots existed) or 400 throws. For a
+ * turn-zero opening pass an empty `message` — the server re-runs the opening. */
+export async function editTurn(
+  connection: Connection,
+  campaignId: string,
+  turnIndex: number,
+  message: string
+): Promise<EditTurnResult> {
+  const { status, body } = await apiFetchRaw(
+    connection,
+    `/campaigns/${encodeURIComponent(campaignId)}/turns/${turnIndex}/edit`,
+    { method: "POST", body: JSON.stringify({ message }) }
+  );
+  if (status !== 200 && status !== 502) {
+    throw new ApiError((body as { error?: string }).error ?? `request failed (${status})`);
+  }
+  return body as EditTurnResult;
+}
+
 /** ADR-0013 opening scene (turn-zero). Generates the DM-initiated first beat of
  * a brand-new campaign. Like sendTurn, a 502 engine error comes back as a valid
  * { narration, isError:true } body (a domain result to render), so this uses
@@ -289,10 +364,13 @@ export async function illustrateEntity(
 export async function illustrateMoment(
   connection: Connection,
   campaignId: string,
-  turnIndex: number
+  turnIndex: number,
+  // Issue #66: an optional prompt override for regenerating a moment's image
+  // (e.g. "the same scene, but at dusk"). Omitted → the turn's narration is used.
+  description?: string
 ): Promise<IllustrateResult> {
   return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/illustrate`, {
     method: "POST",
-    body: JSON.stringify({ kind: "moment", turnIndex }),
+    body: JSON.stringify(description?.trim() ? { kind: "moment", turnIndex, description: description.trim() } : { kind: "moment", turnIndex }),
   })) as IllustrateResult;
 }

@@ -77,6 +77,39 @@ test("strips the post-turn 'updated session log' bookkeeping leak (#62)", () => 
   assert.equal(stripMetaChatter(prose), prose);
 });
 
+test("strips a mid-play SESSION END epilogue and its divider (#72)", () => {
+  // The reported leak: real narration, then a `---` divider, then a bold
+  // SESSION END marker and a retrospective wrap-up — while the player is
+  // still going. Everything from the divider onward must be cut.
+  const raw =
+    "For the first time since you arrived, you feel something like freedom.\n\n---\n\n**SESSION END**\n\nYou've traveled from Phoenix to the open ocean in a single night. The question that remains is: what now?";
+  assert.equal(
+    stripMetaChatter(raw),
+    "For the first time since you arrived, you feel something like freedom."
+  );
+});
+
+test("strips assorted end-of-session markers, keeps prior narration (#72)", () => {
+  assert.equal(
+    stripMetaChatter("The door closes behind you.\n\n**End of the First Session**\n\nWhat a journey it has been."),
+    "The door closes behind you."
+  );
+  assert.equal(
+    stripMetaChatter("Rain hammers the deck.\n\n**To be continued...**"),
+    "Rain hammers the deck."
+  );
+});
+
+test("leaves ordinary prose mentioning 'the end' untouched — needs the bold marker (#72)", () => {
+  // No bold end-of-session marker: nothing is stripped.
+  const prose = "You reach the end of the corridor. A door waits at the far side.";
+  assert.equal(stripMetaChatter(prose), prose);
+  // A bold marker sitting at the very top with no narration before it would
+  // blank the reply, so the original is kept instead.
+  const onlyMarker = "**The End**";
+  assert.equal(stripMetaChatter(onlyMarker), onlyMarker);
+});
+
 test("keeps the player-facing roll request when auto-roll is OFF (#44)", () => {
   // With auto-roll off the DM asks the player to roll — that phrasing must NOT
   // be stripped, or the player never gets asked for their value.

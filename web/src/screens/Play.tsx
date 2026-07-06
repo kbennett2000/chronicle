@@ -3,6 +3,7 @@ import type { Connection } from "../lib/connection";
 import {
   getState,
   sendTurn,
+  editTurn,
   generateOpening,
   illustrateMoment,
   getCampaignSettings,
@@ -70,8 +71,8 @@ function ChapterHeading({ text }: { text: string }) {
 
 /** Renders a moment's illustrated scene as an authed blob image; nothing
  * while it can't resolve (same graceful-empty contract as the gallery). */
-function MomentImage({ connection, campaignId, filename }: { connection: Connection; campaignId: string; filename: string }) {
-  const { url } = useAuthedImage(connection, campaignId, filename);
+function MomentImage({ connection, campaignId, filename, cacheBust }: { connection: Connection; campaignId: string; filename: string; cacheBust?: number }) {
+  const { url } = useAuthedImage(connection, campaignId, filename, cacheBust);
   const [expanded, setExpanded] = useState(false);
   if (!url) return null;
   return (
@@ -134,33 +135,118 @@ function TurnView({
   onIllustrate,
   drawing,
   drawError,
+  imageNonce,
+  onEdit,
+  canEdit,
+  editing,
+  editError,
+  discardCount,
 }: {
   turn: DisplayTurn;
   connection: Connection;
   campaignId: string;
-  onIllustrate: () => void;
+  // Issue #66: an optional prompt override lets the player refine a regenerate.
+  onIllustrate: (description?: string) => void;
   drawing: boolean;
   drawError: string | null;
+  imageNonce?: number;
+  // Issue #68: edit this player message and re-run from here.
+  onEdit: (newMessage: string) => void;
+  canEdit: boolean;
+  editing: boolean;
+  editError: string | null;
+  discardCount: number;
 }) {
   // A moment can be illustrated once it has real (non-error) narration and
   // has been persisted server-side (i.e. it's a settled turn, not the one
   // still weaving). Already-illustrated moments show the image instead.
   const canIllustrate = turn.narration !== null && !turn.isError;
+  // Issue #66: regenerate affordance for an already-drawn moment — optionally
+  // with a refined prompt. Collapsed by default so it doesn't clutter the log.
+  const [regenOpen, setRegenOpen] = useState(false);
+  const [regenDraft, setRegenDraft] = useState("");
+  // Issue #68: inline edit of this turn's player message.
+  const [editOpen, setEditOpen] = useState(false);
+  const [editDraft, setEditDraft] = useState(turn.playerMessage);
+  const isOpening = turn.playerMessage.trim() === "";
+
+  function submitEdit(text: string) {
+    const warning =
+      discardCount > 0
+        ? `This will re-run this turn and discard the ${discardCount} turn${discardCount === 1 ? "" : "s"} after it. This can't be undone. Continue?`
+        : "This will re-run this turn with your edited action. Continue?";
+    if (!window.confirm(warning)) return;
+    setEditOpen(false);
+    onEdit(text);
+  }
   return (
     <>
       {/* ADR-0013: a turn-zero opening scene has an empty playerMessage (the DM
           spoke unprompted) — render narration alone, with no "YOU" block. */}
       {turn.playerMessage.trim() !== "" && (
         <div style={{ margin: "0 0 16px", paddingLeft: 12, borderLeft: "2px solid var(--ember-deep)" }}>
-          <div style={{ fontFamily: "var(--font-display)", fontSize: 10, letterSpacing: 2, color: "var(--ember)", marginBottom: 2 }}>
-            YOU
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 10, letterSpacing: 2, color: "var(--ember)", marginBottom: 2 }}>
+              YOU
+            </div>
+            {/* Issue #68: edit this action and re-run from here. */}
+            {canEdit && !editOpen && (
+              <button
+                data-testid="edit-turn"
+                onClick={() => { setEditDraft(turn.playerMessage); setEditOpen(true); }}
+                disabled={editing}
+                style={{ background: "none", border: "none", cursor: editing ? "default" : "pointer", fontSize: 10.5, color: "var(--brass)", padding: 0, fontFamily: "var(--font-display)", letterSpacing: 0.5 }}
+              >
+                ✎ Edit
+              </button>
+            )}
           </div>
-          <div
-            data-testid="player-message"
-            style={{ fontSize: 15, lineHeight: 1.55, fontStyle: "italic", color: "var(--ink-dim)" }}
-          >
-            {turn.playerMessage}
-          </div>
+          {editOpen ? (
+            <div>
+              <textarea
+                value={editDraft}
+                onChange={(e) => setEditDraft(e.target.value)}
+                data-testid="edit-turn-input"
+                rows={2}
+                autoFocus
+                style={{ width: "100%", boxSizing: "border-box", background: "rgba(12,8,5,.5)", border: "1px solid rgba(109,90,56,.4)", borderRadius: 4, padding: "8px 11px", color: "var(--ink)", fontFamily: "var(--font-body)", fontSize: 15, resize: "vertical", outline: "none" }}
+              />
+              <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                <button
+                  data-testid="edit-turn-save"
+                  onClick={() => submitEdit(editDraft)}
+                  disabled={editing || editDraft.trim() === ""}
+                  style={{ cursor: editing ? "default" : "pointer", padding: "6px 14px", borderRadius: 3, border: "none", background: "linear-gradient(180deg,#d8743e,#a8511f)", color: "#1c120a", fontFamily: "var(--font-display)", fontSize: 11.5, opacity: editing || editDraft.trim() === "" ? 0.6 : 1 }}
+                >
+                  Save & re-run
+                </button>
+                <button
+                  onClick={() => setEditOpen(false)}
+                  disabled={editing}
+                  style={{ cursor: "pointer", padding: "6px 14px", borderRadius: 3, border: "1px solid rgba(109,90,56,.4)", background: "transparent", color: "var(--ink-dim)", fontFamily: "var(--font-display)", fontSize: 11.5 }}
+                >
+                  Cancel
+                </button>
+              </div>
+              {discardCount > 0 && (
+                <div style={{ fontSize: 10.5, color: "var(--ink-faint)", marginTop: 4, lineHeight: 1.35 }}>
+                  Re-running discards the {discardCount} turn{discardCount === 1 ? "" : "s"} after this one.
+                </div>
+              )}
+            </div>
+          ) : (
+            <div
+              data-testid="player-message"
+              style={{ fontSize: 15, lineHeight: 1.55, fontStyle: "italic", color: "var(--ink-dim)" }}
+            >
+              {turn.playerMessage}
+            </div>
+          )}
+          {editError && (
+            <div data-testid="edit-turn-error" style={{ fontSize: 11, color: "var(--ember)", marginTop: 4 }}>
+              {editError}
+            </div>
+          )}
         </div>
       )}
       {turn.narration !== null && (
@@ -177,12 +263,31 @@ function TurnView({
           {turn.narration}
         </p>
       )}
-      {turn.image && <MomentImage connection={connection} campaignId={campaignId} filename={turn.image} />}
+      {/* Issue #68: turn-zero opening has no YOU block — offer a reweave that
+          re-runs the opening scene, discarding everything after it. */}
+      {isOpening && canEdit && turn.narration !== null && (
+        <div style={{ margin: "-6px 0 18px" }}>
+          <button
+            data-testid="reweave-opening"
+            onClick={() => submitEdit("")}
+            disabled={editing}
+            style={{ background: "none", border: "none", cursor: editing ? "default" : "pointer", padding: 0, color: editing ? "var(--ink-faint)" : "var(--brass)", fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 0.5 }}
+          >
+            ↺ Reweave the opening
+          </button>
+          {editError && (
+            <div data-testid="edit-turn-error" style={{ fontSize: 11, color: "var(--ember)", marginTop: 4 }}>
+              {editError}
+            </div>
+          )}
+        </div>
+      )}
+      {turn.image && <MomentImage connection={connection} campaignId={campaignId} filename={turn.image} cacheBust={imageNonce} />}
       {canIllustrate && !turn.image && (
         <div style={{ margin: "-6px 0 18px" }}>
           <button
             data-testid="illustrate-moment"
-            onClick={onIllustrate}
+            onClick={() => onIllustrate()}
             disabled={drawing}
             style={{
               cursor: drawing ? "default" : "pointer",
@@ -197,6 +302,77 @@ function TurnView({
           >
             {drawing ? "Illustrating…" : "⟢ Illustrate this moment"}
           </button>
+          {drawError && (
+            <div data-testid="illustrate-error" style={{ fontSize: 11, color: "var(--ember)", marginTop: 4 }}>
+              {drawError}
+            </div>
+          )}
+        </div>
+      )}
+      {/* Issue #66: regenerate an existing moment image, optionally with a
+          refined prompt. Server overwrites the deterministic filename; the
+          parent bumps imageNonce so the new picture actually shows. */}
+      {canIllustrate && turn.image && (
+        <div style={{ margin: "-6px 0 18px" }}>
+          {!regenOpen ? (
+            <button
+              data-testid="regenerate-moment"
+              onClick={() => setRegenOpen(true)}
+              disabled={drawing}
+              style={{
+                cursor: drawing ? "default" : "pointer",
+                background: "none",
+                border: "none",
+                padding: 0,
+                color: drawing ? "var(--ink-faint)" : "var(--brass)",
+                fontFamily: "var(--font-display)",
+                fontSize: 11,
+                letterSpacing: 0.5,
+              }}
+            >
+              {drawing ? "Redrawing…" : "↻ Regenerate image"}
+            </button>
+          ) : (
+            <div>
+              <textarea
+                value={regenDraft}
+                onChange={(e) => setRegenDraft(e.target.value)}
+                data-testid="regenerate-input"
+                rows={2}
+                placeholder="Optional: describe changes (e.g. at dusk, wider shot). Leave blank to just redraw."
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  background: "rgba(12,8,5,.5)",
+                  border: "1px solid rgba(109,90,56,.4)",
+                  borderRadius: 4,
+                  padding: "8px 11px",
+                  color: "var(--ink)",
+                  fontFamily: "var(--font-body)",
+                  fontSize: 13,
+                  resize: "vertical",
+                  outline: "none",
+                }}
+              />
+              <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                <button
+                  data-testid="regenerate-submit"
+                  onClick={() => { onIllustrate(regenDraft); setRegenOpen(false); setRegenDraft(""); }}
+                  disabled={drawing}
+                  style={{ cursor: drawing ? "default" : "pointer", padding: "6px 14px", borderRadius: 3, border: "none", background: "linear-gradient(180deg,#d8743e,#a8511f)", color: "#1c120a", fontFamily: "var(--font-display)", fontSize: 11.5, opacity: drawing ? 0.6 : 1 }}
+                >
+                  Redraw
+                </button>
+                <button
+                  onClick={() => { setRegenOpen(false); setRegenDraft(""); }}
+                  disabled={drawing}
+                  style={{ cursor: "pointer", padding: "6px 14px", borderRadius: 3, border: "1px solid rgba(109,90,56,.4)", background: "transparent", color: "var(--ink-dim)", fontFamily: "var(--font-display)", fontSize: 11.5 }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
           {drawError && (
             <div data-testid="illustrate-error" style={{ fontSize: 11, color: "var(--ember)", marginTop: 4 }}>
               {drawError}
@@ -308,6 +484,14 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   // generating, and any error to show under that turn's button.
   const [illustratingTurn, setIllustratingTurn] = useState<number | null>(null);
   const [illustrateErrors, setIllustrateErrors] = useState<Record<number, string>>({});
+  // Issue #66: per-turn cache-bust counter. A regenerated moment reuses the same
+  // deterministic filename, so bumping this forces useAuthedImage (and the
+  // browser's HTTP cache) to fetch the freshly-drawn picture instead of the old.
+  const [imageNonces, setImageNonces] = useState<Record<number, number>>({});
+  // Issue #68: which turn is being edited+re-run (null when none), and any error
+  // (tagged with its turn index so it survives editingTurn resetting to null).
+  const [editingTurn, setEditingTurn] = useState<number | null>(null);
+  const [editError, setEditError] = useState<{ index: number; message: string } | null>(null);
   // Issue #56: whether each turn should auto-illustrate. Held in a ref so
   // handleSend/generateOpening read the current value without being re-created
   // or racing a state update.
@@ -536,7 +720,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   // persisted the path on the transcript record; we set it on the turn so it
   // renders immediately (and survives reload via hydration). On failure we
   // show the returned Grok reason under that turn, never a silent no-op.
-  async function handleIllustrateMoment(index: number) {
+  async function handleIllustrateMoment(index: number, description?: string) {
     if (illustratingTurn !== null) return;
     setIllustratingTurn(index);
     setIllustrateErrors((prev) => {
@@ -544,10 +728,12 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
       return rest;
     });
     try {
-      const result = await illustrateMoment(connection, campaignId, index);
+      const result = await illustrateMoment(connection, campaignId, index, description);
       if (result.ok && result.relPath) {
         const relPath = result.relPath;
         setTurns((prev) => prev.map((t, i) => (i === index ? { ...t, image: relPath } : t)));
+        // Bust the image cache so a regenerate (same filename) actually shows.
+        setImageNonces((prev) => ({ ...prev, [index]: (prev[index] ?? 0) + 1 }));
       } else {
         setIllustrateErrors((prev) => ({ ...prev, [index]: result.error || "Grok Build couldn't draw this." }));
       }
@@ -562,6 +748,48 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   // reaches the panels that read it.
   function refreshPanels() {
     getState(connection, campaignId).then(applyPanelState).catch(() => {});
+  }
+
+  // Issue #68: after an edit re-runs the turn (which rewrote the transcript and
+  // state files server-side), rebuild everything from the server — the same
+  // hydration path the initial load uses, rather than surgically patching.
+  async function reloadFromServer() {
+    const snapshot = await getState(connection, campaignId);
+    applyPanelState(snapshot);
+    if (snapshot.currentSessionLog) {
+      setChapters(parseChapterHeadings(snapshot.currentSessionLog.content));
+      setTurns(
+        snapshot.currentSessionLog.transcript.map((record) => ({
+          playerMessage: record.playerMessage,
+          narration: record.narration,
+          image: record.image,
+        }))
+      );
+    } else {
+      setChapters([]);
+      setTurns([]);
+    }
+  }
+
+  // Issue #68: edit a past player message and re-run from there, discarding
+  // everything after it. The caller (TurnView) has already confirmed the
+  // discard. Optimistically drops the edited turn + all later ones and shows the
+  // weaving indicator, then rebuilds from the server once the re-run lands.
+  async function handleEditTurn(index: number, newMessage: string) {
+    if (editingTurn !== null || sending || openingScene) return;
+    setEditingTurn(index);
+    setEditError(null);
+    setTurns((prev) => prev.slice(0, index));
+    try {
+      await editTurn(connection, campaignId, index, newMessage);
+      await reloadFromServer();
+    } catch (err) {
+      setEditError({ index, message: err instanceof Error ? err.message : String(err) });
+      // Restore the pre-edit view so the player doesn't lose the log on error.
+      await reloadFromServer().catch(() => {});
+    } finally {
+      setEditingTurn(null);
+    }
   }
 
   return (
@@ -637,12 +865,18 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
                 turn={turn}
                 connection={connection}
                 campaignId={campaignId}
-                onIllustrate={() => handleIllustrateMoment(i)}
+                onIllustrate={(description) => handleIllustrateMoment(i, description)}
                 drawing={illustratingTurn === i}
                 drawError={illustrateErrors[i] ?? null}
+                imageNonce={imageNonces[i]}
+                onEdit={(newMessage) => handleEditTurn(i, newMessage)}
+                canEdit={!sending && !openingScene && editingTurn === null && turn.narration !== null}
+                editing={editingTurn === i}
+                editError={editError?.index === i ? editError.message : null}
+                discardCount={turns.length - 1 - i}
               />
             ))}
-          {sending && <WeavingIndicator />}
+          {(sending || editingTurn !== null) && <WeavingIndicator />}
           <div ref={logEndRef} />
         </div>
       </div>
@@ -728,7 +962,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
       {openTab && (
         <BottomSheet title={openTab.toUpperCase()} subtitle={TAB_SUBTITLES[openTab]} onClose={() => setOpenTab(null)}>
           {openTab === "Self" && characterSheet ? (
-            <SelfPanel connection={connection} campaignId={campaignId} sheet={characterSheet} />
+            <SelfPanel connection={connection} campaignId={campaignId} sheet={characterSheet} onUpdated={refreshPanels} />
           ) : openTab === "Folk" ? (
             <FolkPanel connection={connection} campaignId={campaignId} npcRoster={npcRoster} />
           ) : openTab === "Quest" ? (

@@ -35,22 +35,26 @@ function GalleryTile({
   onLoadedChange: (loaded: boolean) => void;
   onIllustrated: () => void;
 }) {
-  const { url, status } = useAuthedImage(connection, campaignId, item.image);
+  // Issue #66: a local cache-bust so a regenerated entity image (same
+  // deterministic filename) actually refreshes in the tile and lightbox.
+  const [nonce, setNonce] = useState(0);
+  const { url, status } = useAuthedImage(connection, campaignId, item.image, nonce);
   const [drawing, setDrawing] = useState(false);
   const [drawError, setDrawError] = useState<string | null>(null);
+  // Issue #66: regenerate affordance for an already-drawn entity, optionally
+  // with a refined prompt appended to the entity's base description.
+  const [regenOpen, setRegenOpen] = useState(false);
+  const [regenDraft, setRegenDraft] = useState("");
 
-  async function draw() {
+  async function draw(refine?: string) {
     setDrawing(true);
     setDrawError(null);
+    const base = item.description || item.name;
+    const description = refine?.trim() ? `${base}. ${refine.trim()}` : base;
     try {
-      const result = await illustrateEntity(
-        connection,
-        campaignId,
-        item.type,
-        item.name,
-        item.description || item.name
-      );
+      const result = await illustrateEntity(connection, campaignId, item.type, item.name, description);
       if (result.ok) {
+        setNonce((n) => n + 1);
         onIllustrated();
       } else {
         setDrawError(result.error || "Grok Build couldn't draw this.");
@@ -73,36 +77,85 @@ function GalleryTile({
 
   if (item.image && url) {
     return (
-      <button
-        data-testid="gallery-tile"
-        onClick={() => onOpen(item, url)}
-        style={{
-          padding: 0,
-          border: "none",
-          cursor: "pointer",
-          background: "none",
-          textAlign: "left",
-          position: "relative",
-          borderRadius: 2,
-          overflow: "hidden",
-          height: 110,
-          boxShadow: "0 4px 10px rgba(0,0,0,.5), 0 0 0 1px rgba(184,150,90,.4)",
-        }}
-      >
-        <img
-          src={url}
-          alt=""
-          data-testid="gallery-image"
-          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-        />
-        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg,rgba(0,0,0,0) 55%,rgba(8,5,3,.72))" }} />
-        <div style={{ position: "absolute", left: 7, right: 7, bottom: 6 }}>
-          <div style={{ fontFamily: "var(--font-display)", fontSize: 9, letterSpacing: 1, color: "var(--arcane)" }}>
-            {item.type.toUpperCase()}
+      <div style={{ position: "relative", borderRadius: 2, overflow: "hidden", height: 110, boxShadow: "0 4px 10px rgba(0,0,0,.5), 0 0 0 1px rgba(184,150,90,.4)" }}>
+        <button
+          data-testid="gallery-tile"
+          onClick={() => onOpen(item, url)}
+          style={{ padding: 0, border: "none", cursor: "pointer", background: "none", textAlign: "left", display: "block", width: "100%", height: "100%" }}
+        >
+          <img
+            src={url}
+            alt=""
+            data-testid="gallery-image"
+            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+          />
+          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg,rgba(0,0,0,0) 55%,rgba(8,5,3,.72))" }} />
+          <div style={{ position: "absolute", left: 7, right: 7, bottom: 6 }}>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 9, letterSpacing: 1, color: "var(--arcane)" }}>
+              {item.type.toUpperCase()}
+            </div>
+            <div style={{ fontFamily: "var(--font-body)", fontSize: 11.5, color: "#f2e8d6", lineHeight: 1.2 }}>{item.name}</div>
           </div>
-          <div style={{ fontFamily: "var(--font-body)", fontSize: 11.5, color: "#f2e8d6", lineHeight: 1.2 }}>{item.name}</div>
-        </div>
-      </button>
+        </button>
+        {/* Issue #66: regenerate this likeness (optionally refined). */}
+        <button
+          data-testid="gallery-regenerate"
+          title="Regenerate this image"
+          onClick={() => setRegenOpen(true)}
+          disabled={drawing}
+          style={{
+            position: "absolute",
+            top: 5,
+            right: 5,
+            width: 24,
+            height: 24,
+            borderRadius: "50%",
+            border: "1px solid rgba(211,112,60,.6)",
+            background: "rgba(8,5,3,.6)",
+            color: drawing ? "var(--ink-faint)" : "var(--ember)",
+            cursor: drawing ? "default" : "pointer",
+            fontSize: 12,
+            lineHeight: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {drawing ? "…" : "↻"}
+        </button>
+        {regenOpen && (
+          <div style={{ position: "absolute", inset: 0, background: "rgba(8,5,3,.9)", padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+            <textarea
+              value={regenDraft}
+              onChange={(e) => setRegenDraft(e.target.value)}
+              data-testid="gallery-regenerate-input"
+              placeholder="Optional refinement, then Redraw"
+              style={{ flex: 1, width: "100%", boxSizing: "border-box", background: "rgba(12,8,5,.6)", border: "1px solid rgba(109,90,56,.5)", borderRadius: 3, padding: "5px 7px", color: "var(--ink)", fontFamily: "var(--font-body)", fontSize: 11, resize: "none", outline: "none" }}
+            />
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                data-testid="gallery-regenerate-submit"
+                onClick={() => { draw(regenDraft); setRegenOpen(false); setRegenDraft(""); }}
+                disabled={drawing}
+                style={{ flex: 1, cursor: "pointer", padding: "5px 0", borderRadius: 3, border: "none", background: "linear-gradient(180deg,#d8743e,#a8511f)", color: "#1c120a", fontFamily: "var(--font-display)", fontSize: 10.5 }}
+              >
+                Redraw
+              </button>
+              <button
+                onClick={() => { setRegenOpen(false); setRegenDraft(""); }}
+                style={{ flex: 1, cursor: "pointer", padding: "5px 0", borderRadius: 3, border: "1px solid rgba(109,90,56,.5)", background: "transparent", color: "var(--ink-dim)", fontFamily: "var(--font-display)", fontSize: 10.5 }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+        {drawError && (
+          <div data-testid="gallery-draw-error" style={{ position: "absolute", left: 6, right: 6, bottom: 6, fontSize: 9.5, color: "var(--ember)", background: "rgba(8,5,3,.85)", borderRadius: 3, padding: "3px 5px", lineHeight: 1.3 }}>
+            {drawError}
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -131,7 +184,7 @@ function GalleryTile({
       <div style={{ fontSize: 9, color: "var(--ink-faint)", opacity: 0.6, marginTop: 5 }}>— no likeness —</div>
       <button
         data-testid="gallery-draw"
-        onClick={draw}
+        onClick={() => draw()}
         disabled={drawing}
         style={{
           marginTop: 7,
