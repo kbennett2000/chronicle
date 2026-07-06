@@ -15,7 +15,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  * own cwd (it's shared across all campaigns, not per-campaign state), so it
  * needs its own allowedTools grant — the campaign-scoped `Read(./**)` rule
  * from ADR-0002 wouldn't otherwise reach it. */
-const SRD_DIR = path.resolve(__dirname, "../reference/srd");
+export const SRD_DIR = path.resolve(__dirname, "../reference/srd");
 
 const STATE_FILES = [
   "character-sheet.json",
@@ -127,7 +127,7 @@ items, or verbatim lines/quotes. Invent your own original names for every
 character, faction, location, and object the setting calls for — reskin
 the property's *feel*, not its specific copyrighted content.`;
 
-function systemPrompt(
+export function systemPrompt(
   campaignDir: string,
   sessionLogPath: string,
   settings: CampaignSettings,
