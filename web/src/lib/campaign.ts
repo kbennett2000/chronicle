@@ -317,10 +317,13 @@ export async function illustrateEntity(
 export async function illustrateMoment(
   connection: Connection,
   campaignId: string,
-  turnIndex: number
+  turnIndex: number,
+  // Issue #66: an optional prompt override for regenerating a moment's image
+  // (e.g. "the same scene, but at dusk"). Omitted → the turn's narration is used.
+  description?: string
 ): Promise<IllustrateResult> {
   return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/illustrate`, {
     method: "POST",
-    body: JSON.stringify({ kind: "moment", turnIndex }),
+    body: JSON.stringify(description?.trim() ? { kind: "moment", turnIndex, description: description.trim() } : { kind: "moment", turnIndex }),
   })) as IllustrateResult;
 }

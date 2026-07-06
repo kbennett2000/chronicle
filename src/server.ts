@@ -673,8 +673,11 @@ const ROUTES: Array<{
           sendJson(res, 404, { error: `no turn ${body.turnIndex} in the active session` });
           return;
         }
-        // The narration is the scene description; keep the /imagine prompt sane.
-        const description = record.narration.trim().slice(0, 500) || "a scene from the story";
+        // The narration is the scene description by default; keep the /imagine
+        // prompt sane. Issue #66: a regenerate can pass an explicit `description`
+        // to refine the prompt (e.g. "the same scene, but at night").
+        const override = typeof body.description === "string" && body.description.trim() ? body.description.trim() : "";
+        const description = (override || record.narration.trim()).slice(0, 500) || "a scene from the story";
         const sessionBase = path.basename(active.sessionLogPath).replace(/\.md$/, "");
         const name = `${sessionBase}-turn-${body.turnIndex}`;
 

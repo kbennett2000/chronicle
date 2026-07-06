@@ -70,8 +70,8 @@ function ChapterHeading({ text }: { text: string }) {
 
 /** Renders a moment's illustrated scene as an authed blob image; nothing
  * while it can't resolve (same graceful-empty contract as the gallery). */
-function MomentImage({ connection, campaignId, filename }: { connection: Connection; campaignId: string; filename: string }) {
-  const { url } = useAuthedImage(connection, campaignId, filename);
+function MomentImage({ connection, campaignId, filename, cacheBust }: { connection: Connection; campaignId: string; filename: string; cacheBust?: number }) {
+  const { url } = useAuthedImage(connection, campaignId, filename, cacheBust);
   const [expanded, setExpanded] = useState(false);
   if (!url) return null;
   return (
@@ -134,18 +134,25 @@ function TurnView({
   onIllustrate,
   drawing,
   drawError,
+  imageNonce,
 }: {
   turn: DisplayTurn;
   connection: Connection;
   campaignId: string;
-  onIllustrate: () => void;
+  // Issue #66: an optional prompt override lets the player refine a regenerate.
+  onIllustrate: (description?: string) => void;
   drawing: boolean;
   drawError: string | null;
+  imageNonce?: number;
 }) {
   // A moment can be illustrated once it has real (non-error) narration and
   // has been persisted server-side (i.e. it's a settled turn, not the one
   // still weaving). Already-illustrated moments show the image instead.
   const canIllustrate = turn.narration !== null && !turn.isError;
+  // Issue #66: regenerate affordance for an already-drawn moment — optionally
+  // with a refined prompt. Collapsed by default so it doesn't clutter the log.
+  const [regenOpen, setRegenOpen] = useState(false);
+  const [regenDraft, setRegenDraft] = useState("");
   return (
     <>
       {/* ADR-0013: a turn-zero opening scene has an empty playerMessage (the DM
@@ -177,12 +184,12 @@ function TurnView({
           {turn.narration}
         </p>
       )}
-      {turn.image && <MomentImage connection={connection} campaignId={campaignId} filename={turn.image} />}
+      {turn.image && <MomentImage connection={connection} campaignId={campaignId} filename={turn.image} cacheBust={imageNonce} />}
       {canIllustrate && !turn.image && (
         <div style={{ margin: "-6px 0 18px" }}>
           <button
             data-testid="illustrate-moment"
-            onClick={onIllustrate}
+            onClick={() => onIllustrate()}
             disabled={drawing}
             style={{
               cursor: drawing ? "default" : "pointer",
@@ -197,6 +204,77 @@ function TurnView({
           >
             {drawing ? "Illustrating…" : "⟢ Illustrate this moment"}
           </button>
+          {drawError && (
+            <div data-testid="illustrate-error" style={{ fontSize: 11, color: "var(--ember)", marginTop: 4 }}>
+              {drawError}
+            </div>
+          )}
+        </div>
+      )}
+      {/* Issue #66: regenerate an existing moment image, optionally with a
+          refined prompt. Server overwrites the deterministic filename; the
+          parent bumps imageNonce so the new picture actually shows. */}
+      {canIllustrate && turn.image && (
+        <div style={{ margin: "-6px 0 18px" }}>
+          {!regenOpen ? (
+            <button
+              data-testid="regenerate-moment"
+              onClick={() => setRegenOpen(true)}
+              disabled={drawing}
+              style={{
+                cursor: drawing ? "default" : "pointer",
+                background: "none",
+                border: "none",
+                padding: 0,
+                color: drawing ? "var(--ink-faint)" : "var(--brass)",
+                fontFamily: "var(--font-display)",
+                fontSize: 11,
+                letterSpacing: 0.5,
+              }}
+            >
+              {drawing ? "Redrawing…" : "↻ Regenerate image"}
+            </button>
+          ) : (
+            <div>
+              <textarea
+                value={regenDraft}
+                onChange={(e) => setRegenDraft(e.target.value)}
+                data-testid="regenerate-input"
+                rows={2}
+                placeholder="Optional: describe changes (e.g. at dusk, wider shot). Leave blank to just redraw."
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  background: "rgba(12,8,5,.5)",
+                  border: "1px solid rgba(109,90,56,.4)",
+                  borderRadius: 4,
+                  padding: "8px 11px",
+                  color: "var(--ink)",
+                  fontFamily: "var(--font-body)",
+                  fontSize: 13,
+                  resize: "vertical",
+                  outline: "none",
+                }}
+              />
+              <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                <button
+                  data-testid="regenerate-submit"
+                  onClick={() => { onIllustrate(regenDraft); setRegenOpen(false); setRegenDraft(""); }}
+                  disabled={drawing}
+                  style={{ cursor: drawing ? "default" : "pointer", padding: "6px 14px", borderRadius: 3, border: "none", background: "linear-gradient(180deg,#d8743e,#a8511f)", color: "#1c120a", fontFamily: "var(--font-display)", fontSize: 11.5, opacity: drawing ? 0.6 : 1 }}
+                >
+                  Redraw
+                </button>
+                <button
+                  onClick={() => { setRegenOpen(false); setRegenDraft(""); }}
+                  disabled={drawing}
+                  style={{ cursor: "pointer", padding: "6px 14px", borderRadius: 3, border: "1px solid rgba(109,90,56,.4)", background: "transparent", color: "var(--ink-dim)", fontFamily: "var(--font-display)", fontSize: 11.5 }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
           {drawError && (
             <div data-testid="illustrate-error" style={{ fontSize: 11, color: "var(--ember)", marginTop: 4 }}>
               {drawError}
@@ -308,6 +386,10 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   // generating, and any error to show under that turn's button.
   const [illustratingTurn, setIllustratingTurn] = useState<number | null>(null);
   const [illustrateErrors, setIllustrateErrors] = useState<Record<number, string>>({});
+  // Issue #66: per-turn cache-bust counter. A regenerated moment reuses the same
+  // deterministic filename, so bumping this forces useAuthedImage (and the
+  // browser's HTTP cache) to fetch the freshly-drawn picture instead of the old.
+  const [imageNonces, setImageNonces] = useState<Record<number, number>>({});
   // Issue #56: whether each turn should auto-illustrate. Held in a ref so
   // handleSend/generateOpening read the current value without being re-created
   // or racing a state update.
@@ -536,7 +618,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   // persisted the path on the transcript record; we set it on the turn so it
   // renders immediately (and survives reload via hydration). On failure we
   // show the returned Grok reason under that turn, never a silent no-op.
-  async function handleIllustrateMoment(index: number) {
+  async function handleIllustrateMoment(index: number, description?: string) {
     if (illustratingTurn !== null) return;
     setIllustratingTurn(index);
     setIllustrateErrors((prev) => {
@@ -544,10 +626,12 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
       return rest;
     });
     try {
-      const result = await illustrateMoment(connection, campaignId, index);
+      const result = await illustrateMoment(connection, campaignId, index, description);
       if (result.ok && result.relPath) {
         const relPath = result.relPath;
         setTurns((prev) => prev.map((t, i) => (i === index ? { ...t, image: relPath } : t)));
+        // Bust the image cache so a regenerate (same filename) actually shows.
+        setImageNonces((prev) => ({ ...prev, [index]: (prev[index] ?? 0) + 1 }));
       } else {
         setIllustrateErrors((prev) => ({ ...prev, [index]: result.error || "Grok Build couldn't draw this." }));
       }
@@ -637,9 +721,10 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
                 turn={turn}
                 connection={connection}
                 campaignId={campaignId}
-                onIllustrate={() => handleIllustrateMoment(i)}
+                onIllustrate={(description) => handleIllustrateMoment(i, description)}
                 drawing={illustratingTurn === i}
                 drawError={illustrateErrors[i] ?? null}
+                imageNonce={imageNonces[i]}
               />
             ))}
           {sending && <WeavingIndicator />}
