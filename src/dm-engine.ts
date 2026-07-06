@@ -166,6 +166,12 @@ function systemPrompt(
   // to just the name rather than emitting a dangling "a  " descriptor.
   const descriptor = [character.race, character.class].filter(Boolean).join(" ").trim();
   const who = descriptor ? `${character.name}, a ${descriptor}` : character.name;
+  // Issue #71: if the sheet carries a physical description, tell the DM — so
+  // narration and any auto-generated portrait match the player's intent (a
+  // female Goliath was being rendered as a man for want of this).
+  const appearanceLine = character.appearance
+    ? `\n${character.name}'s appearance (honor this in narration and in any image you generate of them): ${character.appearance}`
+    : "";
   // Issue #63: address every state file by its ABSOLUTE path. The Agent SDK
   // reports the enclosing git repo root — not our `cwd: campaignDir` — as the
   // model's working directory, so a bare filename like "character-sheet.json"
@@ -177,7 +183,7 @@ function systemPrompt(
   // relative, so this is purely about telling the model WHERE the files are.
   const stateFilePaths = STATE_FILES.map((f) => path.join(campaignDir, f));
   const base = `You are the Dungeon Master for a solo Dungeons & Dragons 5th Edition
-campaign for the player character ${who}. This campaign's persistent state
+campaign for the player character ${who}.${appearanceLine} This campaign's persistent state
 lives as plain files in the campaign directory ${campaignDir} — this is the
 source of truth, not your conversation memory. Always read and write these
 files by their full absolute paths below; do NOT assume they are in your

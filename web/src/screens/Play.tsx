@@ -728,7 +728,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
       {openTab && (
         <BottomSheet title={openTab.toUpperCase()} subtitle={TAB_SUBTITLES[openTab]} onClose={() => setOpenTab(null)}>
           {openTab === "Self" && characterSheet ? (
-            <SelfPanel connection={connection} campaignId={campaignId} sheet={characterSheet} />
+            <SelfPanel connection={connection} campaignId={campaignId} sheet={characterSheet} onUpdated={refreshPanels} />
           ) : openTab === "Folk" ? (
             <FolkPanel connection={connection} campaignId={campaignId} npcRoster={npcRoster} />
           ) : openTab === "Quest" ? (

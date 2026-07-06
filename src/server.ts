@@ -20,6 +20,7 @@ import {
   readTurnTranscript,
   setTranscriptRecordImage,
   recordEntityImage,
+  setCharacterAppearance,
   readCampaignModel,
   persistCampaignModel,
   readCampaignSettings,
@@ -42,7 +43,12 @@ import {
   type CampaignSettings,
 } from "./campaign-store.js";
 import { generateImage } from "./image-generator.js";
-import { buildCharacterSheet, deriveCampaignId, CharacterValidationError } from "./character-gen.js";
+import {
+  buildCharacterSheet,
+  deriveCampaignId,
+  CharacterValidationError,
+  MAX_APPEARANCE_CHARS,
+} from "./character-gen.js";
 
 const dotenvResult = loadDotenv();
 if (dotenvResult.error) {
@@ -591,6 +597,27 @@ const ROUTES: Array<{
       }
 
       sendJson(res, 200, persistCampaignSettings(campaignDir, updates));
+    },
+  },
+  {
+    // Issue #71: set/clear the player character's free-text appearance on an
+    // existing sheet, so a character created before this field existed (or one
+    // whose portrait came out wrong) can be fixed without remaking the campaign.
+    method: "POST",
+    pattern: /^\/campaigns\/([^/]+)\/character\/appearance$/,
+    async handler(req, res, [campaignId]) {
+      const campaignDir = resolveCampaignDir(campaignId);
+      const body = (await readJsonBody(req)) as Record<string, unknown>;
+      if (typeof body.appearance !== "string") {
+        sendJson(res, 400, { error: "appearance must be a string" });
+        return;
+      }
+      if (body.appearance.trim().length > MAX_APPEARANCE_CHARS) {
+        sendJson(res, 400, { error: `appearance must be ${MAX_APPEARANCE_CHARS} characters or fewer` });
+        return;
+      }
+      const appearance = setCharacterAppearance(campaignDir, body.appearance);
+      sendJson(res, 200, { appearance: appearance ?? null });
     },
   },
   {

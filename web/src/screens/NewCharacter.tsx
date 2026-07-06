@@ -27,6 +27,8 @@ const CLASS_HIT_DICE: Record<string, number> = {
   Sorcerer: 6, Wizard: 6,
 };
 const CLASSES = Object.keys(CLASS_HIT_DICE);
+// Mirrors MAX_APPEARANCE_CHARS in src/character-gen.ts (server is authoritative).
+const MAX_APPEARANCE_CHARS = 600;
 
 type Ability = "strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma";
 const ABILITIES: Array<{ key: Ability; label: string }> = [
@@ -83,6 +85,8 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
   const [scores, setScores] = useState<Record<Ability, number>>({
     strength: 8, dexterity: 8, constitution: 8, intelligence: 8, wisdom: 8, charisma: 8,
   });
+  // Issue #71: free-text look, fed to the character's portrait prompt.
+  const [appearance, setAppearance] = useState("");
   const [worldSetting, setWorldSetting] = useState("");
   const [toneWhimsy, setToneWhimsy] = useState(0);
   const [contentIntensity, setContentIntensity] = useState<"standard" | "low">("standard");
@@ -148,6 +152,7 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
     setCreating(true);
     setError(null);
     const character: CharacterCreationInput = { name: name.trim(), race, class: klass, abilityScores: scores };
+    if (appearance.trim()) character.appearance = appearance.trim();
     // Issue #64: send every dial explicitly from the form so the new game stores
     // its own complete copy of look/play/model (no reliance on a per-device
     // cache, and no seed-then-override asymmetry that once let a stale
@@ -217,6 +222,20 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
+
+        <div style={labelStyle}>Appearance</div>
+        <textarea
+          value={appearance}
+          onChange={(e) => setAppearance(e.target.value)}
+          placeholder="e.g. A tall female goliath with grey skin, dark braided hair, and pale eyes"
+          data-testid="newchar-appearance"
+          rows={3}
+          maxLength={MAX_APPEARANCE_CHARS}
+          style={{ ...inputStyle, resize: "vertical", fontFamily: "var(--font-body)" }}
+        />
+        <div style={{ fontSize: 10.5, color: "var(--ink-faint)", marginTop: 3, lineHeight: 1.35 }}>
+          Used to generate portraits and scenes that look like your character. You can edit this later.
+        </div>
 
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "22px 0 6px" }}>
           <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2, color: "var(--brass)" }}>ABILITIES</div>

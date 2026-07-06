@@ -66,7 +66,17 @@ export interface CharacterCreationInput {
   race: string;
   class: string;
   abilityScores: Record<AbilityName, number>;
+  /** Issue #71: free-text physical description (sex, build, hair, skin,
+   * distinguishing marks). Optional. The image generator has nothing else to
+   * go on — race+class alone rendered a female Goliath as a man — so this is
+   * what makes a portrait match the player's intent. Pure flavor, no mechanics. */
+  appearance?: string;
 }
+
+/** Cap the free-text appearance so a pasted essay can't bloat the sheet or the
+ * image prompt. Generous enough for a rich description, short enough to stay a
+ * prompt fragment. */
+export const MAX_APPEARANCE_CHARS = 600;
 
 export class CharacterValidationError extends Error {}
 
@@ -92,12 +102,24 @@ export function buildCharacterSheet(input: CharacterCreationInput): Record<strin
     scores[ability] = raw;
   }
 
+  let appearance: string | undefined;
+  if (input.appearance !== undefined && input.appearance !== null) {
+    if (typeof input.appearance !== "string") {
+      throw new CharacterValidationError("appearance must be a string");
+    }
+    const trimmed = input.appearance.trim();
+    if (trimmed.length > MAX_APPEARANCE_CHARS) {
+      throw new CharacterValidationError(`appearance must be ${MAX_APPEARANCE_CHARS} characters or fewer`);
+    }
+    if (trimmed) appearance = trimmed;
+  }
+
   const hitDie = CLASS_HIT_DICE[input.class];
   const conMod = abilityModifier(scores.constitution);
   const dexMod = abilityModifier(scores.dexterity);
   const maxHp = Math.max(1, hitDie + conMod);
 
-  return {
+  const sheet: Record<string, unknown> = {
     name,
     race: input.race,
     class: input.class,
@@ -111,6 +133,10 @@ export function buildCharacterSheet(input: CharacterCreationInput): Record<strin
     xp: 0,
     spellSlots: {},
   };
+  // Only write the field when it has content — an absent appearance stays absent
+  // on disk (the "field may just not be there yet" contract), not an empty string.
+  if (appearance) sheet.appearance = appearance;
+  return sheet;
 }
 
 /** Turns a character name into a valid, unique campaign id

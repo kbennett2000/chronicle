@@ -147,6 +147,10 @@ export interface CharacterIdentity {
   name: string;
   race: string;
   class: string;
+  /** Issue #71: free-text physical description, when the sheet carries one.
+   * Woven into the DM system prompt so narration and auto-generated portraits
+   * reflect the player's intent (e.g. a female Goliath, not a generic hulk). */
+  appearance?: string;
 }
 
 /** The player character's name/race/class straight off character-sheet.json,
@@ -161,10 +165,15 @@ export function readCharacterIdentity(campaignDir: string): CharacterIdentity {
   if (!fs.existsSync(sheetPath)) return fallback;
   try {
     const sheet = JSON.parse(fs.readFileSync(sheetPath, "utf8")) as Record<string, unknown>;
+    const appearance =
+      typeof sheet.appearance === "string" && sheet.appearance.trim()
+        ? sheet.appearance.trim()
+        : undefined;
     return {
       name: typeof sheet.name === "string" && sheet.name.trim() ? sheet.name.trim() : fallback.name,
       race: typeof sheet.race === "string" ? sheet.race : "",
       class: typeof sheet.class === "string" ? sheet.class : "",
+      ...(appearance ? { appearance } : {}),
     };
   } catch {
     return fallback;
@@ -704,6 +713,23 @@ export function recordEntityImage(
     const p = path.join(campaignDir, "world-state.md");
     fs.writeFileSync(p, withLocationImage(fs.readFileSync(p, "utf8"), name, relPath));
   }
+}
+
+/** Issue #71: set (or clear) the player character's free-text appearance on
+ * character-sheet.json, so an already-created character can be fixed without
+ * remaking the campaign. Mirrors recordEntityImage's character-sheet write.
+ * An empty string clears the field back to absent. Returns the stored value. */
+export function setCharacterAppearance(campaignDir: string, appearance: string): string | undefined {
+  const p = path.join(campaignDir, "character-sheet.json");
+  const sheet = JSON.parse(fs.readFileSync(p, "utf8")) as Record<string, unknown>;
+  const trimmed = appearance.trim();
+  if (trimmed) {
+    sheet.appearance = trimmed;
+  } else {
+    delete sheet.appearance;
+  }
+  fs.writeFileSync(p, JSON.stringify(sheet, null, 2) + "\n");
+  return trimmed || undefined;
 }
 
 export interface StateSnapshot {

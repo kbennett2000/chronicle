@@ -31,6 +31,9 @@ export interface CharacterSheet {
   spellSlots?: Record<string, { total: number; used: number }>;
   currency?: { cp: number; sp: number; ep: number; gp: number; pp: number };
   portraitImage?: string;
+  /** Issue #71: free-text physical description (sex, build, hair, marks). Feeds
+   * the character's image prompt so a portrait matches the player's intent. */
+  appearance?: string;
 }
 
 /** Per ADR-0007: the server's own deterministic record of who said what
@@ -117,6 +120,20 @@ export async function updateCampaignSettings(
   })) as CampaignSettings;
 }
 
+/** Issue #71: set (or clear, with "") the player character's free-text
+ * appearance on an existing sheet. Returns the stored value (null when cleared). */
+export async function setCharacterAppearance(
+  connection: Connection,
+  campaignId: string,
+  appearance: string
+): Promise<string | null> {
+  const result = (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/character/appearance`, {
+    method: "POST",
+    body: JSON.stringify({ appearance }),
+  })) as { appearance: string | null };
+  return result.appearance;
+}
+
 export async function getModels(connection: Connection): Promise<{ models: ModelOption[]; default: string }> {
   return (await apiFetch(connection, "/models")) as { models: ModelOption[]; default: string };
 }
@@ -151,6 +168,9 @@ export interface CharacterCreationInput {
   race: string;
   class: string;
   abilityScores: Record<"strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma", number>;
+  /** Issue #71: optional free-text physical description captured at creation
+   * and fed to the character's image prompt. */
+  appearance?: string;
 }
 
 /** Optional world/tone fields the player can set at creation time (issue #48).

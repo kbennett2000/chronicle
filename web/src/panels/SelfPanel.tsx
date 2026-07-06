@@ -1,11 +1,18 @@
+import { useEffect, useState } from "react";
 import type { Connection } from "../lib/connection";
-import type { CharacterSheet } from "../lib/campaign";
+import { setCharacterAppearance, type CharacterSheet } from "../lib/campaign";
 import { EntityPortrait } from "../components/EntityPortrait";
+
+// Mirrors MAX_APPEARANCE_CHARS in src/character-gen.ts (server is authoritative).
+const MAX_APPEARANCE_CHARS = 600;
 
 interface SelfPanelProps {
   connection: Connection;
   campaignId: string;
   sheet: CharacterSheet;
+  /** Issue #71: called after the appearance is saved, so the parent refetches
+   * state and the new value flows back into the panels and image prompts. */
+  onUpdated?: () => void;
 }
 
 const ABILITIES: Array<{ key: keyof NonNullable<CharacterSheet["abilityScores"]>; label: string }> = [
@@ -44,7 +51,33 @@ function StatBox({ label, value, color }: { label: string; value: string; color?
   );
 }
 
-export function SelfPanel({ connection, campaignId, sheet }: SelfPanelProps) {
+export function SelfPanel({ connection, campaignId, sheet, onUpdated }: SelfPanelProps) {
+  // Issue #71: appearance is editable in place so a character created before the
+  // field existed (or with a portrait that came out wrong) can be corrected.
+  const [editingLook, setEditingLook] = useState(false);
+  const [lookDraft, setLookDraft] = useState(sheet.appearance ?? "");
+  const [savingLook, setSavingLook] = useState(false);
+  const [lookError, setLookError] = useState<string | null>(null);
+  // Re-sync the draft when the sheet changes underneath us (a refetch after
+  // save, or a different campaign), but only while not mid-edit.
+  useEffect(() => {
+    if (!editingLook) setLookDraft(sheet.appearance ?? "");
+  }, [sheet.appearance, editingLook]);
+
+  async function saveLook() {
+    setSavingLook(true);
+    setLookError(null);
+    try {
+      await setCharacterAppearance(connection, campaignId, lookDraft);
+      setEditingLook(false);
+      onUpdated?.();
+    } catch (err) {
+      setLookError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingLook(false);
+    }
+  }
+
   const currency = sheet.currency ?? ZERO_CURRENCY;
   const conditions = sheet.conditions ?? [];
   const inventory = sheet.inventory ?? [];
@@ -106,6 +139,69 @@ export function SelfPanel({ connection, campaignId, sheet }: SelfPanelProps) {
             </span>
           ))}
         </div>
+      )}
+
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginTop: 18 }}>
+        <div style={{ fontFamily: "var(--font-display)", fontSize: 10, letterSpacing: 1.5, color: "var(--brass-dim)" }}>APPEARANCE</div>
+        {!editingLook && (
+          <button
+            data-testid="self-appearance-edit"
+            onClick={() => { setLookDraft(sheet.appearance ?? ""); setEditingLook(true); }}
+            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "var(--ember)", padding: 0 }}
+          >
+            {sheet.appearance ? "✎ Edit" : "✎ Add"}
+          </button>
+        )}
+      </div>
+      {editingLook ? (
+        <div style={{ marginTop: 6 }}>
+          <textarea
+            value={lookDraft}
+            onChange={(e) => setLookDraft(e.target.value)}
+            data-testid="self-appearance-input"
+            rows={3}
+            maxLength={MAX_APPEARANCE_CHARS}
+            placeholder="e.g. A tall female goliath with grey skin, dark braided hair, and pale eyes"
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              background: "rgba(12,8,5,.5)",
+              border: "1px solid rgba(109,90,56,.4)",
+              borderRadius: 4,
+              padding: "9px 12px",
+              color: "var(--ink)",
+              fontFamily: "var(--font-body)",
+              fontSize: 13.5,
+              resize: "vertical",
+              outline: "none",
+            }}
+          />
+          <div style={{ fontSize: 10.5, color: "var(--ink-faint)", marginTop: 3, lineHeight: 1.35 }}>
+            Used to generate portraits and scenes that look like you.
+          </div>
+          {lookError && <div data-testid="self-appearance-error" style={{ fontSize: 11.5, color: "var(--ember)", marginTop: 4 }}>{lookError}</div>}
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button
+              data-testid="self-appearance-save"
+              onClick={saveLook}
+              disabled={savingLook}
+              style={{ cursor: savingLook ? "default" : "pointer", padding: "7px 16px", borderRadius: 3, border: "none", background: "linear-gradient(180deg,#d8743e,#a8511f)", color: "#1c120a", fontFamily: "var(--font-display)", fontSize: 12, opacity: savingLook ? 0.6 : 1 }}
+            >
+              {savingLook ? "Saving…" : "Save"}
+            </button>
+            <button
+              onClick={() => { setEditingLook(false); setLookError(null); }}
+              disabled={savingLook}
+              style={{ cursor: "pointer", padding: "7px 16px", borderRadius: 3, border: "1px solid rgba(109,90,56,.4)", background: "transparent", color: "var(--ink-dim)", fontFamily: "var(--font-display)", fontSize: 12 }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p data-testid="self-appearance" style={{ marginTop: 6, fontSize: 13.5, lineHeight: 1.5, color: sheet.appearance ? "var(--ink)" : "var(--ink-faint)", fontStyle: sheet.appearance ? "normal" : "italic" }}>
+          {sheet.appearance || "No description yet — add one so portraits match your character."}
+        </p>
       )}
 
       {abilityScores && (

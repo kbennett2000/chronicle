@@ -76,9 +76,15 @@ function parseLocations(body: string): Array<{ name: string; image?: string; des
  * are already fetched by Play.tsx for their own panels — this just
  * re-reads them into one flat list, entity-type-tagged. */
 export function buildGallery(characterSheet: CharacterSheet, npcRoster: string, worldState: string): GalleryItem[] {
-  const characterDescription = [characterSheet.name, "a", `level ${characterSheet.level}`, characterSheet.race, characterSheet.class]
+  // Issue #71: lead the portrait prompt with the player's own physical
+  // description when they gave one — race+class alone rendered a female Goliath
+  // as a man. Falls back to the terse name/level/race/class line otherwise.
+  const identityLine = [characterSheet.name, "a", `level ${characterSheet.level}`, characterSheet.race, characterSheet.class]
     .filter(Boolean)
     .join(" ");
+  const characterDescription = characterSheet.appearance?.trim()
+    ? `${identityLine}. ${characterSheet.appearance.trim()}`
+    : identityLine;
   const items: GalleryItem[] = [
     {
       type: "character",

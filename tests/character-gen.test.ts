@@ -5,6 +5,7 @@ import {
   deriveCampaignId,
   abilityModifier,
   CharacterValidationError,
+  MAX_APPEARANCE_CHARS,
 } from "../src/character-gen.js";
 
 const scores = {
@@ -32,6 +33,32 @@ test("buildCharacterSheet derives level-1 HP (hit die + CON mod) and unarmored A
   assert.equal(sheet.level, 1);
   assert.equal(sheet.xp, 0);
   assert.deepEqual(sheet.currency, { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 });
+});
+
+test("buildCharacterSheet stores a trimmed appearance when given, and omits it otherwise (#71)", () => {
+  const withLook = buildCharacterSheet({
+    name: "Vashka", race: "Goliath", class: "Barbarian", abilityScores: scores,
+    appearance: "  A tall female goliath with grey skin and dark braids.  ",
+  });
+  assert.equal(withLook.appearance, "A tall female goliath with grey skin and dark braids.");
+
+  const withoutLook = buildCharacterSheet({ name: "Kira", race: "Human", class: "Rogue", abilityScores: scores });
+  assert.equal("appearance" in withoutLook, false);
+
+  // Blank/whitespace appearance is treated as absent, not stored as "".
+  const blankLook = buildCharacterSheet({ name: "Kira", race: "Human", class: "Rogue", abilityScores: scores, appearance: "   " });
+  assert.equal("appearance" in blankLook, false);
+});
+
+test("buildCharacterSheet rejects an over-long or non-string appearance (#71)", () => {
+  assert.throws(
+    () => buildCharacterSheet({ name: "Kira", race: "Human", class: "Rogue", abilityScores: scores, appearance: "x".repeat(MAX_APPEARANCE_CHARS + 1) }),
+    CharacterValidationError
+  );
+  assert.throws(
+    () => buildCharacterSheet({ name: "Kira", race: "Human", class: "Rogue", abilityScores: scores, appearance: 42 as never }),
+    CharacterValidationError
+  );
 });
 
 test("buildCharacterSheet applies the right hit die per class", () => {
