@@ -61,6 +61,65 @@ test("buildCharacterSheet rejects an over-long or non-string appearance (#71)", 
   );
 });
 
+test("buildCharacterSheet derives class save proficiencies and race speed (#67)", () => {
+  const rogue = buildCharacterSheet({ name: "Kira", race: "Human", class: "Rogue", abilityScores: scores });
+  assert.deepEqual(rogue.savingThrowProficiencies, ["dexterity", "intelligence"]);
+  assert.equal(rogue.speed, 30);
+  const goliath = buildCharacterSheet({ name: "Vashka", race: "Goliath", class: "Barbarian", abilityScores: scores });
+  assert.equal(goliath.speed, 35);
+  assert.deepEqual(goliath.savingThrowProficiencies, ["strength", "constitution"]);
+});
+
+test("buildCharacterSheet validates class skill picks (#67)", () => {
+  // Rogue must choose exactly 4 from its list.
+  const ok = buildCharacterSheet({
+    name: "Kira", race: "Human", class: "Rogue", abilityScores: scores,
+    skillProficiencies: ["stealth", "acrobatics", "deception", "perception"],
+  });
+  assert.deepEqual(ok.skillProficiencies, ["stealth", "acrobatics", "deception", "perception"]);
+
+  // Wrong count.
+  assert.throws(
+    () => buildCharacterSheet({ name: "Kira", race: "Human", class: "Rogue", abilityScores: scores, skillProficiencies: ["stealth", "acrobatics"] }),
+    CharacterValidationError
+  );
+  // Skill not on the class list (Arcana isn't a Rogue skill).
+  assert.throws(
+    () => buildCharacterSheet({ name: "Kira", race: "Human", class: "Rogue", abilityScores: scores, skillProficiencies: ["arcana", "acrobatics", "deception", "perception"] }),
+    CharacterValidationError
+  );
+  // Duplicates.
+  assert.throws(
+    () => buildCharacterSheet({ name: "Kira", race: "Human", class: "Rogue", abilityScores: scores, skillProficiencies: ["stealth", "stealth", "deception", "perception"] }),
+    CharacterValidationError
+  );
+});
+
+test("buildCharacterSheet expertise must be a subset of chosen skills (#67)", () => {
+  const ok = buildCharacterSheet({
+    name: "Kira", race: "Human", class: "Rogue", abilityScores: scores,
+    skillProficiencies: ["stealth", "acrobatics", "deception", "perception"],
+    expertise: ["stealth", "perception"],
+  });
+  assert.deepEqual(ok.expertise, ["stealth", "perception"]);
+  assert.throws(
+    () => buildCharacterSheet({
+      name: "Kira", race: "Human", class: "Rogue", abilityScores: scores,
+      skillProficiencies: ["stealth", "acrobatics", "deception", "perception"],
+      expertise: ["athletics"],
+    }),
+    CharacterValidationError
+  );
+});
+
+test("buildCharacterSheet omits skills when not supplied but still sets derived arrays (#67)", () => {
+  const sheet = buildCharacterSheet({ name: "Kira", race: "Human", class: "Rogue", abilityScores: scores });
+  assert.deepEqual(sheet.skillProficiencies, []);
+  assert.deepEqual(sheet.expertise, []);
+  assert.deepEqual(sheet.featuresAndTraits, []);
+  assert.equal("background" in sheet, false);
+});
+
 test("buildCharacterSheet applies the right hit die per class", () => {
   const barbarian = buildCharacterSheet({ name: "Grok", race: "Goliath", class: "Barbarian", abilityScores: scores });
   assert.equal((barbarian.hp as { max: number }).max, 14); // d12 + 2

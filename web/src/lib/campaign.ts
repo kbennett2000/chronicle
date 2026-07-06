@@ -34,6 +34,20 @@ export interface CharacterSheet {
   /** Issue #71: free-text physical description (sex, build, hair, marks). Feeds
    * the character's image prompt so a portrait matches the player's intent. */
   appearance?: string;
+  /** Issue #67 (ADR-0015): full-sheet fields. All optional and degrade
+   * gracefully — old sheets and DM writes may omit any of them. Derived numbers
+   * (proficiency bonus, saves, skills, passive perception, initiative) are NOT
+   * stored; compute them via lib/character-derive.ts. */
+  speed?: number;
+  savingThrowProficiencies?: string[];
+  skillProficiencies?: string[];
+  expertise?: string[];
+  languages?: string[];
+  otherProficiencies?: string[];
+  featuresAndTraits?: Array<{ name: string; description?: string; source?: string }>;
+  background?: string;
+  alignment?: string;
+  personality?: { traits?: string; ideals?: string; bonds?: string; flaws?: string };
 }
 
 /** Per ADR-0007: the server's own deterministic record of who said what
@@ -171,6 +185,13 @@ export interface CharacterCreationInput {
   /** Issue #71: optional free-text physical description captured at creation
    * and fed to the character's image prompt. */
   appearance?: string;
+  /** Issue #67 (ADR-0015): class skill picks (exactly the class's choose-count),
+   * optional expertise (subset of picks), and authored identity fields. */
+  skillProficiencies?: string[];
+  expertise?: string[];
+  background?: string;
+  alignment?: string;
+  personality?: { traits?: string; ideals?: string; bonds?: string; flaws?: string };
 }
 
 /** Optional world/tone fields the player can set at creation time (issue #48).
