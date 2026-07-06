@@ -113,47 +113,58 @@ export const DICE_TOOL_NAME = "mcp__dice__roll_dice";
 /** Built per-turn like the seed/texture servers. Only wired into a turn when
  * the campaign's autoRollDice setting is on (see dm-engine.ts) — when off, the
  * system prompt tells the model to ask the player for the value instead. */
-export function createDiceMcpServer() {
-  const rollDiceTool = tool(
-    "roll_dice",
-    `Roll actual dice for any d20 test (ability check, attack roll, saving
+/** Shared tool metadata (ADR-0018): one source of truth so the in-process
+ * Claude tool and the standalone stdio MCP server (src/mcp-servers/dice-server.ts)
+ * give the DM identical guidance regardless of provider. */
+export const ROLL_DICE_DESCRIPTION = `Roll actual dice for any d20 test (ability check, attack roll, saving
 throw), damage roll, or other random resolution, then narrate the real
 result — never invent the number yourself and never ask the player what they
 rolled. Supports the full set: d4, d6, d8, d10, d12, d20, d100 (percentile,
 also spelled d%), multiple dice (e.g. 2d6), and a flat modifier baked into the
 notation (e.g. 1d20+5). Use the mode argument for advantage/disadvantage on a
 d20. Call this once per roll the rules call for; use the returned total (and
-the natural-20/natural-1 flags for crits) as the authoritative outcome.`,
-    {
-      notation: z
-        .string()
-        .describe('Dice to roll, e.g. "1d20+5", "2d6", "d100", "d%". Count and a +/- modifier are optional.'),
-      mode: z
-        .enum(["normal", "advantage", "disadvantage"])
-        .optional()
-        .describe("Advantage/disadvantage (rolls twice, keeps higher/lower). Defaults to normal."),
-      reason: z
-        .string()
-        .optional()
-        .describe('Optional short label for what this roll is, e.g. "Stealth check" — for your own narration.'),
-    },
-    async ({ notation, mode, reason }) => {
-      try {
-        const result = rollDice(notation, mode ?? "normal");
-        const prefix = reason ? `${reason}: ` : "";
-        return { content: [{ type: "text" as const, text: `${prefix}${result.detail}` }] };
-      } catch (err) {
-        const msg = err instanceof DiceNotationError ? err.message : String(err);
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Could not roll "${notation}" (${msg}). Use standard notation like 1d20+5, 2d6, or d100.`,
-            },
-          ],
-        };
-      }
-    }
+the natural-20/natural-1 flags for crits) as the authoritative outcome.`;
+
+export const ROLL_DICE_INPUT_SHAPE = {
+  notation: z
+    .string()
+    .describe('Dice to roll, e.g. "1d20+5", "2d6", "d100", "d%". Count and a +/- modifier are optional.'),
+  mode: z
+    .enum(["normal", "advantage", "disadvantage"])
+    .optional()
+    .describe("Advantage/disadvantage (rolls twice, keeps higher/lower). Defaults to normal."),
+  reason: z
+    .string()
+    .optional()
+    .describe('Optional short label for what this roll is, e.g. "Stealth check" — for your own narration.'),
+};
+
+/** The provider-neutral tool body: rolls and formats, or returns a helpful
+ * error string. Shared verbatim by both server wrappers. */
+export function runRollDiceTool(args: { notation: string; mode?: RollMode; reason?: string }): {
+  content: { type: "text"; text: string }[];
+} {
+  const { notation, mode, reason } = args;
+  try {
+    const result = rollDice(notation, mode ?? "normal");
+    const prefix = reason ? `${reason}: ` : "";
+    return { content: [{ type: "text" as const, text: `${prefix}${result.detail}` }] };
+  } catch (err) {
+    const msg = err instanceof DiceNotationError ? err.message : String(err);
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `Could not roll "${notation}" (${msg}). Use standard notation like 1d20+5, 2d6, or d100.`,
+        },
+      ],
+    };
+  }
+}
+
+export function createDiceMcpServer() {
+  const rollDiceTool = tool("roll_dice", ROLL_DICE_DESCRIPTION, ROLL_DICE_INPUT_SHAPE, async (args) =>
+    runRollDiceTool(args)
   );
 
   return createSdkMcpServer({ name: "dice", tools: [rollDiceTool] });
