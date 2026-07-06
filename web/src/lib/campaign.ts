@@ -285,6 +285,32 @@ export async function sendTurn(connection: Connection, campaignId: string, messa
   return body as TurnResult;
 }
 
+export interface EditTurnResult extends TurnResult {
+  turnIndex: number;
+  discardedCount: number;
+}
+
+/** Issue #68 (ADR-0016): edit a past player message and re-run from there,
+ * discarding every turn after it. Like sendTurn, 200/502 are domain results;
+ * a 409 (busy, or a turn played before snapshots existed) or 400 throws. For a
+ * turn-zero opening pass an empty `message` — the server re-runs the opening. */
+export async function editTurn(
+  connection: Connection,
+  campaignId: string,
+  turnIndex: number,
+  message: string
+): Promise<EditTurnResult> {
+  const { status, body } = await apiFetchRaw(
+    connection,
+    `/campaigns/${encodeURIComponent(campaignId)}/turns/${turnIndex}/edit`,
+    { method: "POST", body: JSON.stringify({ message }) }
+  );
+  if (status !== 200 && status !== 502) {
+    throw new ApiError((body as { error?: string }).error ?? `request failed (${status})`);
+  }
+  return body as EditTurnResult;
+}
+
 /** ADR-0013 opening scene (turn-zero). Generates the DM-initiated first beat of
  * a brand-new campaign. Like sendTurn, a 502 engine error comes back as a valid
  * { narration, isError:true } body (a domain result to render), so this uses

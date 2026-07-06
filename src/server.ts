@@ -21,6 +21,11 @@ import {
   setTranscriptRecordImage,
   recordEntityImage,
   setCharacterAppearance,
+  writePreTurnSnapshot,
+  hasPreTurnSnapshot,
+  restorePreTurnSnapshot,
+  truncateTranscript,
+  pruneSnapshotsAfter,
   readCampaignModel,
   persistCampaignModel,
   readCampaignSettings,
@@ -368,6 +373,13 @@ const ROUTES: Array<{
 
       try {
         console.log(`[${campaignId}] turn on model ${active.model}`);
+        // Issue #68 (ADR-0016): snapshot state BEFORE this turn runs, so it can
+        // later be edited and re-run from exactly this point.
+        writePreTurnSnapshot(
+          campaignDir,
+          active.sessionLogPath,
+          readTurnTranscript(campaignDir, active.sessionLogPath).length
+        );
         const settings = readCampaignSettings(campaignDir);
         // Issue #57: only resume the SDK session when it was created under the
         // same model. If the player switched models mid-campaign, resuming would
@@ -458,6 +470,8 @@ const ROUTES: Array<{
 
       try {
         console.log(`[${campaignId}] opening scene on model ${active.model}`);
+        // Issue #68 (ADR-0016): snapshot the blank pre-opening state (turn 0).
+        writePreTurnSnapshot(campaignDir, active.sessionLogPath, 0);
         const settings = readCampaignSettings(campaignDir);
         const result = await runTurn(
           campaignDir,
@@ -487,6 +501,106 @@ const ROUTES: Array<{
           sessionId: result.sessionId ?? null,
           model: result.model,
           isError: result.isError,
+        });
+      } finally {
+        active.busy = false;
+      }
+    },
+  },
+  {
+    // Issue #68 (ADR-0016): edit a past player message and re-run from there,
+    // discarding every turn after it. Restores the pre-turn snapshot (rewinding
+    // the state files + prose log), truncates the transcript, and re-runs on a
+    // FRESH SDK session — the SDK conversation is linear and files are the
+    // source of truth (ADR-0001), so a fresh session loses no state.
+    method: "POST",
+    pattern: /^\/campaigns\/([^/]+)\/turns\/(\d+)\/edit$/,
+    async handler(req, res, [campaignId, turnIndexStr]) {
+      const campaignDir = resolveCampaignDir(campaignId);
+      const active = activeSessions.get(campaignId);
+      if (!active) {
+        sendJson(res, 409, {
+          error: `no active session for campaign '${campaignId}' — start one before editing a turn`,
+        });
+        return;
+      }
+
+      const turnIndex = Number(turnIndexStr);
+      const transcript = readTurnTranscript(campaignDir, active.sessionLogPath);
+      if (!Number.isInteger(turnIndex) || turnIndex < 0 || turnIndex >= transcript.length) {
+        sendJson(res, 400, { error: `turnIndex must be an integer in [0, ${transcript.length - 1}]` });
+        return;
+      }
+      // Turn-zero opening has an empty playerMessage (ADR-0013) — re-run the
+      // opening directive rather than requiring a player message.
+      const isOpening = turnIndex === 0 && transcript[0].playerMessage === "";
+      const body = (await readJsonBody(req)) as { message?: unknown };
+      const message = body.message;
+      if (!isOpening && (typeof message !== "string" || message.trim() === "")) {
+        sendJson(res, 400, { error: "request body must include a non-empty string 'message'" });
+        return;
+      }
+
+      if (active.busy) {
+        sendJson(res, 409, {
+          error: `a turn is already in progress for campaign '${campaignId}' — wait for it to finish`,
+        });
+        return;
+      }
+      // Snapshots only exist for turns played after this feature shipped.
+      if (!hasPreTurnSnapshot(campaignDir, active.sessionLogPath, turnIndex)) {
+        sendJson(res, 409, {
+          error: "this turn can't be rewound — it was played before editable history was enabled",
+        });
+        return;
+      }
+      active.busy = true;
+
+      try {
+        const discardedCount = transcript.length - 1 - turnIndex;
+        console.log(`[${campaignId}] editing turn ${turnIndex} (discarding ${discardedCount}) on model ${active.model}`);
+        // Rewind state to just before this turn, drop it and everything after,
+        // and invalidate the now-orphaned later snapshots.
+        restorePreTurnSnapshot(campaignDir, active.sessionLogPath, turnIndex);
+        truncateTranscript(campaignDir, active.sessionLogPath, turnIndex);
+        pruneSnapshotsAfter(campaignDir, active.sessionLogPath, turnIndex);
+
+        // Fresh SDK session: the rewound files are the truth, so we don't (and
+        // can't) resume the old linear conversation. This also means the re-run
+        // always honors the current model choice.
+        active.sessionId = undefined;
+        const settings = readCampaignSettings(campaignDir);
+        const userInput = isOpening ? openingDirective(campaignDir) : (message as string);
+        const result = await runTurn(
+          campaignDir,
+          active.sessionLogPath,
+          userInput,
+          undefined,
+          active.model,
+          settings,
+          () => {}
+        );
+
+        if (result.sessionId) {
+          active.sessionId = result.sessionId;
+          active.sessionModel = active.model;
+          persistSessionId(campaignDir, result.sessionId);
+        }
+
+        // Persist the re-run record at index `turnIndex` (transcript was
+        // truncated to that length). Match /opening: don't persist a broken
+        // opening; a broken normal turn is still recorded (as /turns does).
+        if (!result.isError || !isOpening) {
+          appendTurnTranscript(campaignDir, active.sessionLogPath, isOpening ? "" : (message as string), result.text);
+        }
+
+        sendJson(res, result.isError ? 502 : 200, {
+          narration: result.text,
+          sessionId: result.sessionId ?? null,
+          model: result.model,
+          isError: result.isError,
+          turnIndex,
+          discardedCount,
         });
       } finally {
         active.busy = false;

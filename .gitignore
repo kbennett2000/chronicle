@@ -34,3 +34,7 @@ campaigns/*
 # Re-exclude runtime state even inside the tracked test-campaign exception
 campaigns/test-campaign/.session-id
 campaigns/test-campaign/**/.session-id
+# Issue #68 (ADR-0016): per-turn state snapshots are runtime rewind state, not
+# source — never commit them, not even under the tracked test-campaign fixture.
+campaigns/test-campaign/session-log/snapshots/
+campaigns/test-campaign/**/snapshots/

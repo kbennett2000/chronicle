@@ -575,6 +575,136 @@ export function setTranscriptRecordImage(
   return record;
 }
 
+// ── Issue #68 (ADR-0016): editable history via pre-turn state snapshots ──
+// Before every turn/opening the server snapshots the campaign's mutable state
+// (the four state files + the active prose session log). Editing a past turn
+// restores its pre-turn snapshot, truncates the transcript, and re-runs from
+// the edited message on a fresh SDK session (the SDK conversation is linear;
+// files are the source of truth per ADR-0001).
+
+/** The mutable per-turn state files the DM engine rewrites. The prose session
+ * log is snapshotted separately (it's the active .md, path varies per session). */
+const SNAPSHOT_STATE_FILES = [
+  "character-sheet.json",
+  "world-state.md",
+  "npc-roster.md",
+  "quest-log.md",
+];
+
+function sessionBaseOf(sessionLogRelPath: string): string {
+  return path.basename(sessionLogRelPath).replace(/\.md$/, "");
+}
+
+function snapshotTurnDir(campaignDir: string, sessionLogRelPath: string, turnIndex: number): string {
+  const base = sessionBaseOf(sessionLogRelPath);
+  const padded = String(turnIndex).padStart(4, "0");
+  return path.join(campaignDir, "session-log", "snapshots", base, `turn-${padded}`);
+}
+
+export interface SnapshotManifest {
+  turnIndex: number;
+  sessionLogRelPath: string;
+  timestamp: string;
+}
+
+/** Snapshot the campaign's state as it is right now — i.e. BEFORE turn
+ * `turnIndex` runs — so an edit of that turn can restore this exact point.
+ * Copies the four state files and the active prose log into
+ * session-log/snapshots/<sessionBase>/turn-<NNNN>/. Cheap (small text files);
+ * failures are swallowed so a snapshot problem never blocks actual play. */
+export function writePreTurnSnapshot(
+  campaignDir: string,
+  sessionLogRelPath: string,
+  turnIndex: number
+): void {
+  try {
+    const dir = snapshotTurnDir(campaignDir, sessionLogRelPath, turnIndex);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const name of SNAPSHOT_STATE_FILES) {
+      const src = path.join(campaignDir, name);
+      if (fs.existsSync(src)) fs.copyFileSync(src, path.join(dir, name));
+    }
+    // The active prose log, by its own basename (append-only, so restoring an
+    // earlier copy drops the discarded turns' summaries cleanly).
+    const proseSrc = path.join(campaignDir, sessionLogRelPath);
+    if (fs.existsSync(proseSrc)) {
+      fs.copyFileSync(proseSrc, path.join(dir, path.basename(sessionLogRelPath)));
+    }
+    const manifest: SnapshotManifest = {
+      turnIndex,
+      sessionLogRelPath,
+      timestamp: new Date().toISOString(),
+    };
+    fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+  } catch (err) {
+    console.error(`[campaign-store] pre-turn snapshot failed for turn ${turnIndex}: ${String(err)}`);
+  }
+}
+
+export function hasPreTurnSnapshot(
+  campaignDir: string,
+  sessionLogRelPath: string,
+  turnIndex: number
+): boolean {
+  return fs.existsSync(path.join(snapshotTurnDir(campaignDir, sessionLogRelPath, turnIndex), "manifest.json"));
+}
+
+/** Restore the pre-turn snapshot for `turnIndex`, overwriting the live state
+ * files and prose log. Reads every snapshot file into memory FIRST, then writes
+ * them all, so a mid-restore failure can't leave a half-rewound campaign.
+ * Throws if the snapshot is missing. */
+export function restorePreTurnSnapshot(
+  campaignDir: string,
+  sessionLogRelPath: string,
+  turnIndex: number
+): void {
+  const dir = snapshotTurnDir(campaignDir, sessionLogRelPath, turnIndex);
+  if (!fs.existsSync(path.join(dir, "manifest.json"))) {
+    throw new Error(`no pre-turn snapshot for turn ${turnIndex}`);
+  }
+  const writes: Array<{ dest: string; data: Buffer }> = [];
+  for (const name of SNAPSHOT_STATE_FILES) {
+    const snap = path.join(dir, name);
+    if (fs.existsSync(snap)) writes.push({ dest: path.join(campaignDir, name), data: fs.readFileSync(snap) });
+  }
+  const proseSnap = path.join(dir, path.basename(sessionLogRelPath));
+  if (fs.existsSync(proseSnap)) {
+    writes.push({ dest: path.join(campaignDir, sessionLogRelPath), data: fs.readFileSync(proseSnap) });
+  }
+  for (const w of writes) fs.writeFileSync(w.dest, w.data);
+}
+
+/** Keep only the first `keepCount` transcript records for a session, dropping
+ * the rest (an edit re-runs from turn `keepCount`). keepCount 0 empties it. */
+export function truncateTranscript(
+  campaignDir: string,
+  sessionLogRelPath: string,
+  keepCount: number
+): void {
+  const abs = path.join(campaignDir, transcriptPathFor(sessionLogRelPath));
+  const kept = readTurnTranscript(campaignDir, sessionLogRelPath).slice(0, Math.max(0, keepCount));
+  fs.writeFileSync(abs, kept.length ? kept.map((r) => JSON.stringify(r)).join("\n") + "\n" : "");
+}
+
+/** Remove snapshots for turns strictly after `turnIndex` — they described a
+ * timeline that the edit just discarded. The snapshot for `turnIndex` itself is
+ * kept (it's the pre-state we restored, still valid if the turn is re-edited). */
+export function pruneSnapshotsAfter(
+  campaignDir: string,
+  sessionLogRelPath: string,
+  turnIndex: number
+): void {
+  const base = sessionBaseOf(sessionLogRelPath);
+  const dir = path.join(campaignDir, "session-log", "snapshots", base);
+  if (!fs.existsSync(dir)) return;
+  for (const entry of fs.readdirSync(dir)) {
+    const m = /^turn-(\d+)$/.exec(entry);
+    if (m && Number(m[1]) > turnIndex) {
+      fs.rmSync(path.join(dir, entry), { recursive: true, force: true });
+    }
+  }
+}
+
 // The literal field/heading names the frontend parser reads back (mirrored
 // from web/src/lib/state-headings.ts, cross-checked in
 // web/tests/heading-consistency.spec.ts). A server-side image write must
