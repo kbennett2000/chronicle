@@ -269,6 +269,15 @@ export function persistCampaignModel(campaignDir: string, model: ModelId): void 
 export type ContentIntensity = "standard" | "low";
 export const CONTENT_INTENSITIES: ContentIntensity[] = ["standard", "low"];
 
+/** Issue #69: how long/detailed the DM's narration should run. Absent is
+ * deliberately treated as "detailed" (see readCampaignSettings) — the field
+ * was added because players reported replies were too short, so the fix has
+ * to apply to campaigns that predate the setting without needing them to
+ * change anything. A player who wants the old terse behavior sets "concise". */
+export type ResponseLength = "concise" | "standard" | "detailed";
+export const RESPONSE_LENGTHS: ResponseLength[] = ["concise", "standard", "detailed"];
+export const DEFAULT_RESPONSE_LENGTH: ResponseLength = "detailed";
+
 export interface CampaignSettings {
   model: ModelId;
   artStyle?: string;
@@ -277,6 +286,10 @@ export interface CampaignSettings {
    * this is a UI surface on that existing config, not new machinery). */
   toneWhimsy?: number;
   contentIntensity?: ContentIntensity;
+  /** Issue #69: narration length/detail. Absent is treated as "detailed"
+   * (DEFAULT_RESPONSE_LENGTH) at read time, so existing campaigns get the
+   * richer prose the field was introduced to deliver. */
+  responseLength?: ResponseLength;
   /** Per Slice 9 / design doc §2.2: defaults to false (absent) since it
    * depends on Grok Build/SuperGrok access being configured on the host —
    * opt-in, never assumed. */
@@ -309,6 +322,12 @@ export function readCampaignSettings(campaignDir: string): CampaignSettings {
     CONTENT_INTENSITIES.includes(raw.contentIntensity as ContentIntensity)
   ) {
     settings.contentIntensity = raw.contentIntensity as ContentIntensity;
+  }
+  if (
+    typeof raw.responseLength === "string" &&
+    RESPONSE_LENGTHS.includes(raw.responseLength as ResponseLength)
+  ) {
+    settings.responseLength = raw.responseLength as ResponseLength;
   }
   if (typeof raw.generateImages === "boolean") {
     settings.generateImages = raw.generateImages;

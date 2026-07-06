@@ -8,6 +8,7 @@ import {
   updateCampaignSettings,
   type CampaignSettings,
   type ModelOption,
+  type ResponseLength,
 } from "../lib/campaign";
 import { ToggleRow, ArtStylePicker } from "../components/LookControls";
 
@@ -32,6 +33,13 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
 const INTENSITY_OPTIONS: Array<{ id: "standard" | "low"; label: string; note: string }> = [
   { id: "standard", label: "Standard", note: "Full range of humour and description." },
   { id: "low", label: "Low", note: "No crude humour; violence stays non-graphic." },
+];
+
+// Issue #69: how long/detailed the DM's replies run. Absent === "detailed".
+const LENGTH_OPTIONS: Array<{ id: ResponseLength; label: string; note: string }> = [
+  { id: "concise", label: "Concise", note: "Short replies that mirror your input length." },
+  { id: "standard", label: "Standard", note: "A paragraph or two, scaling with the scene." },
+  { id: "detailed", label: "Detailed", note: "Rich, immersive, multi-paragraph narration." },
 ];
 
 function whimsyLabel(value: number): string {
@@ -320,6 +328,36 @@ export function Settings({
                     data-testid="intensity-option"
                     data-selected={selected}
                     onClick={() => patchSettings({ contentIntensity: option.id }, setWorldSave)}
+                    style={{
+                      flex: 1,
+                      cursor: "pointer",
+                      textAlign: "left",
+                      padding: "11px 13px",
+                      borderRadius: 4,
+                      background: selected ? "rgba(124,61,32,.24)" : "rgba(28,20,12,.5)",
+                      border: `1px solid ${selected ? "rgba(211,112,60,.55)" : "rgba(109,90,56,.32)"}`,
+                    }}
+                  >
+                    <div style={{ fontFamily: "var(--font-display)", fontSize: 13, color: selected ? "#efe6d2" : "var(--ink-dim)" }}>
+                      {option.label}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: "var(--ink-faint)", marginTop: 3, lineHeight: 1.35 }}>{option.note}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Issue #69: how long/detailed the DM's replies run. Absent === detailed. */}
+            <div style={{ fontSize: 12, color: "var(--ink-dim)", margin: "18px 0 6px" }}>Reply length</div>
+            <div style={{ display: "flex", gap: 7 }}>
+              {LENGTH_OPTIONS.map((option) => {
+                const selected = (settings.responseLength ?? "detailed") === option.id;
+                return (
+                  <button
+                    key={option.id}
+                    data-testid="length-option"
+                    data-selected={selected}
+                    onClick={() => patchSettings({ responseLength: option.id }, setWorldSave)}
                     style={{
                       flex: 1,
                       cursor: "pointer",

@@ -30,6 +30,7 @@ import {
   listCampaigns,
   CAMPAIGNS_ROOT,
   CONTENT_INTENSITIES,
+  RESPONSE_LENGTHS,
   isValidModelId,
   MODEL_OPTIONS,
   InvalidCampaignIdError,
@@ -37,6 +38,7 @@ import {
   CampaignExistsError,
   CampaignProtectedError,
   type ContentIntensity,
+  type ResponseLength,
   type CampaignSettings,
 } from "./campaign-store.js";
 import { generateImage } from "./image-generator.js";
@@ -214,6 +216,16 @@ const ROUTES: Array<{
           return;
         }
         creationSettings.contentIntensity = creation.contentIntensity as ContentIntensity;
+      }
+      if (creation.responseLength !== undefined) {
+        if (
+          typeof creation.responseLength !== "string" ||
+          !RESPONSE_LENGTHS.includes(creation.responseLength as ResponseLength)
+        ) {
+          sendJson(res, 400, { error: `responseLength must be one of ${RESPONSE_LENGTHS.join(", ")}` });
+          return;
+        }
+        creationSettings.responseLength = creation.responseLength as ResponseLength;
       }
       // Issue #60: a new game also carries the player's remembered look/play
       // defaults (generateImages/artStyle/autoIllustrateTurns/autoRollDice) so
@@ -505,6 +517,7 @@ const ROUTES: Array<{
         worldSetting?: string;
         toneWhimsy?: number;
         contentIntensity?: ContentIntensity;
+        responseLength?: ResponseLength;
         generateImages?: boolean;
         autoRollDice?: boolean;
         autoIllustrateTurns?: boolean;
@@ -542,6 +555,18 @@ const ROUTES: Array<{
           return;
         }
         updates.contentIntensity = body.contentIntensity as ContentIntensity;
+      }
+      if (body.responseLength !== undefined) {
+        if (
+          typeof body.responseLength !== "string" ||
+          !RESPONSE_LENGTHS.includes(body.responseLength as ResponseLength)
+        ) {
+          sendJson(res, 400, {
+            error: `responseLength must be one of ${RESPONSE_LENGTHS.join(", ")}`,
+          });
+          return;
+        }
+        updates.responseLength = body.responseLength as ResponseLength;
       }
       if (body.generateImages !== undefined) {
         if (typeof body.generateImages !== "boolean") {

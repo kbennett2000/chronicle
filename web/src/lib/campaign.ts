@@ -75,12 +75,17 @@ export interface SessionStartResult {
  * POST /campaigns/:id/session/start (see startSession above) — that
  * split is real, not a frontend simplification, so CampaignSettingsPatch
  * below deliberately excludes it rather than silently no-opping it. */
+/** Issue #69: narration length/detail. Absent is treated as "detailed" by the
+ * server, so the UI shows "detailed" as the effective value when unset. */
+export type ResponseLength = "concise" | "standard" | "detailed";
+
 export interface CampaignSettings {
   model: string;
   artStyle?: string;
   worldSetting?: string;
   toneWhimsy?: number;
   contentIntensity?: "standard" | "low";
+  responseLength?: ResponseLength;
   generateImages?: boolean;
   /** Issue #44: absent === on. When explicitly false, the player supplies
    * their own dice values instead of the engine rolling. */
@@ -155,6 +160,9 @@ export interface CampaignCreationSettings {
   worldSetting?: string;
   toneWhimsy?: number;
   contentIntensity?: "standard" | "low";
+  /** Issue #69: how long/detailed the DM's replies run. Omitted → server
+   * default ("detailed"). Inherited from the last game via new-game-defaults. */
+  responseLength?: ResponseLength;
   /** Issue #57: the model the new campaign should start on. Omitted keeps the
    * server default (Sonnet). */
   model?: string;

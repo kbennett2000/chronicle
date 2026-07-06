@@ -6,8 +6,12 @@ import { createTextureMcpServer, TEXTURE_TOOL_NAME } from "./texture-selector.js
 import { createImageMcpServer, GENERATE_IMAGE_TOOL_NAME } from "./image-generator.js";
 import { createDiceMcpServer, DICE_TOOL_NAME } from "./dice.js";
 import { stripMetaChatter } from "./narration.js";
-import type { CampaignSettings } from "./campaign-store.js";
-import { readCharacterIdentity, type CharacterIdentity } from "./campaign-store.js";
+import type { CampaignSettings, ResponseLength } from "./campaign-store.js";
+import {
+  readCharacterIdentity,
+  type CharacterIdentity,
+  DEFAULT_RESPONSE_LENGTH,
+} from "./campaign-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -127,12 +131,36 @@ items, or verbatim lines/quotes. Invent your own original names for every
 character, faction, location, and object the setting calls for — reskin
 the property's *feel*, not its specific copyrighted content.`;
 
+/** Issue #69: rule 9's length guidance, keyed on the campaign's
+ * responseLength setting. "detailed" is the default (see
+ * DEFAULT_RESPONSE_LENGTH) — players reported replies were too short. Each
+ * variant cross-references the player-agency rule (#70): a longer reply is
+ * filled with the world, never by inventing the player character's actions. */
+const NARRATION_LENGTH_RULE: Record<ResponseLength, string> = {
+  concise: `9. Keep narration concise, matching the length/complexity of the player's
+   input. Don't pad with unnecessary prose.`,
+  standard: `9. Give narration room to breathe — a solid paragraph or two, scaling up
+   with the weight of the scene and down for a quick exchange. Ground it in
+   concrete sensory and world detail rather than padding. Add length only by
+   deepening the world, the environment, and the NPCs' reactions — never by
+   inventing actions, choices, or dialogue for the player character.`,
+  detailed: `9. Default to vivid, immersive, multi-paragraph narration rich in sensory,
+   environmental, and NPC detail — describe the space, the atmosphere, the
+   sounds and textures, and how the world and its people react. Let quiet
+   moments still land a few full paragraphs and big moments run longer; only a
+   truly trivial exchange should be short. Every added sentence must deepen the
+   WORLD, never invent actions, choices, feelings, or dialogue for the player
+   character (that is theirs alone — see the player-agency rule below).`,
+};
+
 function systemPrompt(
   campaignDir: string,
   sessionLogPath: string,
   settings: CampaignSettings,
   character: CharacterIdentity
 ): string {
+  // Issue #69: narration length is a per-campaign dial; absent → detailed.
+  const lengthRule = NARRATION_LENGTH_RULE[settings.responseLength ?? DEFAULT_RESPONSE_LENGTH];
   // Issues #51/#48: the player character is whoever character-sheet.json says
   // — never a hardcoded name. A blank race/class (older/edge sheets) degrades
   // to just the name rather than emitting a dangling "a  " descriptor.
@@ -192,8 +220,7 @@ Every turn:
    them to npc-roster.md.
 8. Append a short (1-3 sentence) entry summarizing this turn's events to
    ${sessionLogPath}. Never overwrite prior entries in it — append only.
-9. Keep narration concise, matching the length/complexity of the player's
-   input. Don't pad with unnecessary prose.
+${lengthRule}
 10. Before you invent a brand-new NPC (a new npc-roster.md entry), a new
     location (not previously visited in world-state.md), or a new quest
     thread (a new quest-log.md entry), call the ${SEED_TOOL_NAME} tool
@@ -377,7 +404,8 @@ respond to yet.
 
 Narrate an immersive, present-tense opening that:
 - establishes exactly where ${character.name} is and what is happening around
-  them right now, in vivid sensory detail (a few tight paragraphs, not a wall);
+  them right now, in vivid sensory detail (follow your narration-length
+  guidance for how much to write);
 - fits the campaign's established world setting and tone;
 - naturally grounds ${character.name}'s appearance and the gear they carry, in
   the fiction (no stat block, no mechanics talk);

@@ -8,6 +8,7 @@ import {
   type CharacterCreationInput,
   type CampaignCreationSettings,
   type ModelOption,
+  type ResponseLength,
 } from "../lib/campaign";
 import { ToggleRow, ArtStylePicker } from "../components/LookControls";
 
@@ -68,6 +69,13 @@ const INTENSITY_OPTIONS: Array<{ id: "standard" | "low"; label: string; note: st
   { id: "low", label: "Low", note: "No crude humour; violence stays non-graphic." },
 ];
 
+// Issue #69: how long/detailed the DM's replies run. Absent === "detailed".
+const LENGTH_OPTIONS: Array<{ id: ResponseLength; label: string; note: string }> = [
+  { id: "concise", label: "Concise", note: "Short replies that mirror your input." },
+  { id: "standard", label: "Standard", note: "A paragraph or two per scene." },
+  { id: "detailed", label: "Detailed", note: "Rich, immersive narration." },
+];
+
 export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterProps) {
   const [name, setName] = useState("");
   const [race, setRace] = useState(RACES[0]);
@@ -78,6 +86,8 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
   const [worldSetting, setWorldSetting] = useState("");
   const [toneWhimsy, setToneWhimsy] = useState(0);
   const [contentIntensity, setContentIntensity] = useState<"standard" | "low">("standard");
+  // Issue #69: reply length, pre-filled from the last game; default detailed.
+  const [responseLength, setResponseLength] = useState<ResponseLength>("detailed");
   // Issue #64: look/play dials, surfaced here and pre-filled from the last game
   // (GET /new-game-defaults) so a new game starts like the one you already play,
   // instead of reverting to images-off / auto-roll-on and forcing a reconfigure.
@@ -107,6 +117,7 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
         setArtStyle(defaults.artStyle ?? "");
         setAutoRollDice(defaults.autoRollDice ?? true);
         if (defaults.contentIntensity) setContentIntensity(defaults.contentIntensity);
+        if (defaults.responseLength) setResponseLength(defaults.responseLength);
         if (defaults.toneWhimsy !== undefined) setToneWhimsy(defaults.toneWhimsy);
       })
       .catch(() => {});
@@ -147,6 +158,7 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
       autoIllustrateTurns,
       autoRollDice,
       contentIntensity,
+      responseLength,
       toneWhimsy,
     };
     if (artStyle.trim()) settings.artStyle = artStyle.trim();
@@ -385,6 +397,35 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
                 data-testid="newchar-intensity"
                 data-selected={selected}
                 onClick={() => setContentIntensity(option.id)}
+                style={{
+                  flex: 1,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  padding: "11px 13px",
+                  borderRadius: 4,
+                  background: selected ? "rgba(124,61,32,.24)" : "rgba(28,20,12,.5)",
+                  border: `1px solid ${selected ? "rgba(211,112,60,.55)" : "rgba(109,90,56,.32)"}`,
+                }}
+              >
+                <div style={{ fontFamily: "var(--font-display)", fontSize: 13, color: selected ? "#efe6d2" : "var(--ink-dim)" }}>
+                  {option.label}
+                </div>
+                <div style={{ fontSize: 10.5, color: "var(--ink-faint)", marginTop: 3, lineHeight: 1.35 }}>{option.note}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={labelStyle}>Reply length</div>
+        <div style={{ display: "flex", gap: 7 }}>
+          {LENGTH_OPTIONS.map((option) => {
+            const selected = responseLength === option.id;
+            return (
+              <button
+                key={option.id}
+                data-testid="newchar-length"
+                data-selected={selected}
+                onClick={() => setResponseLength(option.id)}
                 style={{
                   flex: 1,
                   cursor: "pointer",
