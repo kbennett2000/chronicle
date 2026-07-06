@@ -9,7 +9,8 @@ import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runTurn, openingDirective, modelsMatch } from "./dm-engine.js";
+import { openingDirective, modelsMatch } from "./dm-engine.js";
+import { getBackend } from "./backends/index.js";
 import {
   resolveCampaignDir,
   readPersistedSessionId,
@@ -343,15 +344,17 @@ const ROUTES: Array<{
         // keep running the old model, so we drop `resume` and start fresh.
         const resumeSessionId =
           active.sessionId && active.sessionModel === active.model ? active.sessionId : undefined;
-        const result = await runTurn(
+        // ADR-0018: dispatch through the provider's backend. Slice 1 is
+        // Claude-only; the ActiveSession gains a `provider` field in Slice 2.
+        const result = await getBackend("claude").runTurn({
           campaignDir,
-          active.sessionLogPath,
-          message,
+          sessionLogPath: active.sessionLogPath,
+          userInput: message,
           resumeSessionId,
-          active.model,
+          model: active.model,
           settings,
-          () => {}
-        );
+          onText: () => {},
+        });
 
         if (result.sessionId) {
           active.sessionId = result.sessionId;
@@ -428,15 +431,15 @@ const ROUTES: Array<{
       try {
         console.log(`[${campaignId}] opening scene on model ${active.model}`);
         const settings = readCampaignSettings(campaignDir);
-        const result = await runTurn(
+        const result = await getBackend("claude").runTurn({
           campaignDir,
-          active.sessionLogPath,
-          openingDirective(campaignDir),
-          active.sessionModel === active.model ? active.sessionId : undefined,
-          active.model,
+          sessionLogPath: active.sessionLogPath,
+          userInput: openingDirective(campaignDir),
+          resumeSessionId: active.sessionModel === active.model ? active.sessionId : undefined,
+          model: active.model,
           settings,
-          () => {}
-        );
+          onText: () => {},
+        });
 
         if (result.sessionId) {
           active.sessionId = result.sessionId;
