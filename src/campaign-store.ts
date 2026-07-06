@@ -207,7 +207,7 @@ export function listCampaigns(): CampaignSummary[] {
  * fidelity/cost tradeoff rather than just the raw model id. Stored
  * per-campaign, not globally — a long-running campaign shouldn't
  * silently change adjudication quality mid-story. */
-export const MODEL_OPTIONS = [
+export const MODEL_OPTIONS_CLAUDE = [
   {
     id: "claude-sonnet-5",
     label:
@@ -225,11 +225,65 @@ export const MODEL_OPTIONS = [
   },
 ] as const;
 
+/** ADR-0018: Grok as an alternate DM brain. Both models validated in Slice 0. */
+export const MODEL_OPTIONS_GROK = [
+  {
+    id: "grok-build",
+    label:
+      "Grok Build (512K context) — xAI's general agent model. The recommended Grok DM.",
+  },
+  {
+    id: "grok-composer-2.5-fast",
+    label:
+      "Grok Composer 2.5 Fast (200K) — faster and cheaper, but tuned for coding, so prose may read plainer.",
+  },
+] as const;
+
+/** Flat union kept for `isValidModelId` and the legacy GET /models `{ models }`
+ * shape. Provider-scoped lists live in `PROVIDERS` below. */
+export const MODEL_OPTIONS = [...MODEL_OPTIONS_CLAUDE, ...MODEL_OPTIONS_GROK] as const;
+
 export type ModelId = (typeof MODEL_OPTIONS)[number]["id"];
 export const DEFAULT_MODEL: ModelId = "claude-sonnet-5";
 
 export function isValidModelId(value: string): value is ModelId {
   return MODEL_OPTIONS.some((m) => m.id === value);
+}
+
+/** ADR-0018: which engine runs the DM. A per-campaign, session-resetting choice
+ * like model — each provider carries its own model list and default. */
+export type ProviderId = "claude" | "grok";
+export const DEFAULT_PROVIDER: ProviderId = "claude";
+
+export const PROVIDERS = [
+  {
+    id: "claude",
+    label: "Claude — Anthropic. The recommended default DM engine.",
+    models: MODEL_OPTIONS_CLAUDE,
+    default: "claude-sonnet-5",
+  },
+  {
+    id: "grok",
+    label: "Grok — xAI. An alternate DM brain (ADR-0018).",
+    models: MODEL_OPTIONS_GROK,
+    default: "grok-build",
+  },
+] as const;
+
+export function isValidProviderId(value: string): value is ProviderId {
+  return PROVIDERS.some((p) => p.id === value);
+}
+
+export function modelsForProvider(provider: ProviderId): readonly { id: string; label: string }[] {
+  return PROVIDERS.find((p) => p.id === provider)?.models ?? [];
+}
+
+export function isModelValidForProvider(provider: ProviderId, model: string): boolean {
+  return modelsForProvider(provider).some((m) => m.id === model);
+}
+
+export function defaultModelForProvider(provider: ProviderId): ModelId {
+  return (PROVIDERS.find((p) => p.id === provider)?.default ?? DEFAULT_MODEL) as ModelId;
 }
 
 const campaignSettingsFile = (campaignDir: string) =>
@@ -263,6 +317,20 @@ export function persistCampaignModel(campaignDir: string, model: ModelId): void 
   writeRawSettings(campaignDir, { ...readRawSettings(campaignDir), model });
 }
 
+/** ADR-0018: which engine runs the DM. Every existing campaign with no stored
+ * value defaults to Claude, so this is backward-compatible with no migration. */
+export function readCampaignProvider(campaignDir: string): ProviderId {
+  const raw = readRawSettings(campaignDir);
+  return typeof raw.provider === "string" && isValidProviderId(raw.provider)
+    ? raw.provider
+    : DEFAULT_PROVIDER;
+}
+
+/** Merge-write like persistCampaignModel — never clobber the other settings. */
+export function persistCampaignProvider(campaignDir: string, provider: ProviderId): void {
+  writeRawSettings(campaignDir, { ...readRawSettings(campaignDir), provider });
+}
+
 /** Per ADR-0004: optional per-campaign narration-layer dials, stored
  * alongside model selection. All absent = standard fantasy defaults,
  * existing WILDCARD_CHANCE, no content bounding — this feature is opt-in. */
@@ -271,6 +339,9 @@ export const CONTENT_INTENSITIES: ContentIntensity[] = ["standard", "low"];
 
 export interface CampaignSettings {
   model: ModelId;
+  /** ADR-0018: which engine runs the DM. Like `model`, this is read-only via
+   * GET and only changes through POST /session/start (session reset). */
+  provider: ProviderId;
   artStyle?: string;
   worldSetting?: string;
   /** 0-1. Overrides seed-selector's WILDCARD_CHANCE when set (per ADR-0004,
@@ -294,7 +365,10 @@ export interface CampaignSettings {
 
 export function readCampaignSettings(campaignDir: string): CampaignSettings {
   const raw = readRawSettings(campaignDir);
-  const settings: CampaignSettings = { model: readCampaignModel(campaignDir) };
+  const settings: CampaignSettings = {
+    model: readCampaignModel(campaignDir),
+    provider: readCampaignProvider(campaignDir),
+  };
   if (typeof raw.artStyle === "string" && raw.artStyle.trim()) {
     settings.artStyle = raw.artStyle.trim();
   }
@@ -327,7 +401,7 @@ export function readCampaignSettings(campaignDir: string): CampaignSettings {
  * rather than being stored as a literal empty string. */
 export function persistCampaignSettings(
   campaignDir: string,
-  updates: Partial<Omit<CampaignSettings, "model">>
+  updates: Partial<Omit<CampaignSettings, "model" | "provider">>
 ): CampaignSettings {
   const raw = readRawSettings(campaignDir);
   const merged: Record<string, unknown> = { ...raw, ...updates };

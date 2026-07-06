@@ -1,10 +1,9 @@
-import type { CampaignSettings } from "./campaign-store.js";
+import type { CampaignSettings, ProviderId } from "./campaign-store.js";
 import type { TurnResult } from "./dm-engine.js";
 
-/** Which engine runs the DM (ADR-0018). Provider is a per-campaign,
- * session-resetting choice, alongside model. */
-export type ProviderId = "claude" | "grok";
-export const DEFAULT_PROVIDER: ProviderId = "claude";
+/** Which engine runs the DM (ADR-0018). Defined in campaign-store (where model
+ * lives); re-exported here for backends that only import the engine seam. */
+export type { ProviderId };
 
 /** Everything a single turn needs, independent of which backend runs it. The
  * positional `runTurn(...)` in dm-engine.ts is wrapped by the Claude backend to

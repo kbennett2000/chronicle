@@ -1,12 +1,13 @@
 import type { DmBackend, ProviderId } from "../dm-backend.js";
 import { claudeBackend } from "./claude-backend.js";
+import { grokBackend } from "./grok-backend.js";
 
-/** Registry of DM backends keyed by provider (ADR-0018). Slice 1 ships only
- * Claude; the Grok backend is added in a later slice. */
+/** Registry of DM backends keyed by provider (ADR-0018). The Grok backend is a
+ * stub until Slice 4 (it throws if selected). */
 const BACKENDS: Record<ProviderId, DmBackend> = {
   claude: claudeBackend,
-  // grok: added in Slice 4 (stub in Slice 2)
-} as Record<ProviderId, DmBackend>;
+  grok: grokBackend,
+};
 
 /** Resolve the backend for a provider. Falls back to Claude for an unknown
  * provider so a bad stored value can never leave a campaign unplayable. */

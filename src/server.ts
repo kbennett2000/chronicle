@@ -23,6 +23,8 @@ import {
   recordEntityImage,
   readCampaignModel,
   persistCampaignModel,
+  readCampaignProvider,
+  persistCampaignProvider,
   readCampaignSettings,
   persistCampaignSettings,
   scaffoldCampaign,
@@ -31,13 +33,19 @@ import {
   CAMPAIGNS_ROOT,
   CONTENT_INTENSITIES,
   isValidModelId,
+  isValidProviderId,
+  isModelValidForProvider,
+  defaultModelForProvider,
   MODEL_OPTIONS,
+  PROVIDERS,
   InvalidCampaignIdError,
   CampaignNotFoundError,
   CampaignExistsError,
   CampaignProtectedError,
   type ContentIntensity,
   type CampaignSettings,
+  type ProviderId,
+  type ModelId,
 } from "./campaign-store.js";
 import { generateImage } from "./image-generator.js";
 import { buildCharacterSheet, deriveCampaignId, CharacterValidationError } from "./character-gen.js";
@@ -84,6 +92,12 @@ interface ActiveSession {
   // SDK's conversation history, so dropping the session loses nothing that
   // matters and is the correct trade for honoring the model choice.
   sessionModel?: string;
+  // ADR-0018: which engine runs this campaign's DM (Claude vs Grok), and the
+  // provider the persisted session was created under. A Claude session id is
+  // meaningless to Grok and vice-versa, so a provider switch — like a model
+  // switch (#57) — must start a fresh session rather than resume.
+  provider: ProviderId;
+  sessionProvider?: ProviderId;
   // Per issue #31: single-flight marker. Two turns submitted concurrently
   // for the same campaign (two tabs, a cross-tab double-submit the in-page
   // `sending` guard can't see) would otherwise both run `runTurn` in
@@ -131,7 +145,14 @@ const ROUTES: Array<{
     method: "GET",
     pattern: /^\/models$/,
     async handler(_req, res) {
-      sendJson(res, 200, { models: MODEL_OPTIONS, default: "claude-sonnet-5" });
+      // ADR-0018: `providers` carries the per-provider model lists + defaults for
+      // the provider toggle. `models`/`default` kept flat for backward compat.
+      sendJson(res, 200, {
+        models: MODEL_OPTIONS,
+        default: "claude-sonnet-5",
+        providers: PROVIDERS,
+        defaultProvider: "claude",
+      });
     },
   },
   {
@@ -178,6 +199,23 @@ const ROUTES: Array<{
           return;
         }
         creationSettings.model = creation.model;
+      }
+      // ADR-0018: a new game can pick its DM engine (Claude/Grok). Validate the
+      // provider, and if a model is also given, that it belongs to that provider.
+      if (creation.provider !== undefined) {
+        if (typeof creation.provider !== "string" || !isValidProviderId(creation.provider)) {
+          sendJson(res, 400, {
+            error: `invalid provider — must be one of ${PROVIDERS.map((p) => p.id).join(", ")}`,
+          });
+          return;
+        }
+        if (creationSettings.model && !isModelValidForProvider(creation.provider, creationSettings.model)) {
+          sendJson(res, 400, {
+            error: `model '${creationSettings.model}' is not a ${creation.provider} model`,
+          });
+          return;
+        }
+        creationSettings.provider = creation.provider;
       }
       if (creation.worldSetting !== undefined) {
         if (typeof creation.worldSetting !== "string") {
@@ -240,12 +278,16 @@ const ROUTES: Array<{
         fs.existsSync(path.join(CAMPAIGNS_ROOT, id))
       );
       const dir = scaffoldCampaign(campaignId, sheet);
-      // Model is persisted via persistCampaignModel (it's excluded from the
-      // POST /settings update type); the world fields go through
-      // persistCampaignSettings. Split them out so both are seeded at create.
-      const { model: creationModel, ...worldSettings } = creationSettings;
+      // Model and provider are persisted via their own merge-writes (both are
+      // excluded from the POST /settings update type); the world fields go
+      // through persistCampaignSettings. Split them out so all are seeded at
+      // create.
+      const { model: creationModel, provider: creationProvider, ...worldSettings } = creationSettings;
       if (creationModel) {
         persistCampaignModel(dir, creationModel);
+      }
+      if (creationProvider) {
+        persistCampaignProvider(dir, creationProvider);
       }
       if (Object.keys(worldSettings).length > 0) {
         persistCampaignSettings(dir, worldSettings);
@@ -273,10 +315,27 @@ const ROUTES: Array<{
 
       const body = await readJsonBody(req);
       const requestedModel = (body as { model?: unknown }).model;
-      // The model the campaign was running under before this call — i.e. the
-      // model any persisted SDK session was created with (issue #57).
+      const requestedProvider = (body as { provider?: unknown }).provider;
+      // What the campaign was running under before this call — i.e. what any
+      // persisted session was created with (#57, ADR-0018).
       const priorModel = readCampaignModel(campaignDir);
-      let model: string;
+      const priorProvider = readCampaignProvider(campaignDir);
+
+      // Resolve the provider first — it constrains which models are valid.
+      let provider: ProviderId;
+      if (requestedProvider !== undefined) {
+        if (typeof requestedProvider !== "string" || !isValidProviderId(requestedProvider)) {
+          sendJson(res, 400, {
+            error: `invalid provider — must be one of ${PROVIDERS.map((p) => p.id).join(", ")}`,
+          });
+          return;
+        }
+        provider = requestedProvider;
+      } else {
+        provider = priorProvider;
+      }
+
+      let model: ModelId;
       if (requestedModel !== undefined) {
         if (typeof requestedModel !== "string" || !isValidModelId(requestedModel)) {
           sendJson(res, 400, {
@@ -284,24 +343,44 @@ const ROUTES: Array<{
           });
           return;
         }
-        persistCampaignModel(campaignDir, requestedModel);
+        if (!isModelValidForProvider(provider, requestedModel)) {
+          sendJson(res, 400, { error: `model '${requestedModel}' is not a ${provider} model` });
+          return;
+        }
         model = requestedModel;
-      } else {
+      } else if (isModelValidForProvider(provider, priorModel)) {
+        // Keep the stored model when it belongs to the (possibly newly chosen)
+        // provider.
         model = priorModel;
+      } else {
+        // Provider switched and the stored model belongs to the old provider —
+        // fall back to the new provider's default rather than run an invalid pair.
+        model = defaultModelForProvider(provider);
       }
+
+      if (model !== priorModel) persistCampaignModel(campaignDir, model);
+      if (provider !== priorProvider) persistCampaignProvider(campaignDir, provider);
 
       const persisted = readPersistedSessionId(campaignDir);
       const sessionLogPath = resolveSessionLog(campaignDir, Boolean(persisted));
-      // sessionModel = the model the persisted session ran under. If the player
-      // just switched models, this differs from `model`, so the first turn will
-      // start a fresh SDK session rather than resume the old-model one (#57).
-      activeSessions.set(campaignId, { sessionId: persisted, sessionLogPath, model, sessionModel: priorModel });
+      // sessionModel/sessionProvider = what the persisted session ran under. If
+      // the player switched either, the first turn starts a fresh session rather
+      // than resume the old one (#57, ADR-0018).
+      activeSessions.set(campaignId, {
+        sessionId: persisted,
+        sessionLogPath,
+        model,
+        sessionModel: priorModel,
+        provider,
+        sessionProvider: priorProvider,
+      });
       sendJson(res, 200, {
         campaignId,
         sessionId: persisted ?? null,
         resumed: Boolean(persisted),
         sessionLogPath,
         model,
+        provider,
       });
     },
   },
@@ -342,11 +421,17 @@ const ROUTES: Array<{
         // Issue #57: only resume the SDK session when it was created under the
         // same model. If the player switched models mid-campaign, resuming would
         // keep running the old model, so we drop `resume` and start fresh.
+        // Resume only when BOTH the model and the provider still match what the
+        // persisted session was created under (#57, ADR-0018) — a session id is
+        // not portable across providers or models.
         const resumeSessionId =
-          active.sessionId && active.sessionModel === active.model ? active.sessionId : undefined;
-        // ADR-0018: dispatch through the provider's backend. Slice 1 is
-        // Claude-only; the ActiveSession gains a `provider` field in Slice 2.
-        const result = await getBackend("claude").runTurn({
+          active.sessionId &&
+          active.sessionModel === active.model &&
+          active.sessionProvider === active.provider
+            ? active.sessionId
+            : undefined;
+        // ADR-0018: dispatch through the campaign's chosen provider backend.
+        const result = await getBackend(active.provider).runTurn({
           campaignDir,
           sessionLogPath: active.sessionLogPath,
           userInput: message,
@@ -431,11 +516,14 @@ const ROUTES: Array<{
       try {
         console.log(`[${campaignId}] opening scene on model ${active.model}`);
         const settings = readCampaignSettings(campaignDir);
-        const result = await getBackend("claude").runTurn({
+        const result = await getBackend(active.provider).runTurn({
           campaignDir,
           sessionLogPath: active.sessionLogPath,
           userInput: openingDirective(campaignDir),
-          resumeSessionId: active.sessionModel === active.model ? active.sessionId : undefined,
+          resumeSessionId:
+            active.sessionModel === active.model && active.sessionProvider === active.provider
+              ? active.sessionId
+              : undefined,
           model: active.model,
           settings,
           onText: () => {},
