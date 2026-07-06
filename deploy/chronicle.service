@@ -1,0 +1,52 @@
+# Chronicle DM engine — systemd service template.
+#
+# This runs the native `npm start` (build-free `tsx src/server.ts`) as a
+# supervised, restart-on-crash, start-on-boot service on the home-LAN Ubuntu
+# host. See deploy/README.md for install steps. Copy this file, fill in the
+# three <PLACEHOLDER> values, then install it (system-wide install needs sudo):
+#
+#   sudo cp deploy/chronicle.service /etc/systemd/system/chronicle.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now chronicle
+#
+# Config (port/host/secret) is read from the repo's .env via EnvironmentFile —
+# do NOT put secrets in this unit file (it may be world-readable under /etc).
+
+[Unit]
+Description=Chronicle solo D&D DM engine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# The Linux user/group that owns the checkout and the ~/.claude (Claude
+# subscription login) + ~/.grok (image auth) credentials the engine relies on.
+# Must match whoever ran `claude` / `grok` login, or auth will fail.
+User=<YOUR_UNIX_USER>
+
+# Absolute path to the repo checkout.
+WorkingDirectory=<ABSOLUTE_PATH_TO>/chronicle
+
+# All runtime config lives here (CHRONICLE_SHARED_SECRET, HOST, PORT). The
+# server refuses to start without CHRONICLE_SHARED_SECRET. For LAN access set
+# HOST=0.0.0.0 (or the host's LAN IP) in this file — the default 127.0.0.1 is
+# reachable only from the host itself.
+EnvironmentFile=<ABSOLUTE_PATH_TO>/chronicle/.env
+
+# Absolute path to npm. systemd does NOT use your login shell's PATH, so a
+# bare `npm` fails — and nvm-installed node is invisible to systemd entirely.
+# Find yours with `which npm` (login shell); if it's under ~/.nvm, either
+# point ExecStart at that absolute path or install a system-wide node
+# (e.g. via nodesource / `apt install nodejs`) so /usr/bin/npm exists.
+ExecStart=/usr/bin/npm start
+
+# The server drains in-flight turns on SIGTERM (server.ts gracefulShutdown),
+# which can hold a socket open for a long agent run — give it room.
+TimeoutStopSec=45
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
