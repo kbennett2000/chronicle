@@ -324,6 +324,16 @@ ${lengthRule}
     move, and let them supply it. If you catch yourself writing "you say",
     "you decide", "you feel", "you draw your sword", or any other action or
     line the player didn't give you, cut it — that choice is theirs to make.
+19. Never end, conclude, or "wrap up" the session, and never write an
+    epilogue, retrospective, or closing summary of the story so far. The
+    session runs continuously for as long as the player keeps playing — that
+    decision is theirs alone, never yours. Do not emit "Session End", "End
+    of Session", "End of the First Session", "The End", "To be continued",
+    "Fin", a scene-break line followed by a wrap-up, or any similar framing,
+    even after a climactic or natural-feeling stopping point. However
+    momentous the moment just was, there is always a next moment: keep the
+    world live and end every reply on an in-progress beat that invites the
+    player's next action, exactly as rule 18 requires.
 
 If your narration would ever contradict what's actually in a state file,
 the file wins — correct your narration to match it.`;

@@ -59,6 +59,31 @@ function stripBackstagePreamble(text: string): string {
   return text.slice(divider + 5).trimStart();
 }
 
+/** Issue #72: the model sometimes declares the session over mid-play — a bold
+ * `**SESSION END**` / `**End of the First Session**` marker followed by a
+ * retrospective epilogue — even though the player is still going. Rule 19 of
+ * the system prompt tells it not to; this is the safety net for when it does.
+ * Deliberately CONSERVATIVE: it only fires on an explicit BOLD end-of-session
+ * marker (ordinary prose that merely says "the end of the session" is left
+ * alone), then drops that marker, any `---` divider immediately preceding it,
+ * and everything after it. If a match would blank the whole reply (the marker
+ * sits at the very top with no narration before it), the original text is kept
+ * — better a stray epilogue than an empty turn. */
+const SESSION_END_MARKER =
+  /\*\*\s*(?:session\s+end(?:ed|s)?|end\s+of\s+(?:the\s+|our\s+|this\s+|your\s+|first\s+|second\s+|third\s+|fourth\s+|fifth\s+)*session|the\s+end|to\s+be\s+continued|fin)[\s.!?…]*\*\*/i;
+
+function stripSessionEndEpilogue(text: string): string {
+  const marker = SESSION_END_MARKER.exec(text);
+  if (!marker) return text;
+  let cut = marker.index;
+  // Also swallow a `---`/`***` scene-break divider (and any blank lines) sitting
+  // immediately before the marker, so the reply doesn't end on a dangling rule.
+  const dividerBefore = /\n[ \t]*(?:-{3,}|\*{3,})[ \t]*\n\s*$/.exec(text.slice(0, cut));
+  if (dividerBefore) cut = dividerBefore.index;
+  const kept = text.slice(0, cut).trimEnd();
+  return kept.trim() ? kept : text;
+}
+
 function tidyWhitespace(text: string): string {
   return text
     .replace(/[ \t]{2,}/g, " ")
@@ -75,6 +100,8 @@ export function stripMetaChatter(text: string, opts: { autoRoll?: boolean } = {}
   // reads badly and can hide a boundary from the patterns below.
   let out = text.replace(/([.!?:])(?=[A-Z"'“‘])/g, "$1 ");
   out = stripBackstagePreamble(out);
+  // Issue #72: drop any "session over" epilogue the model tacked on mid-play.
+  out = stripSessionEndEpilogue(out);
   for (const re of META_PATTERNS) out = out.replace(re, "");
   // Only scrub "let me roll for stealth" backstage chatter when the engine rolls
   // (issue #44). With auto-roll off, that phrasing is the DM asking the player.
