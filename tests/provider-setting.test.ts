@@ -17,6 +17,8 @@ import {
 
 // ADR-0018: provider selection + persistence, mirroring the model helpers.
 
+// ADR-0019: campaigns nest under a user dir; a throwaway user isolates fixtures.
+const TEST_USER = "zz-provider-test-user";
 function uniqueId(): string {
   return `zz-provider-test-${process.pid}-${process.hrtime.bigint()}`;
 }
@@ -46,7 +48,7 @@ test("defaultModelForProvider returns a model that belongs to that provider", ()
 
 test("readCampaignProvider defaults to Claude with no stored value (backward compatible)", () => {
   const id = uniqueId();
-  const dir = scaffoldCampaign(id, { name: "Prov", race: "Human", class: "Fighter", level: 1 });
+  const dir = scaffoldCampaign(TEST_USER, id, { name: "Prov", race: "Human", class: "Fighter", level: 1 });
   try {
     assert.equal(readCampaignProvider(dir), DEFAULT_PROVIDER);
     assert.equal(readCampaignProvider(dir), "claude");
@@ -58,7 +60,7 @@ test("readCampaignProvider defaults to Claude with no stored value (backward com
 
 test("persistCampaignProvider round-trips and does not wipe other settings", () => {
   const id = uniqueId();
-  const dir = scaffoldCampaign(id, { name: "Prov", race: "Elf", class: "Wizard", level: 1 });
+  const dir = scaffoldCampaign(TEST_USER, id, { name: "Prov", race: "Elf", class: "Wizard", level: 1 });
   try {
     persistCampaignSettings(dir, { worldSetting: "a brass city", generateImages: true });
     persistCampaignProvider(dir, "grok");

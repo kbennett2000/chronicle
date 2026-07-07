@@ -6,8 +6,10 @@ at it. This doc covers installing and running the host on **Ubuntu, macOS, or
 Windows**, then the LAN networking steps.
 
 Per [ADR-0003](docs/adr/0003-lan-exposure-auth.md) this is a
-single-household-LAN posture — no HTTPS, no per-user accounts, one shared
-passphrase. Deployment/packaging rationale (and why not Docker) is in
+single-household-LAN posture — no HTTPS. Auth is **per-user accounts**
+([ADR-0019](docs/adr/0019-multi-user-accounts.md)): each person registers a
+username + password in the app and logs in from any device (open signup on your
+LAN). Deployment/packaging rationale (and why not Docker) is in
 [ADR-0017](docs/adr/0017-deployment-and-packaging.md).
 
 ---
@@ -62,14 +64,35 @@ cp .env.example .env
 Edit `.env` and set at least:
 
 ```
-CHRONICLE_SHARED_SECRET=<pick something long and hard to guess>
 HOST=<the host's LAN IP, e.g. 192.168.1.42, or 0.0.0.0 for all interfaces>
 # PORT=4317   # optional; the single knob for the listening port
+
+# Multi-user (ADR-0019): the "bootstrap" account that will own any campaigns
+# that already exist (test-campaign, and any you were already playing). You'll
+# log in with these; the migration in A3.5 creates the account.
+BOOTSTRAP_USERNAME=<your name, e.g. kris>
+BOOTSTRAP_PASSWORD=<pick a real password>
 ```
 
-`.env` is gitignored — it never gets committed. The server **refuses to start**
-without `CHRONICLE_SHARED_SECRET`. `HOST` defaults to `127.0.0.1` (this machine
-only); set it to the LAN IP (or `0.0.0.0`) to reach the host from other devices.
+`.env` is gitignored — it never gets committed. There is **no shared passphrase
+anymore**; each person makes their own account in the app. `HOST` defaults to
+`127.0.0.1` (this machine only); set it to the LAN IP (or `0.0.0.0`) to reach
+the host from other devices. See `.env.example` for the optional
+`DEFAULT_*` settings a brand-new account inherits.
+
+### A3.5. Migrate existing campaigns to multi-user (one-time)
+
+If this host already has campaigns from before multi-user (`test-campaign`, or
+real games), move them under your bootstrap account:
+
+```
+npm run migrate:multi-user
+```
+
+This creates the `BOOTSTRAP_USERNAME` account and nests existing campaigns under
+it (`campaigns/<user>/<campaign>/`). It's idempotent and refuses to run if the
+tracked `test-campaign` fixture has uncommitted changes. A brand-new install
+with no campaigns can skip this — just register in the app.
 
 ### A4. Start the server
 
@@ -84,8 +107,7 @@ Chronicle DM engine HTTP API listening on http://<your HOST value>:4317
 ```
 
 For the always-on Ubuntu host, run it under **systemd** instead so it survives
-reboots and crashes — see [`deploy/README.md`](deploy/README.md). If it prints
-an error about `CHRONICLE_SHARED_SECRET`, revisit A3.
+reboots and crashes — see [`deploy/README.md`](deploy/README.md).
 
 ---
 
@@ -117,7 +139,7 @@ Default port is `4317` (override with `PORT` in `.env`).
   (Windows Defender Firewall usually prompts on first bind — allow it on
   Private networks).
 
-### B3. Point the mobile UI at the host
+### B3. Point the mobile UI at the host and log in
 
 From a phone or second PC on the same LAN, open:
 
@@ -125,21 +147,27 @@ From a phone or second PC on the same LAN, open:
 http://<HOST / hostname from B1>:4317
 ```
 
-Go to **Settings → The Hearth (Connection)** and fill in:
+You'll land on the **login screen**. Set:
 
-- **Server address:** `http://<HOST from B1>:4317`
-- **Passphrase:** the `CHRONICLE_SHARED_SECRET` value from `.env`
+- **Server address:** `<HOST from B1>:4317` (the page pre-fills this from the
+  address you loaded it from).
+- **Username / Password:** your account. Tap **Create account** the first time
+  (or, on the host that ran the A3.5 migration, log in as your
+  `BOOTSTRAP_USERNAME`). Each person on the household gets their own account and
+  sees only their own chronicles.
 
-Tap **Save & reconnect**. The app stores both in that device's local storage
-and sends the passphrase on every request from then on.
+The app stores your session token in that device's local storage and stays
+logged in until you log out (Settings → The Hearth → Log out).
 
 ### B4. Validate
 
 From the second device:
 
-- Confirm the Story tab starts/resumes a session and you can send a turn.
-- Confirm a wrong passphrase is rejected: set the Passphrase field to something
-  wrong, Save & reconnect, and confirm you get an auth error instead of a reply.
+- Confirm you can register/log in and reach your chronicles, and that the Story
+  tab starts/resumes a session and you can send a turn.
+- Confirm a wrong password is rejected at login with an error.
+- Confirm isolation: a second account sees only its own characters, not the
+  first account's.
 - (Optional, host machine) If you enabled Grok as a DM engine (Part C), you can
   sanity-check parity with `npm run verify:grok-parity` — it plays a throwaway
   scratch campaign on Grok end-to-end (opening, turns, image, resume, and a

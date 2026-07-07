@@ -3,11 +3,19 @@ import { Home } from "./screens/Home";
 import { Play } from "./screens/Play";
 import { Settings } from "./screens/Settings";
 import { NewCharacter } from "./screens/NewCharacter";
+import { Auth } from "./screens/Auth";
 import { checkConnection, type ConnectionStatus } from "./lib/api";
-import { hasConnection, loadConnection, saveConnection, type Connection } from "./lib/connection";
+import { logout } from "./lib/auth";
+import {
+  hasConnection,
+  loadConnection,
+  saveConnection,
+  clearConnection,
+  type Connection,
+} from "./lib/connection";
 import { getCampaignId } from "./lib/campaign";
 
-type Screen = "home" | "play" | "settings" | "newcharacter";
+type Screen = "home" | "play" | "settings" | "newcharacter" | "auth";
 
 /** The one-off SVG filter every parchment surface references via
  * filter:url(#deckle) — ported verbatim from the handoff. */
@@ -44,19 +52,21 @@ export function App() {
   const pendingReconnect = useRef(false);
 
   useEffect(() => {
+    // ADR-0019: no token -> straight to the login/register screen.
     if (!hasConnection(connection)) {
       pendingReconnect.current = false;
-      setScreen("settings");
+      setScreen("auth");
       return;
     }
     setConnectionStatus("checking");
     checkConnection(connection).then((status) => {
       setConnectionStatus(status);
-      // The 401/unreachable -> Settings redirect: nothing else in the app
-      // works without a valid connection, so send the player straight to
-      // where they can fix it. A successful *deliberate* reconnect instead
-      // returns them Home, ready to play.
-      if (status !== "connected") {
+      // An expired/invalid token (401) sends the player back to Auth to log in
+      // again; an unreachable server sends them to Settings to fix the address.
+      // A successful *deliberate* reconnect returns them Home, ready to play.
+      if (status === "unauthorized") {
+        setScreen("auth");
+      } else if (status !== "connected") {
         setScreen("settings");
       } else if (pendingReconnect.current) {
         setScreen("home");
@@ -65,10 +75,24 @@ export function App() {
     });
   }, [connection]);
 
+  function handleAuthenticated(next: Connection) {
+    pendingReconnect.current = true;
+    saveConnection(next);
+    setConnection(next);
+  }
+
   function handleSaveConnection(next: Connection) {
     pendingReconnect.current = true;
     saveConnection(next);
     setConnection(next);
+  }
+
+  function handleLogout() {
+    void logout(connection);
+    clearConnection();
+    setConnection(loadConnection());
+    setConnectionStatus("unchecked");
+    setScreen("auth");
   }
 
   function handleTestConnection() {
@@ -88,6 +112,9 @@ export function App() {
     >
       <DeckleFilters />
       <div className="candlelight" />
+      {screen === "auth" && (
+        <Auth initialServerAddress={connection.serverAddress} onAuthenticated={handleAuthenticated} />
+      )}
       {screen === "home" && (
         <Home
           connection={connection}
@@ -118,12 +145,13 @@ export function App() {
       )}
       {screen === "settings" && (
         <Settings
-          onBack={() => setScreen(hasConnection(connection) ? "home" : "settings")}
+          onBack={() => setScreen(hasConnection(connection) ? "home" : "auth")}
           connection={connection}
           campaignId={campaignId}
           connectionStatus={connectionStatus}
           onSaveConnection={handleSaveConnection}
           onTestConnection={handleTestConnection}
+          onLogout={handleLogout}
         />
       )}
     </div>

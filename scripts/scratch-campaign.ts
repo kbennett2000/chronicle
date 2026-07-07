@@ -13,11 +13,22 @@
  * any id that doesn't start with "scratch-" — this is the actual safety rail,
  * not a confirmation prompt that could be bypassed.
  */
+import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
-import { CAMPAIGNS_ROOT, scaffoldCampaign } from "../src/campaign-store.js";
+import { scaffoldCampaign, userCampaignsRoot } from "../src/campaign-store.js";
+import { userIdForUsername } from "../src/user-store.js";
 
 const SCRATCH_PREFIX = "scratch-";
+
+// ADR-0019: campaigns nest under a user dir. Scratch campaigns live under the
+// bootstrap user by default (BOOTSTRAP_USERNAME in .env, default "kris"),
+// overridable with `--user <name>`.
+function resolveUserId(argv: string[]): string {
+  const idx = argv.indexOf("--user");
+  const name = idx !== -1 ? argv[idx + 1] : process.env.BOOTSTRAP_USERNAME ?? "kris";
+  return userIdForUsername(name);
+}
 
 const EMPTY_CHARACTER_SHEET = {
   name: "",
@@ -59,7 +70,7 @@ function parseCreateOptions(argv: string[]): CreateOptions {
   return opts;
 }
 
-function createScratchCampaign(opts: CreateOptions = {}): string {
+function createScratchCampaign(userId: string, opts: CreateOptions = {}): string {
   // Lowercased: campaign-store.ts's CAMPAIGN_ID_PATTERN only allows
   // lowercase letters, and toISOString()'s literal "T"/"Z" would otherwise
   // produce an id that resolveCampaignDir() rejects.
@@ -72,12 +83,12 @@ function createScratchCampaign(opts: CreateOptions = {}): string {
   };
   if (opts.provider) settings.provider = opts.provider;
   if (opts.images) settings.generateImages = true;
-  scaffoldCampaign(id, EMPTY_CHARACTER_SHEET, settings);
+  scaffoldCampaign(userId, id, EMPTY_CHARACTER_SHEET, settings);
   console.log(id);
   return id;
 }
 
-function deleteScratchCampaign(id: string): void {
+function deleteScratchCampaign(userId: string, id: string): void {
   if (!id.startsWith(SCRATCH_PREFIX)) {
     console.error(
       `refusing to delete "${id}": only campaign ids starting with "${SCRATCH_PREFIX}" may be deleted by this tool`
@@ -85,8 +96,9 @@ function deleteScratchCampaign(id: string): void {
     process.exit(1);
   }
 
-  const dir = path.join(CAMPAIGNS_ROOT, id);
-  if (path.dirname(dir) !== CAMPAIGNS_ROOT) {
+  const root = userCampaignsRoot(userId);
+  const dir = path.join(root, id);
+  if (path.dirname(dir) !== root) {
     console.error(`refusing to delete "${id}": resolves outside campaigns/`);
     process.exit(1);
   }
@@ -100,17 +112,18 @@ function deleteScratchCampaign(id: string): void {
 }
 
 const [, , command, arg] = process.argv;
+const userId = resolveUserId(process.argv);
 
 switch (command) {
   case "create":
-    createScratchCampaign(parseCreateOptions(process.argv.slice(3)));
+    createScratchCampaign(userId, parseCreateOptions(process.argv.slice(3)));
     break;
   case "delete":
     if (!arg) {
       console.error("usage: tsx scripts/scratch-campaign.ts delete <id>");
       process.exit(1);
     }
-    deleteScratchCampaign(arg);
+    deleteScratchCampaign(userId, arg);
     break;
   default:
     console.error("usage: tsx scripts/scratch-campaign.ts <create|delete <id>>");

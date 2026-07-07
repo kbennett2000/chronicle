@@ -18,23 +18,30 @@ blob-report/
 .grok/
 .credentials.json
 
+# User accounts (ADR-0019): password hashes, session tokens, and per-user
+# default settings live here — never enters git.
+users/
+
 # Agent SDK session pointers (local runtime state, not source)
 **/.session-id
 
 # Campaign data (ADR-0005): real player campaigns never enter git.
-# test-campaign is a deliberately tracked dev/validation fixture, and
-# _registry is shared cross-campaign infra (genre-neutral seed-table
-# dedup log, not player data) — both are explicit exceptions.
+# _registry is shared cross-campaign infra (genre-neutral seed-table dedup log,
+# not player data). test-campaign is a deliberately tracked dev/validation
+# fixture; after the ADR-0019 multi-user migration it is owned by the bootstrap
+# user "kris" at campaigns/kris/test-campaign — the one nested path we un-ignore.
 campaigns/*
-!campaigns/test-campaign
-!campaigns/test-campaign/**
 !campaigns/_registry
 !campaigns/_registry/**
+!campaigns/kris/
+campaigns/kris/*
+!campaigns/kris/test-campaign
+!campaigns/kris/test-campaign/**
 
 # Re-exclude runtime state even inside the tracked test-campaign exception
-campaigns/test-campaign/.session-id
-campaigns/test-campaign/**/.session-id
+campaigns/kris/test-campaign/.session-id
+campaigns/kris/test-campaign/**/.session-id
 # Issue #68 (ADR-0016): per-turn state snapshots are runtime rewind state, not
 # source — never commit them, not even under the tracked test-campaign fixture.
-campaigns/test-campaign/session-log/snapshots/
-campaigns/test-campaign/**/snapshots/
+campaigns/kris/test-campaign/session-log/snapshots/
+campaigns/kris/test-campaign/**/snapshots/

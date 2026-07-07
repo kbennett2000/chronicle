@@ -3,10 +3,16 @@ import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import { userIdForUsername } from "../../../src/user-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
-const TOKEN = "e2e-harness-token";
+// ADR-0019: auth is per-user. The harness registers a dedicated user and owns
+// its scratch campaigns under that user's dir; `token` is that user's session
+// token (obtained from the server after boot), not a shared secret.
+const HARNESS_USERNAME = "e2e-harness-user";
+const HARNESS_PASSWORD = "e2e-harness-pass";
+const HARNESS_USER_ID = userIdForUsername(HARNESS_USERNAME);
 
 export interface ChronicleTestServer {
   baseURL: string;
@@ -25,6 +31,34 @@ function runScratchScript(args: string[]): string {
     cwd: REPO_ROOT,
     encoding: "utf8",
   }).trim();
+}
+
+/** Create a scratch campaign owned by the harness user (ADR-0019). */
+function createScratchCampaign(): string {
+  return runScratchScript(["create", "--user", HARNESS_USERNAME]);
+}
+
+function deleteScratchCampaign(campaignId: string): string {
+  return runScratchScript(["delete", campaignId, "--user", HARNESS_USERNAME]);
+}
+
+/** Register (or log in, if a prior run already created it) the harness user and
+ * return its session token — the value every spec sends as X-Chronicle-Token. */
+async function authenticate(baseURL: string): Promise<string> {
+  const body = { username: HARNESS_USERNAME, password: HARNESS_PASSWORD };
+  const reg = await fetch(`${baseURL}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (reg.status === 201) return ((await reg.json()) as { token: string }).token;
+  const login = await fetch(`${baseURL}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (login.status !== 200) throw new Error(`harness auth failed: ${login.status}`);
+  return ((await login.json()) as { token: string }).token;
 }
 
 /** `npx tsx src/server.ts` is not one process but two: tsx's own CLI
@@ -55,11 +89,13 @@ function killServerTree(proc: ChildProcess): void {
   }
 }
 
-async function waitForReady(baseURL: string, token: string, timeoutMs = 20000): Promise<void> {
+async function waitForReady(baseURL: string, timeoutMs = 20000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`${baseURL}/models`, { headers: { "X-Chronicle-Token": token } });
+      // The SPA shell is served unauthenticated (ADR-0019) — a 200 here means
+      // the server is listening, without needing a token we don't have yet.
+      const res = await fetch(`${baseURL}/`);
       if (res.status === 200) return;
     } catch {
       // not listening yet — keep polling
@@ -69,11 +105,14 @@ async function waitForReady(baseURL: string, token: string, timeoutMs = 20000): 
   throw new Error(`chronicle server at ${baseURL} did not become ready in time`);
 }
 
+const campaignDirFor = (campaignId: string): string =>
+  path.join(REPO_ROOT, "campaigns", HARNESS_USER_ID, campaignId);
+
 /** Seeds the scratch campaign with deterministic content so assertions on
  * rendered state check against known values, not the scratch template's
  * blank defaults. */
 function seedCampaignContent(campaignId: string): void {
-  const dir = path.join(REPO_ROOT, "campaigns", campaignId);
+  const dir = campaignDirFor(campaignId);
 
   const sheetPath = path.join(dir, "character-sheet.json");
   const sheet = JSON.parse(fs.readFileSync(sheetPath, "utf8"));
@@ -118,7 +157,7 @@ _(none established yet)_
  * is history, not a resumable Agent SDK conversation (a fresh log is started on
  * session/start, and /state falls back to this one for its transcript). */
 function seedOpeningTurn(campaignId: string): void {
-  const logDir = path.join(REPO_ROOT, "campaigns", campaignId, "session-log");
+  const logDir = path.join(campaignDirFor(campaignId), "session-log");
   const base = "session-2020-01-01T00-00-00-000Z";
   fs.writeFileSync(path.join(logDir, `${base}.md`), `# ${base}\n\nThe seeded opening.\n`);
   fs.writeFileSync(
@@ -158,7 +197,7 @@ async function bootServer(
   // group (pid === pgid) — see killServerTree below for why that matters.
   const proc: ChildProcess = spawn("npx", ["tsx", "src/server.ts"], {
     cwd: REPO_ROOT,
-    env: { ...process.env, CHRONICLE_SHARED_SECRET: TOKEN, PORT: String(port), HOST: host },
+    env: { ...process.env, PORT: String(port), HOST: host },
     stdio: "pipe",
     detached: true,
   });
@@ -168,11 +207,13 @@ async function bootServer(
     stderr += chunk.toString();
   });
 
+  let token: string;
   try {
-    await waitForReady(baseURL, TOKEN);
+    await waitForReady(baseURL);
+    token = await authenticate(baseURL);
   } catch (err) {
     killServerTree(proc);
-    runScratchScript(["delete", campaignId]);
+    deleteScratchCampaign(campaignId);
     throw new Error(`${(err as Error).message}\n${stderr}`);
   }
 
@@ -183,10 +224,10 @@ async function bootServer(
     killServerTree(proc);
   };
 
-  await use({ baseURL, token: TOKEN, campaignId, stop });
+  await use({ baseURL, token, campaignId, stop });
 
   stop();
-  runScratchScript(["delete", campaignId]);
+  deleteScratchCampaign(campaignId);
 }
 
 export const test = base.extend<
@@ -203,7 +244,7 @@ export const test = base.extend<
   // right default for every UI/panel spec — they reach Play and test their
   // own thing without paying for (and racing against) an opening turn.
   chronicleServer: async ({}, use) => {
-    const campaignId = runScratchScript(["create"]);
+    const campaignId = createScratchCampaign();
     seedCampaignContent(campaignId);
     seedOpeningTurn(campaignId);
     await bootServer(campaignId, use);
@@ -213,7 +254,7 @@ export const test = base.extend<
   // scene (issue #54). For specs that specifically exercise the turn/opening
   // flow (turn, transcript, opening) and need a real, empty starting log.
   unopenedChronicleServer: async ({}, use) => {
-    const campaignId = runScratchScript(["create"]);
+    const campaignId = createScratchCampaign();
     seedCampaignContent(campaignId);
     await bootServer(campaignId, use);
   },
@@ -224,7 +265,7 @@ export const test = base.extend<
   // has genuinely never been touched, since seeded content or a stored
   // client-side connection can mask the exact bug being verified.
   freshChronicleServer: async ({}, use) => {
-    const campaignId = runScratchScript(["create"]);
+    const campaignId = createScratchCampaign();
     await bootServer(campaignId, use);
   },
 
@@ -236,7 +277,7 @@ export const test = base.extend<
   // configured in Hearth) without depending on this machine's real LAN IP
   // being reachable/stable in CI.
   crossOriginChronicleServer: async ({}, use) => {
-    const campaignId = runScratchScript(["create"]);
+    const campaignId = createScratchCampaign();
     await bootServer(campaignId, use, "0.0.0.0");
   },
 });

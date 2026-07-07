@@ -23,10 +23,16 @@ import path from "node:path";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { userIdForUsername } from "../src/user-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
-const TOKEN = "grok-parity-token";
+// ADR-0019: auth is per-user now. The sweep registers (or logs in) a dedicated
+// parity user and owns its scratch campaign under that user's dir.
+const PARITY_USERNAME = "grok-parity-user";
+const PARITY_PASSWORD = "grok-parity-pass";
+const PARITY_USER_ID = userIdForUsername(PARITY_USERNAME);
+let token = "";
 const GROK_MODEL = process.env.CHRONICLE_PARITY_MODEL || "grok-build";
 const CLAUDE_MODEL = "claude-haiku-4-5"; // cheapest/fastest for the switch-back turn
 const TURN_COUNT = Number(process.env.CHRONICLE_PARITY_TURNS || 3);
@@ -65,7 +71,9 @@ async function waitForReady(baseURL: string, timeoutMs = 20000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`${baseURL}/models`, { headers: { "X-Chronicle-Token": TOKEN } });
+      // The SPA shell is served unauthenticated (ADR-0019), so a 200 here means
+      // the server is listening without needing a token we don't have yet.
+      const res = await fetch(`${baseURL}/`);
       if (res.status === 200) return;
     } catch {
       /* not listening yet */
@@ -73,6 +81,25 @@ async function waitForReady(baseURL: string, timeoutMs = 20000): Promise<void> {
     await new Promise((r) => setTimeout(r, 200));
   }
   throw new Error(`server at ${baseURL} did not become ready in time`);
+}
+
+/** Register the parity user (or log in if it already exists from a prior run)
+ * and stash its session token for all subsequent authenticated calls. */
+async function authenticate(baseURL: string): Promise<void> {
+  const reg = await api(baseURL, "POST", "/auth/register", {
+    username: PARITY_USERNAME,
+    password: PARITY_PASSWORD,
+  });
+  if (reg.status === 201) {
+    token = reg.body.token;
+    return;
+  }
+  const login = await api(baseURL, "POST", "/auth/login", {
+    username: PARITY_USERNAME,
+    password: PARITY_PASSWORD,
+  });
+  if (login.status !== 200) throw new Error(`parity auth failed: ${login.status} ${JSON.stringify(login.body)}`);
+  token = login.body.token;
 }
 
 async function api(
@@ -83,7 +110,7 @@ async function api(
 ): Promise<{ status: number; body: any }> {
   const res = await fetch(`${baseURL}${route}`, {
     method,
-    headers: { "X-Chronicle-Token": TOKEN, "Content-Type": "application/json" },
+    headers: { "X-Chronicle-Token": token, "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
@@ -154,11 +181,21 @@ async function main(): Promise<void> {
   check("`grok` CLI is on PATH (needed for Grok turns + images)", grokOk,
     grokOk ? "" : "install/authenticate the grok CLI — see SETUP.md §7");
 
-  // Create the scratch Grok campaign (images + auto-roll on) and seed a real PC.
-  const scratchId = scratch(["create", "--provider", "grok", "--model", GROK_MODEL, "--images"]);
-  const dir = path.join(REPO_ROOT, "campaigns", scratchId);
+  // Create the scratch Grok campaign (images + auto-roll on) under the parity
+  // user (ADR-0019) and seed a real PC.
+  const scratchId = scratch([
+    "create",
+    "--user",
+    PARITY_USERNAME,
+    "--provider",
+    "grok",
+    "--model",
+    GROK_MODEL,
+    "--images",
+  ]);
+  const dir = path.join(REPO_ROOT, "campaigns", PARITY_USER_ID, scratchId);
   seedCharacter(dir);
-  console.log(`  scratch campaign: ${scratchId}`);
+  console.log(`  scratch campaign: ${scratchId} (user ${PARITY_USER_ID})`);
 
   const baselineForeignDirt = foreignCampaignDirt(scratchId);
 
@@ -166,7 +203,7 @@ async function main(): Promise<void> {
   const baseURL = `http://127.0.0.1:${port}`;
   const proc = spawn("npx", ["tsx", "src/server.ts"], {
     cwd: REPO_ROOT,
-    env: { ...process.env, CHRONICLE_SHARED_SECRET: TOKEN, PORT: String(port), HOST: "127.0.0.1" },
+    env: { ...process.env, PORT: String(port), HOST: "127.0.0.1" },
     stdio: "pipe",
     detached: true,
   });
@@ -176,6 +213,7 @@ async function main(): Promise<void> {
 
   try {
     await waitForReady(baseURL);
+    await authenticate(baseURL);
 
     step("Start a Grok session");
     const start = await api(baseURL, "POST", `/campaigns/${scratchId}/session/start`, {
@@ -258,7 +296,7 @@ async function main(): Promise<void> {
     step("Cleanup");
     killServerTree(proc);
     try {
-      const del = scratch(["delete", scratchId]);
+      const del = scratch(["delete", scratchId, "--user", PARITY_USERNAME]);
       check("scratch campaign deleted", del.includes("deleted"), del);
     } catch (e) {
       check("scratch campaign deleted", false, String(e));

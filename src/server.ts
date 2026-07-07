@@ -37,7 +37,7 @@ import {
   scaffoldCampaign,
   deleteCampaign,
   listCampaigns,
-  CAMPAIGNS_ROOT,
+  userCampaignsRoot,
   CONTENT_INTENSITIES,
   RESPONSE_LENGTHS,
   isValidModelId,
@@ -46,6 +46,7 @@ import {
   defaultModelForProvider,
   MODEL_OPTIONS,
   PROVIDERS,
+  DEFAULT_MODEL,
   InvalidCampaignIdError,
   CampaignNotFoundError,
   CampaignExistsError,
@@ -63,6 +64,19 @@ import {
   CharacterValidationError,
   MAX_APPEARANCE_CHARS,
 } from "./character-gen.js";
+import {
+  createUser,
+  verifyLogin,
+  createSession,
+  resolveSession,
+  deleteSession,
+  readAccount,
+  readUserSettings,
+  writeUserSettings,
+  InvalidUsernameError,
+  UsernameTakenError,
+  InvalidCredentialsError,
+} from "./user-store.js";
 
 const dotenvResult = loadDotenv();
 if (dotenvResult.error) {
@@ -78,17 +92,50 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 4317;
 // boundary from "this machine only" to "this household's network."
 const HOST = process.env.HOST ?? "127.0.0.1";
 
-// Required, not optional: once the server can be bound to a LAN interface,
-// shipping without a secret configured would silently serve the API to
-// the whole household network with no auth at all.
-const SHARED_SECRET = process.env.CHRONICLE_SHARED_SECRET;
-if (!SHARED_SECRET) {
-  console.error(
-    "CHRONICLE_SHARED_SECRET is not set. Refusing to start — see .env.example / SETUP.md."
-  );
-  process.exit(1);
-}
+// ADR-0019: auth is now per-user accounts, not one household secret. The same
+// `X-Chronicle-Token` header now carries a per-user *session token* (issued by
+// POST /auth/login|register), which the dispatcher resolves to a user id. The
+// header name is unchanged so CORS and the client transport didn't have to move.
 const AUTH_HEADER = "x-chronicle-token";
+
+/** ADR-0019: the default settings a brand-new user's account inherits, read
+ * from `.env` (see .env.example). Only well-formed values are included; anything
+ * unset or invalid is simply omitted, so the user falls back to the same code
+ * defaults an absent field always had. These seed the user's settings.json at
+ * registration and, through it, every campaign they create. */
+function newUserDefaultSettings(): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const model = process.env.DEFAULT_MODEL;
+  if (model && isValidModelId(model)) out.model = model;
+  const provider = process.env.DEFAULT_PROVIDER;
+  if (provider && isValidProviderId(provider)) out.provider = provider;
+  const artStyle = process.env.DEFAULT_ART_STYLE?.trim();
+  if (artStyle) out.artStyle = artStyle;
+  const worldSetting = process.env.DEFAULT_WORLD_SETTING?.trim();
+  if (worldSetting) out.worldSetting = worldSetting;
+  const tone = process.env.DEFAULT_TONE_WHIMSY;
+  if (tone !== undefined && tone !== "") {
+    const n = Number(tone);
+    if (Number.isFinite(n) && n >= 0 && n <= 1) out.toneWhimsy = n;
+  }
+  const intensity = process.env.DEFAULT_CONTENT_INTENSITY;
+  if (intensity && CONTENT_INTENSITIES.includes(intensity as ContentIntensity)) {
+    out.contentIntensity = intensity;
+  }
+  const length = process.env.DEFAULT_RESPONSE_LENGTH;
+  if (length && RESPONSE_LENGTHS.includes(length as ResponseLength)) {
+    out.responseLength = length;
+  }
+  const boolEnv = (v: string | undefined): boolean | undefined =>
+    v === "true" ? true : v === "false" ? false : undefined;
+  const genImages = boolEnv(process.env.DEFAULT_GENERATE_IMAGES);
+  if (genImages !== undefined) out.generateImages = genImages;
+  const autoRoll = boolEnv(process.env.DEFAULT_AUTO_ROLL_DICE);
+  if (autoRoll !== undefined) out.autoRollDice = autoRoll;
+  const autoIllustrate = boolEnv(process.env.DEFAULT_AUTO_ILLUSTRATE);
+  if (autoIllustrate !== undefined) out.autoIllustrateTurns = autoIllustrate;
+  return out;
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_ROOT = path.resolve(__dirname, "../public");
@@ -121,9 +168,14 @@ interface ActiveSession {
 }
 
 // In-memory only: which campaign's Agent SDK session/log is "active" for
-// this server process. Single process, single shared secret (ADR-0003) —
-// still a single-household trust boundary, not a multi-user one.
+// this server process. ADR-0019: keyed by `${userId}/${campaignId}` so two
+// users whose campaigns share an id can't collide on the same active session.
 const activeSessions = new Map<string, ActiveSession>();
+
+/** The activeSessions key for a user's campaign (ADR-0019). */
+function sessionKey(userId: string, campaignId: string): string {
+  return `${userId}/${campaignId}`;
+}
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -150,11 +202,168 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
   });
 }
 
+/** ADR-0019: validate a user's *default* settings patch (POST /me/settings).
+ * Unlike a campaign's POST /settings, this accepts `model` and `provider` too,
+ * because a user's defaults seed a new campaign's model/provider. Returns the
+ * validated subset, or an error string. Only provided fields are validated. */
+function parseDefaultSettings(
+  body: Record<string, unknown>
+): { value: Record<string, unknown> } | { error: string } {
+  const out: Record<string, unknown> = {};
+  if (body.model !== undefined) {
+    if (typeof body.model !== "string" || !isValidModelId(body.model)) {
+      return { error: `invalid model — must be one of ${MODEL_OPTIONS.map((m) => m.id).join(", ")}` };
+    }
+    out.model = body.model;
+  }
+  if (body.provider !== undefined) {
+    if (typeof body.provider !== "string" || !isValidProviderId(body.provider)) {
+      return { error: `invalid provider — must be one of ${PROVIDERS.map((p) => p.id).join(", ")}` };
+    }
+    out.provider = body.provider;
+  }
+  if (out.provider && out.model && !isModelValidForProvider(out.provider as ProviderId, out.model as string)) {
+    return { error: `model '${out.model}' is not a ${out.provider} model` };
+  }
+  if (body.artStyle !== undefined) {
+    if (typeof body.artStyle !== "string") return { error: "artStyle must be a string" };
+    out.artStyle = body.artStyle;
+  }
+  if (body.worldSetting !== undefined) {
+    if (typeof body.worldSetting !== "string") return { error: "worldSetting must be a string" };
+    out.worldSetting = body.worldSetting;
+  }
+  if (body.toneWhimsy !== undefined) {
+    if (typeof body.toneWhimsy !== "number" || body.toneWhimsy < 0 || body.toneWhimsy > 1) {
+      return { error: "toneWhimsy must be a number between 0 and 1" };
+    }
+    out.toneWhimsy = body.toneWhimsy;
+  }
+  if (body.contentIntensity !== undefined) {
+    if (
+      typeof body.contentIntensity !== "string" ||
+      !CONTENT_INTENSITIES.includes(body.contentIntensity as ContentIntensity)
+    ) {
+      return { error: `contentIntensity must be one of ${CONTENT_INTENSITIES.join(", ")}` };
+    }
+    out.contentIntensity = body.contentIntensity;
+  }
+  if (body.responseLength !== undefined) {
+    if (
+      typeof body.responseLength !== "string" ||
+      !RESPONSE_LENGTHS.includes(body.responseLength as ResponseLength)
+    ) {
+      return { error: `responseLength must be one of ${RESPONSE_LENGTHS.join(", ")}` };
+    }
+    out.responseLength = body.responseLength;
+  }
+  for (const key of ["generateImages", "autoRollDice", "autoIllustrateTurns"] as const) {
+    if (body[key] !== undefined) {
+      if (typeof body[key] !== "boolean") return { error: `${key} must be a boolean` };
+      out[key] = body[key];
+    }
+  }
+  return { value: out };
+}
+
 const ROUTES: Array<{
   method: string;
   pattern: RegExp;
-  handler: (req: IncomingMessage, res: ServerResponse, params: string[]) => Promise<void>;
+  /** ADR-0019: when true, this route is reachable without a valid session token
+   * (registration + login, which issue tokens). Every other route requires one,
+   * and the dispatcher passes the resolved user id to the handler. */
+  public?: boolean;
+  handler: (
+    req: IncomingMessage,
+    res: ServerResponse,
+    params: string[],
+    userId: string
+  ) => Promise<void>;
 }> = [
+  // ── ADR-0019: auth ──────────────────────────────────────────────────────
+  {
+    method: "POST",
+    pattern: /^\/auth\/register$/,
+    public: true,
+    async handler(req, res) {
+      const body = (await readJsonBody(req)) as { username?: unknown; password?: unknown };
+      if (typeof body.username !== "string" || typeof body.password !== "string") {
+        sendJson(res, 400, { error: "username and password are required" });
+        return;
+      }
+      try {
+        const user = createUser(body.username, body.password, newUserDefaultSettings());
+        const token = createSession(user.id);
+        sendJson(res, 201, { token, username: user.username });
+      } catch (err) {
+        if (err instanceof UsernameTakenError) {
+          sendJson(res, 409, { error: err.message });
+        } else if (err instanceof InvalidUsernameError || err instanceof InvalidCredentialsError) {
+          sendJson(res, 400, { error: err.message });
+        } else {
+          throw err;
+        }
+      }
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/auth\/login$/,
+    public: true,
+    async handler(req, res) {
+      const body = (await readJsonBody(req)) as { username?: unknown; password?: unknown };
+      if (typeof body.username !== "string" || typeof body.password !== "string") {
+        sendJson(res, 400, { error: "username and password are required" });
+        return;
+      }
+      const user = verifyLogin(body.username, body.password);
+      if (!user) {
+        sendJson(res, 401, { error: "incorrect username or password" });
+        return;
+      }
+      const token = createSession(user.id);
+      sendJson(res, 200, { token, username: user.username });
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/auth\/logout$/,
+    async handler(req, res) {
+      deleteSession(req.headers[AUTH_HEADER] as string | undefined);
+      sendJson(res, 200, { ok: true });
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/auth\/me$/,
+    async handler(_req, res, _params, userId) {
+      const account = readAccount(userId);
+      sendJson(res, 200, { username: account?.username ?? userId });
+    },
+  },
+  {
+    // ADR-0019: the user's *default* settings — the seed for every new campaign
+    // (per-user defaults, overridable per game). Same field family as a
+    // campaign's settings.
+    method: "GET",
+    pattern: /^\/me\/settings$/,
+    async handler(_req, res, _params, userId) {
+      sendJson(res, 200, readUserSettings(userId));
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/me\/settings$/,
+    async handler(req, res, _params, userId) {
+      const body = (await readJsonBody(req)) as Record<string, unknown>;
+      const parsed = parseDefaultSettings(body);
+      if ("error" in parsed) {
+        sendJson(res, 400, { error: parsed.error });
+        return;
+      }
+      sendJson(res, 200, writeUserSettings(userId, parsed.value));
+    },
+  },
   {
     method: "GET",
     pattern: /^\/models$/,
@@ -177,16 +386,20 @@ const ROUTES: Array<{
     // shadowed by the /campaigns/:id matcher below. `{}` when no campaign exists.
     method: "GET",
     pattern: /^\/new-game-defaults$/,
-    async handler(_req, res) {
-      sendJson(res, 200, { settings: newGameDefaultSettings() });
+    async handler(_req, res, _params, userId) {
+      // ADR-0019: base is the user's account defaults (seeded from .env at
+      // registration); the most recently played campaign's settings overlay them
+      // (ADR-0014) so an active player's latest tweaks carry into the next game.
+      const settings = { ...readUserSettings(userId), ...newGameDefaultSettings(userId) };
+      sendJson(res, 200, { settings });
     },
   },
   {
-    // ADR-0010: list every campaign for Home's chronicle picker.
+    // ADR-0010 / ADR-0019: list this user's own campaigns for Home's picker.
     method: "GET",
     pattern: /^\/campaigns$/,
-    async handler(_req, res) {
-      sendJson(res, 200, { campaigns: listCampaigns() });
+    async handler(_req, res, _params, userId) {
+      sendJson(res, 200, { campaigns: listCampaigns(userId) });
     },
   },
   {
@@ -195,7 +408,7 @@ const ROUTES: Array<{
     // are authoritative, not trusted from the client.
     method: "POST",
     pattern: /^\/campaigns$/,
-    async handler(req, res) {
+    async handler(req, res, _params, userId) {
       const body = (await readJsonBody(req)) as { character?: unknown; settings?: unknown };
       let sheet: Record<string, unknown>;
       try {
@@ -311,9 +524,17 @@ const ROUTES: Array<{
       }
 
       const campaignId = deriveCampaignId(String(sheet.name), (id) =>
-        fs.existsSync(path.join(CAMPAIGNS_ROOT, id))
+        fs.existsSync(path.join(userCampaignsRoot(userId), id))
       );
-      const dir = scaffoldCampaign(campaignId, sheet);
+      // ADR-0019: seed the new campaign from the user's account defaults, then
+      // let the explicit create-form settings (below) override. The client's
+      // form is itself pre-filled from those defaults, so this is the robust
+      // floor even if the form omits a field.
+      const dir = scaffoldCampaign(userId, campaignId, sheet, {
+        model: DEFAULT_MODEL,
+        autoRollDice: true,
+        ...readUserSettings(userId),
+      });
       // Model and provider are persisted via their own merge-writes (both are
       // excluded from the POST /settings update type); the world fields go
       // through persistCampaignSettings. Split them out so all are seeded at
@@ -337,17 +558,17 @@ const ROUTES: Array<{
     // any in-memory session so a later request can't resurrect it.
     method: "DELETE",
     pattern: /^\/campaigns\/([^/]+)$/,
-    async handler(_req, res, [campaignId]) {
-      deleteCampaign(campaignId);
-      activeSessions.delete(campaignId);
+    async handler(_req, res, [campaignId], userId) {
+      deleteCampaign(userId, campaignId);
+      activeSessions.delete(sessionKey(userId, campaignId));
       sendJson(res, 200, { deleted: campaignId });
     },
   },
   {
     method: "POST",
     pattern: /^\/campaigns\/([^/]+)\/session\/start$/,
-    async handler(req, res, [campaignId]) {
-      const campaignDir = resolveCampaignDir(campaignId);
+    async handler(req, res, [campaignId], userId) {
+      const campaignDir = resolveCampaignDir(userId, campaignId);
 
       const body = await readJsonBody(req);
       const requestedModel = (body as { model?: unknown }).model;
@@ -402,7 +623,7 @@ const ROUTES: Array<{
       // sessionModel/sessionProvider = what the persisted session ran under. If
       // the player switched either, the first turn starts a fresh session rather
       // than resume the old one (#57, ADR-0018).
-      activeSessions.set(campaignId, {
+      activeSessions.set(sessionKey(userId, campaignId), {
         sessionId: persisted,
         sessionLogPath,
         model,
@@ -423,9 +644,9 @@ const ROUTES: Array<{
   {
     method: "POST",
     pattern: /^\/campaigns\/([^/]+)\/turns$/,
-    async handler(req, res, [campaignId]) {
-      const campaignDir = resolveCampaignDir(campaignId);
-      const active = activeSessions.get(campaignId);
+    async handler(req, res, [campaignId], userId) {
+      const campaignDir = resolveCampaignDir(userId, campaignId);
+      const active = activeSessions.get(sessionKey(userId, campaignId));
       if (!active) {
         sendJson(res, 409, {
           error: `no active session for campaign '${campaignId}' — call POST /campaigns/${campaignId}/session/start first`,
@@ -523,9 +744,9 @@ const ROUTES: Array<{
     // so a page reload or double client fire can't duplicate it.
     method: "POST",
     pattern: /^\/campaigns\/([^/]+)\/opening$/,
-    async handler(_req, res, [campaignId]) {
-      const campaignDir = resolveCampaignDir(campaignId);
-      const active = activeSessions.get(campaignId);
+    async handler(_req, res, [campaignId], userId) {
+      const campaignDir = resolveCampaignDir(userId, campaignId);
+      const active = activeSessions.get(sessionKey(userId, campaignId));
       if (!active) {
         sendJson(res, 409, {
           error: `no active session for campaign '${campaignId}' — call POST /campaigns/${campaignId}/session/start first`,
@@ -606,9 +827,9 @@ const ROUTES: Array<{
     // source of truth (ADR-0001), so a fresh session loses no state.
     method: "POST",
     pattern: /^\/campaigns\/([^/]+)\/turns\/(\d+)\/edit$/,
-    async handler(req, res, [campaignId, turnIndexStr]) {
-      const campaignDir = resolveCampaignDir(campaignId);
-      const active = activeSessions.get(campaignId);
+    async handler(req, res, [campaignId, turnIndexStr], userId) {
+      const campaignDir = resolveCampaignDir(userId, campaignId);
+      const active = activeSessions.get(sessionKey(userId, campaignId));
       if (!active) {
         sendJson(res, 409, {
           error: `no active session for campaign '${campaignId}' — start one before editing a turn`,
@@ -703,9 +924,9 @@ const ROUTES: Array<{
   {
     method: "GET",
     pattern: /^\/campaigns\/([^/]+)\/state$/,
-    async handler(_req, res, [campaignId]) {
-      const campaignDir = resolveCampaignDir(campaignId);
-      const active = activeSessions.get(campaignId);
+    async handler(_req, res, [campaignId], userId) {
+      const campaignDir = resolveCampaignDir(userId, campaignId);
+      const active = activeSessions.get(sessionKey(userId, campaignId));
       const snapshot = readStateSnapshot(campaignDir, active?.sessionLogPath);
       sendJson(res, 200, snapshot);
     },
@@ -713,16 +934,16 @@ const ROUTES: Array<{
   {
     method: "GET",
     pattern: /^\/campaigns\/([^/]+)\/settings$/,
-    async handler(_req, res, [campaignId]) {
-      const campaignDir = resolveCampaignDir(campaignId);
+    async handler(_req, res, [campaignId], userId) {
+      const campaignDir = resolveCampaignDir(userId, campaignId);
       sendJson(res, 200, readCampaignSettings(campaignDir));
     },
   },
   {
     method: "POST",
     pattern: /^\/campaigns\/([^/]+)\/settings$/,
-    async handler(req, res, [campaignId]) {
-      const campaignDir = resolveCampaignDir(campaignId);
+    async handler(req, res, [campaignId], userId) {
+      const campaignDir = resolveCampaignDir(userId, campaignId);
       const body = (await readJsonBody(req)) as Record<string, unknown>;
 
       const updates: {
@@ -812,8 +1033,8 @@ const ROUTES: Array<{
     // whose portrait came out wrong) can be fixed without remaking the campaign.
     method: "POST",
     pattern: /^\/campaigns\/([^/]+)\/character\/appearance$/,
-    async handler(req, res, [campaignId]) {
-      const campaignDir = resolveCampaignDir(campaignId);
+    async handler(req, res, [campaignId], userId) {
+      const campaignDir = resolveCampaignDir(userId, campaignId);
       const body = (await readJsonBody(req)) as Record<string, unknown>;
       if (typeof body.appearance !== "string") {
         sendJson(res, 400, { error: "appearance must be a string" });
@@ -835,8 +1056,8 @@ const ROUTES: Array<{
     // instead of a silent no-op.
     method: "POST",
     pattern: /^\/campaigns\/([^/]+)\/illustrate$/,
-    async handler(req, res, [campaignId]) {
-      const campaignDir = resolveCampaignDir(campaignId);
+    async handler(req, res, [campaignId], userId) {
+      const campaignDir = resolveCampaignDir(userId, campaignId);
       const body = (await readJsonBody(req)) as Record<string, unknown>;
       const settings = readCampaignSettings(campaignDir);
 
@@ -862,7 +1083,7 @@ const ROUTES: Array<{
       }
 
       if (body.kind === "moment") {
-        const active = activeSessions.get(campaignId);
+        const active = activeSessions.get(sessionKey(userId, campaignId));
         if (!active) {
           sendJson(res, 409, {
             error: `no active session for campaign '${campaignId}' — start one before illustrating a moment`,
@@ -902,8 +1123,8 @@ const ROUTES: Array<{
   {
     method: "GET",
     pattern: /^\/campaigns\/([^/]+)\/images\/([^/]+)$/,
-    async handler(_req, res, [campaignId, filename]) {
-      const campaignDir = resolveCampaignDir(campaignId);
+    async handler(_req, res, [campaignId, filename], userId) {
+      const campaignDir = resolveCampaignDir(userId, campaignId);
       const imagesDir = path.join(campaignDir, "images");
       const resolved = path.resolve(imagesDir, filename);
       // Same guard shape as resolveCampaignDir/serveStatic: the filename
@@ -1030,19 +1251,25 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    // Static assets (the SPA shell) are intentionally not gated on the
-    // header below — a browser's initial navigation to "/" can't attach a
-    // custom header, so the page has to load unauthenticated before the
-    // user can enter the passphrase into Settings. Only the API routes,
-    // which the SPA calls via fetch() with the header attached, are
-    // secret-gated.
-    if (req.headers[AUTH_HEADER] !== SHARED_SECRET) {
+    const params = route.pattern.exec(url.pathname)!.slice(1);
+
+    // Public routes (register/login) issue tokens and so run unauthenticated;
+    // static assets (the SPA shell) also load ungated — a browser's initial
+    // navigation to "/" can't attach a header, so the page has to load before
+    // the user can log in. ADR-0019: every other API route resolves the
+    // X-Chronicle-Token header to a user id (via the session index) and 401s
+    // if it's missing/unknown. The user id is then passed to the handler, which
+    // uses it to scope every campaign operation — it never comes from the URL.
+    if (route.public) {
+      await route.handler(req, res, params, "");
+      return;
+    }
+    const userId = resolveSession(req.headers[AUTH_HEADER] as string | undefined);
+    if (!userId) {
       sendJson(res, 401, { error: "missing or invalid auth token" });
       return;
     }
-
-    const params = route.pattern.exec(url.pathname)!.slice(1);
-    await route.handler(req, res, params);
+    await route.handler(req, res, params, userId);
   } catch (err) {
     if (err instanceof InvalidCampaignIdError) {
       sendJson(res, 400, { error: err.message });

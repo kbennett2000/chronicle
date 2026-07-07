@@ -6,6 +6,7 @@ import {
   getModels,
   startSession,
   updateCampaignSettings,
+  saveUserDefaults,
   type CampaignSettings,
   type ModelOption,
   type ProviderOption,
@@ -20,13 +21,14 @@ interface SettingsProps {
   connectionStatus: ConnectionStatus;
   onSaveConnection: (connection: Connection) => void;
   onTestConnection: () => void;
+  onLogout: () => void;
 }
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
   unchecked: "Not yet tested",
   checking: "Testing…",
   connected: "Connected to the hearth",
-  unauthorized: "Wrong passphrase",
+  unauthorized: "Session expired — log in again",
   unreachable: "Could not reach that address — check the IP and that both devices are on the same network",
   "origin-mismatch": "This page was loaded from a different address — reload the app from the address above",
 };
@@ -94,9 +96,9 @@ export function Settings({
   connectionStatus,
   onSaveConnection,
   onTestConnection,
+  onLogout,
 }: SettingsProps) {
   const [serverAddress, setServerAddress] = useState(connection.serverAddress);
-  const [passphrase, setPassphrase] = useState(connection.passphrase);
 
   const [models, setModels] = useState<ModelOption[]>([]);
   const [providers, setProviders] = useState<ProviderOption[]>([]);
@@ -106,6 +108,7 @@ export function Settings({
   const [modelSave, setModelSave] = useState<SaveState>("idle");
   const [lookSave, setLookSave] = useState<SaveState>("idle");
   const [worldSave, setWorldSave] = useState<SaveState>("idle");
+  const [defaultsSave, setDefaultsSave] = useState<SaveState>("idle");
 
   useEffect(() => {
     let cancelled = false;
@@ -168,6 +171,21 @@ export function Settings({
       setState("saved");
     } catch {
       setState("error");
+    }
+  }
+
+  /** ADR-0019: copy this game's engine/look/play settings into the user's
+   * account defaults, so every NEW chronicle starts from them. worldSetting is
+   * excluded — that's each game's own premise, typed fresh (ADR-0014). */
+  async function saveAsDefaults() {
+    if (!settings) return;
+    setDefaultsSave("saving");
+    try {
+      const { worldSetting: _world, ...rest } = settings;
+      await saveUserDefaults(connection, rest);
+      setDefaultsSave("saved");
+    } catch {
+      setDefaultsSave("error");
     }
   }
 
@@ -449,11 +467,85 @@ export function Settings({
           </>
         )}
 
+        {/* ACCOUNT DEFAULTS (ADR-0019): make this game's settings the baseline
+            for every new chronicle you start. Per-game settings above always
+            override these defaults. */}
+        {settings && (
+          <>
+            <div style={sectionHeadingStyle}>NEW-CHRONICLE DEFAULTS</div>
+            <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 8 }}>
+              Save this game's engine, look, and play settings as the defaults every
+              new chronicle you begin will start from. Each game can still override them.
+            </div>
+            <button
+              onClick={saveAsDefaults}
+              data-testid="save-defaults"
+              style={{
+                cursor: "pointer",
+                padding: "9px 14px",
+                borderRadius: 3,
+                background: "rgba(36,26,16,.6)",
+                border: "1px solid var(--brass-dim)",
+                color: "var(--ink-dim)",
+                fontFamily: "var(--font-display)",
+                fontSize: 11,
+                letterSpacing: 1.2,
+              }}
+            >
+              SAVE AS MY DEFAULTS
+            </button>
+            <div data-testid="defaults-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 6 }}>
+              {defaultsSave === "saving" && "Saving…"}
+              {defaultsSave === "saved" && "Saved as your defaults for new chronicles."}
+              {defaultsSave === "error" && "Couldn't save — try again."}
+            </div>
+          </>
+        )}
+
         {/* THE HEARTH */}
         <div style={sectionHeadingStyle}>THE HEARTH</div>
         <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 10 }}>
           Your phone only talks to your home server over the LAN — that
           server is what reaches out to Claude and Grok.
+        </div>
+
+        {/* ADR-0019: signed-in account. Passphrase is gone — identity is your
+            account now, obtained on the login screen. */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "10px 13px",
+            background: "rgba(12,8,5,.5)",
+            border: "1px solid rgba(109,90,56,.4)",
+            borderRadius: 4,
+            marginBottom: 12,
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 10.5, color: "var(--ink-dim)", letterSpacing: 1 }}>SIGNED IN AS</div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 14, color: "var(--ink)" }} data-testid="account-username">
+              {connection.username || "—"}
+            </div>
+          </div>
+          <button
+            onClick={onLogout}
+            data-testid="logout"
+            style={{
+              cursor: "pointer",
+              padding: "8px 14px",
+              borderRadius: 3,
+              background: "rgba(36,26,16,.6)",
+              border: "1px solid var(--brass-dim)",
+              color: "var(--ink-dim)",
+              fontFamily: "var(--font-display)",
+              fontSize: 11,
+              letterSpacing: 1.5,
+            }}
+          >
+            LOG OUT
+          </button>
         </div>
 
         <div style={{ fontSize: 11, color: "var(--ink-dim)", marginBottom: 4 }}>Server address</div>
@@ -463,8 +555,6 @@ export function Settings({
           placeholder="192.168.1.24:4317"
           style={textInputStyle}
         />
-        <div style={{ fontSize: 11, color: "var(--ink-dim)", margin: "11px 0 4px" }}>Passphrase</div>
-        <input value={passphrase} onChange={(e) => setPassphrase(e.target.value)} type="password" style={textInputStyle} />
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
@@ -492,7 +582,7 @@ export function Settings({
         <button
           data-testid="save-reconnect"
           disabled={connectionStatus === "checking"}
-          onClick={() => onSaveConnection({ serverAddress, passphrase })}
+          onClick={() => onSaveConnection({ ...connection, serverAddress })}
           style={{
             marginTop: 18,
             width: "100%",
@@ -509,10 +599,6 @@ export function Settings({
             letterSpacing: 1.5,
           }}
         >
-          {/* Issue #35: while checking, the button itself is the "working"
-              indicator; on success App navigates Home, and on failure the
-              status line above (next to TEST) shows the reason — so there's
-              always a visible response, and no duplicated status text. */}
           {connectionStatus === "checking" ? "RECONNECTING…" : "SAVE & RECONNECT"}
         </button>
       </div>

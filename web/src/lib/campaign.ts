@@ -186,6 +186,23 @@ export async function getNewGameDefaults(connection: Connection): Promise<Partia
   return result.settings;
 }
 
+/** ADR-0019: the signed-in user's *default* settings — the per-user baseline
+ * every new campaign inherits (seeded from .env at registration, editable here).
+ * Unlike a campaign patch, this accepts model/provider too. */
+export async function getUserDefaults(connection: Connection): Promise<Partial<CampaignSettings>> {
+  return (await apiFetch(connection, "/me/settings")) as Partial<CampaignSettings>;
+}
+
+export async function saveUserDefaults(
+  connection: Connection,
+  settings: Partial<CampaignSettings>
+): Promise<Partial<CampaignSettings>> {
+  return (await apiFetch(connection, "/me/settings", {
+    method: "POST",
+    body: JSON.stringify(settings),
+  })) as Partial<CampaignSettings>;
+}
+
 /** Mirrors src/campaign-store.ts's CampaignSummary — the Home chronicle list
  * (ADR-0010). */
 export interface CampaignSummary {
