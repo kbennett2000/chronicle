@@ -1,7 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { test, expect } from "./harness";
+import { test, expect, campaignDir } from "./harness";
 import { seedConnection } from "./connection";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -9,11 +9,11 @@ const REPO_ROOT = path.resolve(__dirname, "../../..");
 const PORTRAIT_FIXTURE = path.join(REPO_ROOT, "docs/design/handoff-2026-07/assets/portrait-wren.png");
 
 function writeNpcRoster(campaignId: string, markdown: string): void {
-  fs.writeFileSync(path.join(REPO_ROOT, "campaigns", campaignId, "npc-roster.md"), markdown);
+  fs.writeFileSync(campaignDir(campaignId, "npc-roster.md"), markdown);
 }
 
 function seedPortraitImage(campaignId: string, filename: string): void {
-  const imagesDir = path.join(REPO_ROOT, "campaigns", campaignId, "images");
+  const imagesDir = campaignDir(campaignId, "images");
   fs.mkdirSync(imagesDir, { recursive: true });
   fs.copyFileSync(PORTRAIT_FIXTURE, path.join(imagesDir, filename));
 }

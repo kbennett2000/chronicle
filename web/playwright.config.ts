@@ -15,4 +15,22 @@ export default defineConfig({
   use: {
     trace: "retain-on-failure",
   },
+  // ADR-0021: the app now branches layout at 900px. The original suite was
+  // written against the mobile layout (bottom-sheet panels, bottom tab bar) but
+  // ran at Playwright's 1280 default — which is now the *desktop* layout. Pin the
+  // main suite to a phone viewport so it keeps testing what it was written for,
+  // and put the desktop-only specs (desktop-*.spec.ts) in their own wide-viewport
+  // project.
+  projects: [
+    {
+      name: "mobile",
+      testIgnore: "**/desktop-*.spec.ts",
+      use: { viewport: { width: 390, height: 844 } },
+    },
+    {
+      name: "desktop",
+      testMatch: "**/desktop-*.spec.ts",
+      use: { viewport: { width: 1280, height: 800 } },
+    },
+  ],
 });

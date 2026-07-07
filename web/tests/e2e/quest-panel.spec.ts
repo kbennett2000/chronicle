@@ -1,14 +1,9 @@
-import path from "node:path";
 import fs from "node:fs";
-import { fileURLToPath } from "node:url";
-import { test, expect } from "./harness";
+import { test, expect, campaignDir } from "./harness";
 import { seedConnection } from "./connection";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, "../../..");
-
 function writeQuestLog(campaignId: string, markdown: string): void {
-  fs.writeFileSync(path.join(REPO_ROOT, "campaigns", campaignId, "quest-log.md"), markdown);
+  fs.writeFileSync(campaignDir(campaignId, "quest-log.md"), markdown);
 }
 
 async function openQuestPanel(page: import("@playwright/test").Page): Promise<void> {

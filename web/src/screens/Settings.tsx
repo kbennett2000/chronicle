@@ -13,6 +13,7 @@ import {
   type ResponseLength,
 } from "../lib/campaign";
 import { ToggleRow, ArtStylePicker } from "../components/LookControls";
+import { useIsDesktop } from "../lib/useIsDesktop";
 import { getMusicConfig, saveMusicSettings, type MusicConfig, type MusicSource } from "../lib/music";
 
 interface SettingsProps {
@@ -219,27 +220,35 @@ export function Settings({
 
   const dotColor = connectionStatus === "connected" ? "var(--arcane)" : "var(--ember)";
 
+  // ADR-0021: cap and center the settings column on desktop; trim the phone
+  // status-bar top inset on the header.
+  const isDesktop = useIsDesktop();
+  const columnStyle = isDesktop ? { width: "100%", maxWidth: 720, margin: "0 auto" } : {};
+
   return (
     <div className="screen leather-ground">
       <div
         style={{
           flexShrink: 0,
-          padding: "54px 16px 12px",
+          padding: isDesktop ? "22px 16px 12px" : "54px 16px 12px",
           display: "flex",
           alignItems: "center",
           gap: 10,
           borderBottom: "1px solid rgba(109,90,56,.3)",
         }}
       >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, ...columnStyle }}>
         <button className="icon-button" data-testid="settings-back" onClick={onBack}>
           <span className="back-chevron" />
         </button>
         <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, letterSpacing: 2, color: "var(--ink)" }}>
           SETTINGS
         </div>
+        </div>
       </div>
 
       <div className="cx-scroll" style={{ flex: 1, overflowY: "auto", padding: "20px 18px 40px" }}>
+        <div style={columnStyle}>
         {/* THE ENGINE */}
         <div style={{ ...sectionHeadingStyle, margin: "2px 0 4px" }}>THE ENGINE</div>
         {!settings ? (
@@ -707,6 +716,7 @@ export function Settings({
         >
           {connectionStatus === "checking" ? "RECONNECTING…" : "SAVE & RECONNECT"}
         </button>
+        </div>
       </div>
     </div>
   );

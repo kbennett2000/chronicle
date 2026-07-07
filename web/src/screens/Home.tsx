@@ -4,6 +4,7 @@ import type { Connection } from "../lib/connection";
 import { getState, listCampaigns, startSession, deleteCampaign, type CampaignSummary, type StateSnapshot } from "../lib/campaign";
 import { findMarkdownSection } from "../lib/markdown";
 import { CURRENT_SITUATION_HEADING } from "../lib/state-headings";
+import { useIsDesktop } from "../lib/useIsDesktop";
 
 interface HomeProps {
   connection: Connection;
@@ -123,9 +124,15 @@ export function Home({
   const situation =
     load.status === "ready" ? findMarkdownSection(load.snapshot.worldState, CURRENT_SITUATION_HEADING)?.body : undefined;
 
+  // ADR-0021: on desktop, cap and center the content so it doesn't stretch
+  // edge-to-edge, and trim the phone status-bar top inset.
+  const isDesktop = useIsDesktop();
+  const columnStyle = isDesktop ? { width: "100%", maxWidth: 780, margin: "0 auto" } : {};
+
   return (
     <div className="screen leather-ground">
-      <div className="cx-scroll" style={{ flex: 1, overflowY: "auto", padding: "66px 22px 30px" }}>
+      <div className="cx-scroll" style={{ flex: 1, overflowY: "auto", padding: isDesktop ? "34px 22px 30px" : "66px 22px 30px" }}>
+        <div style={columnStyle}>
         <div style={{ textAlign: "center", marginBottom: 8 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12 }}>
             <div style={{ height: 1, width: 34, background: "linear-gradient(90deg,transparent,var(--brass-dim))" }} />
@@ -333,6 +340,7 @@ export function Home({
             ))}
           </div>
         )}
+        </div>
       </div>
 
       <div
@@ -344,6 +352,7 @@ export function Home({
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          ...columnStyle,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>

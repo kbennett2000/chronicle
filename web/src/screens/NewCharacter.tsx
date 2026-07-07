@@ -13,6 +13,7 @@ import {
 } from "../lib/campaign";
 import { ToggleRow, ArtStylePicker } from "../components/LookControls";
 import { SKILLS } from "../lib/character-derive";
+import { useIsDesktop } from "../lib/useIsDesktop";
 
 interface NewCharacterProps {
   connection: Connection;
@@ -285,27 +286,35 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
     }
   }
 
+  // ADR-0021: cap and center the creation form on desktop; trim the phone
+  // status-bar top inset on the header.
+  const isDesktop = useIsDesktop();
+  const columnStyle = isDesktop ? { width: "100%", maxWidth: 720, margin: "0 auto" } : {};
+
   return (
     <div className="screen leather-ground">
       <div
         style={{
           flexShrink: 0,
-          padding: "54px 16px 12px",
+          padding: isDesktop ? "22px 16px 12px" : "54px 16px 12px",
           display: "flex",
           alignItems: "center",
           gap: 10,
           borderBottom: "1px solid rgba(109,90,56,.3)",
         }}
       >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, ...columnStyle }}>
         <button className="icon-button" data-testid="newchar-back" onClick={onCancel}>
           <span className="back-chevron" />
         </button>
         <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, letterSpacing: 2, color: "var(--ink)" }}>
           NEW CHRONICLE
         </div>
+        </div>
       </div>
 
       <div className="cx-scroll" style={{ flex: 1, overflowY: "auto", padding: "18px 18px 40px" }}>
+        <div style={columnStyle}>
         <div style={labelStyle}>Name</div>
         <input
           value={name}
@@ -737,6 +746,7 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
             {error}
           </div>
         )}
+        </div>
       </div>
     </div>
   );
