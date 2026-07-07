@@ -11,6 +11,16 @@ import { stripMetaChatter } from "../narration.js";
 
 const execFileAsync = promisify(execFile);
 
+/** The single grok invocation, narrowed to what this backend passes and reads.
+ * Injectable so the retry logic can be unit-tested without spawning `grok`. */
+export type GrokExec = (
+  file: "grok",
+  args: string[],
+  options: { timeout: number; killSignal: NodeJS.Signals; maxBuffer: number }
+) => Promise<{ stdout: string; stderr: string }>;
+
+const defaultExec = execFileAsync as unknown as GrokExec;
+
 /** DM turns run a full agentic loop (read state, narrate, update several files),
  * which on grok-build measured ~2-2.5 min in the Slice 0 spike. Give generous
  * headroom; SIGKILL on overrun so a stuck turn can't hold the socket forever. */
@@ -54,50 +64,34 @@ function writeGrokConfig(campaignDir: string, settings: CampaignSettings): void 
   fs.writeFileSync(path.join(grokDir, "config.toml"), blocks.join("\n") + "\n");
 }
 
-/** Grok's headless flags, finalized in the Slice 0 spike (see ADR-0018):
- * --system-prompt-override carries the full DM prompt (no 10K cap); --sandbox
- * workspace confines writes to campaignDir while allowing SRD reads and blocking
- * repo/.git writes; run_terminal_cmd removed so no shell/git; --always-approve
- * for unattended file edits. No --effort (both grok models reject it). */
-async function runGrokTurn(args: RunTurnArgs): Promise<TurnResult> {
-  const { campaignDir, sessionLogPath, userInput, resumeSessionId, model, settings } = args;
-  const character = readCharacterIdentity(campaignDir);
-  const sysPrompt = systemPrompt(campaignDir, sessionLogPath, settings, character, GROK_TOOL_NAMES);
+/** The outcome of a single grok invocation, classified so the caller can decide
+ * whether a retry is warranted. `retryable` marks the intermittent
+ * silent-turn/garbled-output case (issue #100) — as opposed to a terminal
+ * spawn/timeout/non-zero failure, which retrying wouldn't help. */
+interface GrokAttempt {
+  text: string;
+  sessionId: string | undefined;
+  /** No usable narration came back (empty `.text` or unparseable output). */
+  retryable: boolean;
+  /** The exec itself failed (ENOENT/timeout/non-zero); not the same as a
+   * successful-but-silent turn, and never retried. */
+  terminal: boolean;
+}
 
-  writeGrokConfig(campaignDir, settings);
-
-  // Reuse the persisted session on resume; otherwise mint a UUID grok will
-  // create the session under, and hand it back so the server persists it.
-  const newSessionId = randomUUID();
-  const grokArgs = [
-    "-p",
-    userInput,
-    "--cwd",
-    campaignDir,
-    "-m",
-    model,
-    "--output-format",
-    "json",
-    "--system-prompt-override",
-    sysPrompt,
-    "--sandbox",
-    "workspace",
-    "--disallowed-tools",
-    "run_terminal_cmd",
-    "--always-approve",
-    "--no-plan",
-    "--no-subagents",
-    "--disable-web-search",
-  ];
-  if (resumeSessionId) {
-    grokArgs.push("--resume", resumeSessionId);
-  } else {
-    grokArgs.push("--session-id", newSessionId);
-  }
-
+/** Run one headless grok turn and parse its single JSON blob
+ * ({ text, stopReason, sessionId, ... }). `.text` is the clean narration; file
+ * edits are disk side effects. Classifies the result but does not decide policy
+ * — the caller owns retry/error handling. */
+async function attemptGrokTurn(
+  grokArgs: string[],
+  campaignDir: string,
+  model: string,
+  fallbackSessionId: string | undefined,
+  execFn: GrokExec
+): Promise<GrokAttempt> {
   let stdout: string;
   try {
-    const result = await execFileAsync("grok", grokArgs, {
+    const result = await execFn("grok", grokArgs, {
       timeout: GROK_TURN_TIMEOUT_MS,
       killSignal: "SIGKILL",
       maxBuffer: 20 * 1024 * 1024,
@@ -115,42 +109,114 @@ async function runGrokTurn(args: RunTurnArgs): Promise<TurnResult> {
     return {
       text: `[DM engine error: ${reason}]`,
       // Keep the resume id on failure so the next attempt can continue the session.
-      sessionId: resumeSessionId,
-      isError: true,
-      model,
-      requestedModel: model,
+      sessionId: fallbackSessionId,
+      retryable: false,
+      terminal: true,
     };
   }
 
-  // Headless grok returns one JSON blob: { text, stopReason, sessionId, ... }.
-  // `.text` is the clean narration; file edits are disk side effects.
-  let text = "";
-  let sessionId: string | undefined = resumeSessionId ?? newSessionId;
-  let isError = false;
+  let sessionId = fallbackSessionId;
   try {
     const parsed = JSON.parse(stdout) as { text?: unknown; sessionId?: unknown; stopReason?: unknown };
-    text = typeof parsed.text === "string" ? parsed.text : "";
+    const text = typeof parsed.text === "string" ? parsed.text : "";
     if (typeof parsed.sessionId === "string" && parsed.sessionId) {
       sessionId = parsed.sessionId;
     }
-    // A run that produced no narration is treated as an engine error so the
-    // route returns 502 rather than persisting an empty turn.
     if (!text.trim()) {
-      isError = true;
-      text = `[DM engine error: grok returned no narration (stopReason=${String(parsed.stopReason)})]`;
+      return {
+        text: `[DM engine error: grok returned no narration (stopReason=${String(parsed.stopReason)})]`,
+        sessionId,
+        retryable: true,
+        terminal: false,
+      };
     }
+    return { text, sessionId, retryable: false, terminal: false };
   } catch {
-    isError = true;
-    text = `[DM engine error: could not parse grok output]\n${stdout.slice(0, 500)}`;
+    return {
+      text: `[DM engine error: could not parse grok output]\n${stdout.slice(0, 500)}`,
+      sessionId,
+      retryable: true,
+      terminal: false,
+    };
+  }
+}
+
+/** Grok's headless flags, finalized in the Slice 0 spike (see ADR-0018):
+ * --system-prompt-override carries the full DM prompt (no 10K cap); --sandbox
+ * workspace confines writes to campaignDir while allowing SRD reads and blocking
+ * repo/.git writes; run_terminal_cmd removed so no shell/git; --always-approve
+ * for unattended file edits. No --effort (both grok models reject it).
+ *
+ * `execFn` is injectable for testing; production uses the real `grok` CLI. */
+export async function runGrokTurn(args: RunTurnArgs, execFn: GrokExec = defaultExec): Promise<TurnResult> {
+  const { campaignDir, sessionLogPath, userInput, resumeSessionId, model, settings } = args;
+  const character = readCharacterIdentity(campaignDir);
+  const sysPrompt = systemPrompt(campaignDir, sessionLogPath, settings, character, GROK_TOOL_NAMES);
+
+  writeGrokConfig(campaignDir, settings);
+
+  // Reuse the persisted session on resume; otherwise mint a UUID grok will
+  // create the session under, and hand it back so the server persists it.
+  const newSessionId = randomUUID();
+  const buildArgs = (input: string, resume: string | undefined): string[] => {
+    const a = [
+      "-p", input,
+      "--cwd", campaignDir,
+      "-m", model,
+      "--output-format", "json",
+      "--system-prompt-override", sysPrompt,
+      "--sandbox", "workspace",
+      "--disallowed-tools", "run_terminal_cmd",
+      "--always-approve",
+      "--no-plan",
+      "--no-subagents",
+      "--disable-web-search",
+    ];
+    if (resume) a.push("--resume", resume);
+    else a.push("--session-id", newSessionId);
+    return a;
+  };
+
+  let attempt = await attemptGrokTurn(
+    buildArgs(userInput, resumeSessionId),
+    campaignDir,
+    model,
+    resumeSessionId ?? newSessionId,
+    execFn
+  );
+
+  // Issue #100: grok-build (and, less often, composer) intermittently completes
+  // a DM turn through tool/file edits alone — reading state, generating images —
+  // and ends with no narration in `.text`, which would strand the campaign at 0
+  // turns. Retry ONCE, resuming the session this attempt just created so it
+  // continues the same context, with a nudge that forces the scene into the
+  // reply text. Terminal exec failures are not retried.
+  if (attempt.retryable) {
+    console.error(`[grok-backend] no narration for ${campaignDir}; retrying once with a prose-forcing nudge`);
+    const nudge =
+      `${userInput}\n\n(Write the scene now as narrated prose in your reply text. ` +
+      `Do not answer only through tool calls or file edits.)`;
+    const retry = await attemptGrokTurn(
+      buildArgs(nudge, attempt.sessionId),
+      campaignDir,
+      model,
+      attempt.sessionId ?? newSessionId,
+      execFn
+    );
+    console.error(
+      `[grok-backend] retry for ${campaignDir} ${retry.retryable || retry.terminal ? "still produced no narration" : "succeeded"}`
+    );
+    attempt = retry;
   }
 
+  const isError = attempt.retryable || attempt.terminal;
   const cleaned = isError
-    ? text
-    : stripMetaChatter(text, { autoRoll: settings.autoRollDice !== false });
+    ? attempt.text
+    : stripMetaChatter(attempt.text, { autoRoll: settings.autoRollDice !== false });
 
   // Grok's JSON carries no per-message model echo like Claude's, so requested
   // and actual collapse (ADR-0018).
-  return { text: cleaned, sessionId, isError, model, requestedModel: model };
+  return { text: cleaned, sessionId: attempt.sessionId, isError, model, requestedModel: model };
 }
 
 export const grokBackend: DmBackend = {

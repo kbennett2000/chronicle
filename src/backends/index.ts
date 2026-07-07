@@ -2,8 +2,9 @@ import type { DmBackend, ProviderId } from "../dm-backend.js";
 import { claudeBackend } from "./claude-backend.js";
 import { grokBackend } from "./grok-backend.js";
 
-/** Registry of DM backends keyed by provider (ADR-0018). The Grok backend is a
- * stub until Slice 4 (it throws if selected). */
+/** Registry of DM backends keyed by provider (ADR-0018). Both backends are
+ * fully implemented: Claude via the in-process Agent SDK, Grok via the headless
+ * CLI (grok-backend.ts). */
 const BACKENDS: Record<ProviderId, DmBackend> = {
   claude: claudeBackend,
   grok: grokBackend,
