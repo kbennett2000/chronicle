@@ -110,6 +110,8 @@ export function GameMusicPopover({ connection, campaignId, onChanged }: GameMusi
             </div>
             {effective ? (
               <MusicOverrideEditor
+                connection={connection}
+                campaignId={campaignId}
                 override={override}
                 effective={effective}
                 onPatch={patch}

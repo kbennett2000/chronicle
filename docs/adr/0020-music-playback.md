@@ -93,3 +93,34 @@ settings already use (engine/look/world, ADR-0019).
    editors and in-game playback resolve the per-game config. The override is
    editable both in the campaign-scoped section of Settings and inline beside the
    Active-Play transport controls (so it can be changed mid-session, per #109).
+
+## Amendment — playlist discovery (issue #110)
+
+The Navidrome playlist was a free-text field the player had to type from memory,
+in both the account default and the per-game override. #110 asks for a dropdown
+of the available playlists instead.
+
+1. **Live from Navidrome, not an app-side registry.** All users share one
+   Navidrome server (credentials are server-side in `.env`), and the Subsonic
+   `getPlaylists` call already made inside `navidromePlaylistTracks` returns every
+   playlist with its `name` and `comment` (description). So the dropdown is
+   populated **live** from the server (`navidromePlaylists()` +
+   `GET /music/navidrome/playlists`, threading `?campaignId=` like the other music
+   routes). No accreted cross-user registry, no persistence, and every option is a
+   real, current, self-validating playlist. The registry-accretion the issue
+   originally proposed was a workaround for not being able to enumerate playlists —
+   which we can.
+
+2. **Curation via the description tag.** Only playlists whose Navidrome
+   description contains the word **"chronicle"** (case-insensitive; the
+   `PLAYLIST_TAG` constant) are offered. Publishing a playlist to Chronicle players
+   is thus a Navidrome-side act — tag its description — keeping unrelated personal
+   playlists off the list without any app UI to manage. (Hardcoded for now; an
+   env-configurable tag is a trivial future extension.)
+
+3. **Free-text fallback preserved.** The picker (`PlaylistPicker`, modeled on the
+   existing pick-or-type `ArtStylePicker`) is a `<select>` of tagged names plus an
+   "add your own" option, and falls back to a plain text field when Navidrome is
+   unreachable. A stored name that isn't among the tagged set still shows as
+   selected. The hard guard stays `navidromePlaylistTracks`, which throws a
+   "playlist not found" at play time for a bad name.

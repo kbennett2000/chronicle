@@ -87,6 +87,7 @@ import {
   parseMusicBlock,
   navidromeCreds,
   navidromePlaylistTracks,
+  navidromePlaylists,
   navidromeStreamUrl,
   MUSIC_CONTENT_TYPES,
   type UserMusic,
@@ -482,6 +483,27 @@ const ROUTES: Array<{
       }
       try {
         sendJson(res, 200, { tracks: await navidromePlaylistTracks(creds) });
+      } catch (err) {
+        sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  },
+  {
+    // #110: the chronicle-tagged playlist NAMES on the shared server, for the
+    // picker dropdown. Same guard as the singular /playlist route above; threads
+    // ?campaignId= so a per-game Navidrome URL override resolves the right server.
+    method: "GET",
+    pattern: /^\/music\/navidrome\/playlists$/,
+    async handler(req, res, _params, userId) {
+      const creds = navidromeCreds(
+        resolveMusicConfig(userMusic(userId), campaignMusic(userId, musicCampaignId(req)))
+      );
+      if (!creds) {
+        sendJson(res, 400, { error: "Navidrome is not configured — set NAVIDROME_URL/USER/PASSWORD in .env" });
+        return;
+      }
+      try {
+        sendJson(res, 200, { playlists: await navidromePlaylists(creds) });
       } catch (err) {
         sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) });
       }

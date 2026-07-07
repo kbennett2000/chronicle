@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
 import { ToggleRow } from "./LookControls";
+import { PlaylistPicker } from "./PlaylistPicker";
+import type { Connection } from "../lib/connection";
 import type { MusicConfig, MusicOverride, MusicSource } from "../lib/music";
 
 // Issue #109 / ADR-0020 (amended): the per-game music override editor, shared by
@@ -16,6 +17,10 @@ import type { MusicConfig, MusicOverride, MusicSource } from "../lib/music";
 // (URL is a LAN/server concern left to the account default and inherited).
 
 interface MusicOverrideEditorProps {
+  /** For the playlist picker's live Navidrome lookup (#110). */
+  connection: Connection;
+  /** null for the account default; a campaign id for per-game editors. */
+  campaignId: string | null;
   /** The stored per-game override (settings.music), or undefined when absent. */
   override: MusicOverride | undefined;
   /** The effective, campaign-resolved config (campaign → user → .env). Drives the
@@ -40,15 +45,16 @@ const pillBase = {
   color: "var(--ink)",
 };
 
-export function MusicOverrideEditor({ override, effective, onPatch, onReset, compact }: MusicOverrideEditorProps) {
+export function MusicOverrideEditor({
+  connection,
+  campaignId,
+  override,
+  effective,
+  onPatch,
+  onReset,
+  compact,
+}: MusicOverrideEditorProps) {
   const hasOverride = !!override && Object.keys(override).length > 0;
-  const [playlist, setPlaylist] = useState(effective.navidrome.playlist);
-
-  // Keep the playlist buffer in step when the effective config reloads (a save
-  // round-trips, or the popover reopens on a different game).
-  useEffect(() => {
-    setPlaylist(effective.navidrome.playlist);
-  }, [effective.navidrome.playlist]);
 
   function enableOverride(on: boolean) {
     if (!on) {
@@ -120,24 +126,12 @@ export function MusicOverrideEditor({ override, effective, onPatch, onReset, com
                     Navidrome playlist{" "}
                     <span style={{ color: "var(--ink-faint)" }}>— leave blank to use your account playlist</span>
                   </div>
-                  <input
-                    data-testid="game-music-playlist"
-                    value={playlist}
-                    onChange={(e) => setPlaylist(e.target.value)}
-                    onBlur={() => playlist !== effective.navidrome.playlist && onPatch({ navidromePlaylist: playlist })}
-                    placeholder="playlist name for this game"
-                    style={{
-                      width: "100%",
-                      boxSizing: "border-box",
-                      background: "rgba(12,8,5,.5)",
-                      border: "1px solid rgba(109,90,56,.4)",
-                      borderRadius: 4,
-                      padding: "8px 12px",
-                      color: "var(--ink)",
-                      fontFamily: "var(--font-body)",
-                      fontSize: 13,
-                      outline: "none",
-                    }}
+                  {/* #110: pick from the chronicle-tagged playlists (or add your own). */}
+                  <PlaylistPicker
+                    connection={connection}
+                    campaignId={campaignId}
+                    value={effective.navidrome.playlist}
+                    onChange={(name) => name !== effective.navidrome.playlist && onPatch({ navidromePlaylist: name })}
                   />
                   {!effective.navidrome.configured && (
                     <div style={{ fontSize: 11, color: "var(--ember)", marginTop: 5 }}>
