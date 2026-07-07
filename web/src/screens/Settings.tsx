@@ -19,7 +19,8 @@ import { getMusicConfig, saveMusicSettings, type MusicConfig, type MusicSource }
 interface SettingsProps {
   onBack: () => void;
   connection: Connection;
-  campaignId: string;
+  /** null when the player has no active campaign yet (issue #97). */
+  campaignId: string | null;
   connectionStatus: ConnectionStatus;
   onSaveConnection: (connection: Connection) => void;
   onTestConnection: () => void;
@@ -130,10 +131,10 @@ export function Settings({
       })
       .catch(() => {});
     // #96: fetch models and campaign settings independently. They were coupled in
-    // one Promise.all with an empty .catch(), so a settings 404 (a brand-new user
-    // with no campaign — campaignId falls back to the "test-campaign" fixture that
-    // doesn't exist under their account) rejected the whole chain and left
-    // `settings` null forever, showing the infinite "Reading campaign settings…".
+    // one Promise.all with an empty .catch(), so a settings 404 (a user with no
+    // such campaign) rejected the whole chain and left `settings` null forever,
+    // showing the infinite "Reading campaign settings…". Since #97, campaignId is
+    // null (not a fixture) when there's no game — handled just below.
     getModels(connection)
       .then((modelsResult) => {
         if (cancelled) return;
@@ -141,6 +142,15 @@ export function Settings({
         setProviders(modelsResult.providers);
       })
       .catch(() => {});
+    // No active campaign (issue #97): skip the fetch — /campaigns/null/settings
+    // would just 404 — and go straight to the no-campaign empty state.
+    if (!campaignId) {
+      setSettings(null);
+      setSettingsStatus("no-campaign");
+      return () => {
+        cancelled = true;
+      };
+    }
     setSettingsStatus("loading");
     getCampaignSettings(connection, campaignId)
       .then((settingsResult) => {
@@ -164,6 +174,7 @@ export function Settings({
   }, [connection, campaignId]);
 
   async function pickModel(modelId: string) {
+    if (!campaignId) return;
     setModelSave("saving");
     try {
       // Model-only: the clicked model always belongs to the currently-selected
@@ -184,6 +195,7 @@ export function Settings({
    * if it already belongs) — then trust the resolved {provider, model} pair it
    * returns rather than guessing client-side. */
   async function pickProvider(providerId: string) {
+    if (!campaignId) return;
     if (settings?.provider === providerId) return;
     setModelSave("saving");
     try {
@@ -196,6 +208,7 @@ export function Settings({
   }
 
   async function patchSettings(patch: Parameters<typeof updateCampaignSettings>[2], setState: (s: SaveState) => void) {
+    if (!campaignId) return;
     setState("saving");
     try {
       const next = await updateCampaignSettings(connection, campaignId, patch);

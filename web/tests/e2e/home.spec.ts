@@ -51,3 +51,25 @@ test.describe("Home screen — connected state", () => {
     await expect(page.getByTestId("auth-username")).toBeVisible();
   });
 });
+
+// #97: a stale ?campaign= link or a deleted game (e.g. Kris's `qroky-qrok`) used
+// to dead-end Home on a raw "Couldn't read this campaign" error. It now drops to
+// a recoverable empty state, with the user's real chronicles listed below to
+// pick from in a tap.
+test.describe("Home screen — unknown campaign recovers gracefully (#97)", () => {
+  test("a 404 active campaign shows the recoverable empty state, not an error", async ({
+    page,
+    chronicleServer,
+  }) => {
+    await seedConnection(page, chronicleServer.baseURL, chronicleServer.token);
+    await page.goto(`${chronicleServer.baseURL}/?campaign=zz-no-such-campaign`);
+
+    // No raw error card; instead the recoverable empty state...
+    await expect(page.getByTestId("home-no-campaign")).toBeVisible();
+    await expect(page.getByText("Couldn't read this campaign")).toHaveCount(0);
+    // ...worded for a user who does have chronicles, just not this one...
+    await expect(page.getByTestId("home-no-campaign")).toContainText("choose one below");
+    // ...and the user's real chronicle is listed below to recover in one tap.
+    await expect(page.getByTestId("other-chronicle").first()).toBeVisible();
+  });
+});

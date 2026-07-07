@@ -13,7 +13,7 @@ import {
   clearConnection,
   type Connection,
 } from "./lib/connection";
-import { getCampaignId } from "./lib/campaign";
+import { getCampaignId, listCampaigns } from "./lib/campaign";
 
 type Screen = "home" | "play" | "settings" | "newcharacter" | "auth";
 
@@ -42,8 +42,14 @@ export function App() {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("unchecked");
   // Now stateful (ADR-0010): seeded from ?campaign= (still wins when present,
   // keeping existing links + the e2e harness working) but switchable in-app by
-  // picking a chronicle on Home or creating a new one.
-  const [campaignId, setCampaignId] = useState(getCampaignId());
+  // picking a chronicle on Home or creating a new one. Issue #97: when no
+  // ?campaign= is given it starts null (no longer the `test-campaign` fixture)
+  // and is resolved to the user's own first campaign once connected.
+  const [campaignId, setCampaignId] = useState<string | null>(getCampaignId());
+  // True while we're still resolving which campaign to show, so Home renders a
+  // loading state rather than flashing the "no chronicle yet" empty state for a
+  // returning player. Starts true exactly when there's nothing to show yet.
+  const [resolvingCampaign, setResolvingCampaign] = useState<boolean>(getCampaignId() === null);
 
   // Set by "Save & Reconnect" (issue #35): a deliberate reconnect from
   // Settings should, on success, drop the player back on Home rather than
@@ -74,6 +80,32 @@ export function App() {
       pendingReconnect.current = false;
     });
   }, [connection]);
+
+  // Issue #97: once connected, if no campaign is selected (no ?campaign=), adopt
+  // the user's own first campaign from GET /campaigns. Zero campaigns leaves it
+  // null, which Home renders as a first-run empty state — instead of the old
+  // fixture fallback that 404'd for every real account.
+  useEffect(() => {
+    if (connectionStatus !== "connected") return;
+    if (campaignId !== null) {
+      setResolvingCampaign(false);
+      return;
+    }
+    let cancelled = false;
+    setResolvingCampaign(true);
+    listCampaigns(connection)
+      .then((all) => {
+        if (cancelled) return;
+        if (all.length > 0) setCampaignId(all[0].id);
+        setResolvingCampaign(false);
+      })
+      .catch(() => {
+        if (!cancelled) setResolvingCampaign(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connection, connectionStatus, campaignId]);
 
   function handleAuthenticated(next: Connection) {
     pendingReconnect.current = true;
@@ -119,6 +151,7 @@ export function App() {
         <Home
           connection={connection}
           campaignId={campaignId}
+          campaignResolving={resolvingCampaign}
           connectionStatus={connectionStatus}
           onContinue={() => setScreen("play")}
           onEnterCampaign={(id) => {
@@ -130,7 +163,7 @@ export function App() {
           onOpenSettings={() => setScreen("settings")}
         />
       )}
-      {screen === "play" && (
+      {screen === "play" && campaignId && (
         <Play connection={connection} campaignId={campaignId} onGoHome={() => setScreen("home")} />
       )}
       {screen === "newcharacter" && (

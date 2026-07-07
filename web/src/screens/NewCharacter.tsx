@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Connection } from "../lib/connection";
 import {
   createCampaign,
@@ -255,6 +255,43 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
     missing.push(`${need} more expertise pick${need === 1 ? "" : "s"}`);
   }
 
+  // Issue #97: the button used to be a dead `disabled` element — a tap did
+  // nothing and, on a long form, the blocking field could be far off-screen. It
+  // now stays tappable and, when requirements are unmet, jumps to the first
+  // blocking section and flashes it so "why can't I start?" answers itself.
+  const nameRef = useRef<HTMLInputElement>(null);
+  const abilitiesRef = useRef<HTMLDivElement>(null);
+  const skillsRef = useRef<HTMLDivElement>(null);
+  const expertiseRef = useRef<HTMLDivElement>(null);
+  const [flash, setFlash] = useState<null | "name" | "abilities" | "skills" | "expertise">(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+  }, []);
+  function guideTo(section: "name" | "abilities" | "skills" | "expertise", ref: { current: HTMLElement | null }) {
+    ref.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFlash(section);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlash(null), 1500);
+  }
+  /** A transient ember ring on the section a blocked tap points the user to. */
+  const flashRing = (section: typeof flash) =>
+    flash === section
+      ? { boxShadow: "0 0 0 2px var(--ember)", borderRadius: 6, transition: "box-shadow .2s ease" }
+      : { transition: "box-shadow .2s ease" };
+  /** BEGIN THE TALE: create when ready, else guide to the first missing piece.
+   * Order mirrors `canCreate`/`missing`: name → ability budget → skills → expertise. */
+  function handleBegin() {
+    if (canCreate) {
+      void submit();
+      return;
+    }
+    if (name.trim().length === 0) return guideTo("name", nameRef);
+    if (remaining < 0) return guideTo("abilities", abilitiesRef);
+    if (!skillsComplete) return guideTo("skills", skillsRef);
+    if (!expertiseComplete) return guideTo("expertise", expertiseRef);
+  }
+
   async function submit() {
     if (!canCreate) return;
     setCreating(true);
@@ -333,11 +370,12 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
         <div style={columnStyle}>
         <div style={labelStyle}>Name</div>
         <input
+          ref={nameRef}
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. Kira Emberfall"
           data-testid="newchar-name"
-          style={inputStyle}
+          style={{ ...inputStyle, ...flashRing("name") }}
         />
 
         <div style={labelStyle}>Ancestry</div>
@@ -368,7 +406,7 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
           Used to generate portraits and scenes that look like your character. You can edit this later.
         </div>
 
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "22px 0 6px" }}>
+        <div ref={abilitiesRef} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "22px 0 6px", padding: 2, ...flashRing("abilities") }}>
           <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2, color: "var(--brass)" }}>ABILITIES</div>
           <div data-testid="newchar-points" style={{ fontSize: 11.5, color: remaining === 0 ? "var(--ink-faint)" : "var(--ember)" }}>
             {remaining} points to spend
@@ -426,7 +464,7 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
         </div>
 
         {/* Issue #67: class saving throws (derived) and skill picks (chosen). */}
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "26px 0 4px" }}>
+        <div ref={skillsRef} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "26px 0 4px", padding: 2, ...flashRing("skills") }}>
           <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2, color: "var(--brass)" }}>SKILLS</div>
           <div data-testid="newchar-skills-remaining" style={{ fontSize: 11.5, color: skillsComplete ? "var(--ink-faint)" : "var(--ember)" }}>
             choose {skillChoice.choose - skillProficiencies.length} more
@@ -465,7 +503,7 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
 
         {expertiseCount > 0 && (
           <>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "18px 0 4px" }}>
+            <div ref={expertiseRef} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "18px 0 4px", padding: 2, ...flashRing("expertise") }}>
               <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2, color: "var(--brass)" }}>EXPERTISE</div>
               <div style={{ fontSize: 11.5, color: expertiseComplete ? "var(--ink-faint)" : "var(--ember)" }}>
                 choose {expertiseCount - expertise.length} more
@@ -735,9 +773,14 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
           })}
         </div>
 
+        {/* Issue #97: deliberately NOT a `disabled`/`aria-disabled` button — a
+            disabled element eats the tap (and assistive tech/tooling won't
+            activate it), so a blocked user got no feedback. It stays a normal,
+            dimmed-when-not-ready button; handleBegin either creates or scrolls to
+            the first blocker. aria-describedby points AT to what's still missing. */}
         <button
-          onClick={submit}
-          disabled={!canCreate}
+          onClick={handleBegin}
+          aria-describedby={!canCreate && missing.length > 0 ? "newchar-missing" : undefined}
           data-testid="newchar-create"
           style={{
             marginTop: 22,
@@ -759,6 +802,7 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
         </button>
         {!creating && missing.length > 0 && (
           <div
+            id="newchar-missing"
             data-testid="newchar-missing"
             style={{ marginTop: 10, fontSize: 12, color: "var(--ember)", textAlign: "center", lineHeight: 1.4 }}
           >
