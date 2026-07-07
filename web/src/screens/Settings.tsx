@@ -1,36 +1,31 @@
 import { useEffect, useState } from "react";
 import type { Connection } from "../lib/connection";
-import { ApiError, type ConnectionStatus } from "../lib/api";
+import { type ConnectionStatus } from "../lib/api";
 import {
-  getCampaignSettings,
   getModels,
-  startSession,
-  updateCampaignSettings,
+  getUserDefaults,
   saveUserDefaults,
   type CampaignSettings,
+  type CampaignSettingsPatch,
   type ModelOption,
   type ProviderOption,
-  type ResponseLength,
 } from "../lib/campaign";
-import { ToggleRow, ArtStylePicker } from "../components/LookControls";
-import { MusicOverrideEditor } from "../components/MusicOverrideEditor";
+import { ToggleRow } from "../components/LookControls";
+import { EnginePicker } from "../components/EnginePicker";
+import { LookSettingsEditor } from "../components/LookSettingsEditor";
+import { WorldSettingsEditor } from "../components/WorldSettingsEditor";
 import { PlaylistPicker } from "../components/PlaylistPicker";
 import { useIsDesktop } from "../lib/useIsDesktop";
 import {
   getMusicConfig,
   saveMusicSettings,
-  saveCampaignMusicSettings,
-  resetCampaignMusicSettings,
   type MusicConfig,
-  type MusicOverride,
   type MusicSource,
 } from "../lib/music";
 
 interface SettingsProps {
   onBack: () => void;
   connection: Connection;
-  /** null when the player has no active campaign yet (issue #97). */
-  campaignId: string | null;
   connectionStatus: ConnectionStatus;
   onSaveConnection: (connection: Connection) => void;
   onTestConnection: () => void;
@@ -45,25 +40,6 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   unreachable: "Could not reach that address — check the IP and that both devices are on the same network",
   "origin-mismatch": "This page was loaded from a different address — reload the app from the address above",
 };
-
-const INTENSITY_OPTIONS: Array<{ id: "standard" | "low"; label: string; note: string }> = [
-  { id: "standard", label: "Standard", note: "Full range of humour and description." },
-  { id: "low", label: "Low", note: "No crude humour; violence stays non-graphic." },
-];
-
-// Issue #69: how long/detailed the DM's replies run. Absent === "detailed".
-const LENGTH_OPTIONS: Array<{ id: ResponseLength; label: string; note: string }> = [
-  { id: "concise", label: "Concise", note: "Short replies that mirror your input length." },
-  { id: "standard", label: "Standard", note: "A paragraph or two, scaling with the scene." },
-  { id: "detailed", label: "Detailed", note: "Rich, immersive, multi-paragraph narration." },
-];
-
-function whimsyLabel(value: number): string {
-  if (value < 0.22) return "Grounded";
-  if (value < 0.45) return "A little strange";
-  if (value < 0.7) return "Often strange";
-  return "Deeply strange";
-}
 
 const sectionHeadingStyle = {
   fontFamily: "var(--font-display)",
@@ -88,24 +64,22 @@ const textInputStyle = {
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-/** Two genuinely different persistence mechanisms live on one screen —
- * model choice only ever changes via POST /session/start (backend
- * contract §5: "model is NOT part of [POST /settings] — posting model to
- * this endpoint silently no-ops"), while every other Engine/Look/World
- * field goes through POST /campaigns/:id/settings. Per Slice 24's own
- * instruction, this must not be papered over with one "Save" button that
- * quietly fires two kinds of requests — so instead every control here
- * applies itself immediately on interaction (click a model row, click an
- * art chip, flip a toggle, release the whimsy slider) with its own small
- * inline status line, the same auto-apply pattern the design mockup
- * itself uses for these three sections. Only Connection keeps an
- * explicit "Save & Reconnect" button, because that one really does need
- * a deliberate commit — typing a passphrase char-by-char shouldn't fire
- * a reconnect attempt on every keystroke. */
+/** Issue #114: the main Settings screen edits the signed-in account's DEFAULTS
+ * — the engine, look, and world every NEW chronicle inherits — plus account
+ * music and the device connection. It no longer touches whatever game happens
+ * to be "active": per-game settings are set when a game is created and changed
+ * from the in-game settings screen (the gear in Active Play). This removes the
+ * old muddle where opening Settings from Home silently rewrote the current
+ * game's engine/look/world, and the awkward "no game yet" empty state (#97).
+ *
+ * Every content control applies itself immediately on interaction (click a
+ * model row, flip a toggle, release the whimsy slider) via POST /me/settings,
+ * with a small inline status line. Only Connection keeps an explicit "Save &
+ * Reconnect" button — typing a server address char-by-char shouldn't fire a
+ * reconnect on every keystroke. */
 export function Settings({
   onBack,
   connection,
-  campaignId,
   connectionStatus,
   onSaveConnection,
   onTestConnection,
@@ -115,23 +89,15 @@ export function Settings({
 
   const [models, setModels] = useState<ModelOption[]>([]);
   const [providers, setProviders] = useState<ProviderOption[]>([]);
-  const [settings, setSettings] = useState<CampaignSettings | null>(null);
-  // #96: distinguish "still loading" from "loaded, but this user has no such
-  // campaign" so the campaign-scoped sections show a real empty state instead of
-  // spinning "Reading campaign settings…" forever.
-  const [settingsStatus, setSettingsStatus] = useState<"loading" | "ready" | "no-campaign" | "error">("loading");
-  const [whimsyDraft, setWhimsyDraft] = useState(0);
+  // The account defaults being edited. Null until loaded.
+  const [defaults, setDefaults] = useState<Partial<CampaignSettings> | null>(null);
+  const [defaultsStatus, setDefaultsStatus] = useState<"loading" | "ready" | "error">("loading");
 
-  const [modelSave, setModelSave] = useState<SaveState>("idle");
+  const [engineSave, setEngineSave] = useState<SaveState>("idle");
   const [lookSave, setLookSave] = useState<SaveState>("idle");
   const [worldSave, setWorldSave] = useState<SaveState>("idle");
-  const [defaultsSave, setDefaultsSave] = useState<SaveState>("idle");
   const [music, setMusic] = useState<MusicConfig | null>(null);
   const [navUrl, setNavUrl] = useState("");
-  // #109: the campaign-resolved effective config (campaign → user → .env) for the
-  // per-game override editor. Distinct from `music` above, which is the account
-  // default (no campaignId). Null until an active campaign's config loads.
-  const [gameMusic, setGameMusic] = useState<MusicConfig | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,116 +108,72 @@ export function Settings({
         setNavUrl(cfg.navidrome.url);
       })
       .catch(() => {});
-    // #96: fetch models and campaign settings independently. They were coupled in
-    // one Promise.all with an empty .catch(), so a settings 404 (a user with no
-    // such campaign) rejected the whole chain and left `settings` null forever,
-    // showing the infinite "Reading campaign settings…". Since #97, campaignId is
-    // null (not a fixture) when there's no game — handled just below.
+    // Fetch the engine catalog and the account defaults independently.
     getModels(connection)
       .then((modelsResult) => {
         if (cancelled) return;
         setModels(modelsResult.models);
         setProviders(modelsResult.providers);
+        // Backfill provider/model if the account has no stored value yet, so the
+        // pickers always show a selection.
+        setDefaults((prev) =>
+          prev
+            ? {
+                provider: prev.provider ?? modelsResult.defaultProvider,
+                model: prev.model ?? modelsResult.default,
+                ...prev,
+              }
+            : prev
+        );
       })
       .catch(() => {});
-    // No active campaign (issue #97): skip the fetch — /campaigns/null/settings
-    // would just 404 — and go straight to the no-campaign empty state.
-    if (!campaignId) {
-      setSettings(null);
-      setSettingsStatus("no-campaign");
-      return () => {
-        cancelled = true;
-      };
-    }
-    setSettingsStatus("loading");
-    // #109: the campaign-resolved effective config, for the per-game override editor.
-    getMusicConfig(connection, campaignId)
-      .then((cfg) => !cancelled && setGameMusic(cfg))
-      .catch(() => {});
-    getCampaignSettings(connection, campaignId)
-      .then((settingsResult) => {
+    setDefaultsStatus("loading");
+    getUserDefaults(connection)
+      .then((result) => {
         if (cancelled) return;
-        setSettings(settingsResult);
-        setWhimsyDraft(settingsResult.toneWhimsy ?? 0);
-        setSettingsStatus("ready");
+        setDefaults(result);
+        setDefaultsStatus("ready");
       })
-      .catch((err) => {
+      .catch(() => {
         if (cancelled) return;
-        setSettings(null);
-        // A 404 means the campaign doesn't exist for this user (no game yet) —
-        // show an empty state. Any other failure (server unreachable) is also
-        // surfaced by the Connection tester below, but either way we must stop
-        // spinning rather than hang on the loading text.
-        setSettingsStatus(err instanceof ApiError && err.status === 404 ? "no-campaign" : "error");
+        setDefaults(null);
+        setDefaultsStatus("error");
       });
     return () => {
       cancelled = true;
     };
-  }, [connection, campaignId]);
+  }, [connection]);
 
-  async function pickModel(modelId: string) {
-    if (!campaignId) return;
-    setModelSave("saving");
-    try {
-      // Model-only: the clicked model always belongs to the currently-selected
-      // provider (the list is filtered to it), and the server resolves provider
-      // from stored settings, which this screen keeps in sync. Trust the
-      // resolved pair the server returns.
-      const result = await startSession(connection, campaignId, modelId);
-      setSettings((prev) => (prev ? { ...prev, model: result.model, provider: result.provider } : prev));
-      setModelSave("saved");
-    } catch {
-      setModelSave("error");
-    }
-  }
-
-  /** ADR-0018: switching the DM engine is the same session-resetting
-   * POST /session/start path as a model change. We send only the provider and
-   * let the server pick that provider's default model (or keep the stored one
-   * if it already belongs) — then trust the resolved {provider, model} pair it
-   * returns rather than guessing client-side. */
-  async function pickProvider(providerId: string) {
-    if (!campaignId) return;
-    if (settings?.provider === providerId) return;
-    setModelSave("saving");
-    try {
-      const result = await startSession(connection, campaignId, undefined, providerId);
-      setSettings((prev) => (prev ? { ...prev, provider: result.provider, model: result.model } : prev));
-      setModelSave("saved");
-    } catch {
-      setModelSave("error");
-    }
-  }
-
-  async function patchSettings(patch: Parameters<typeof updateCampaignSettings>[2], setState: (s: SaveState) => void) {
-    if (!campaignId) return;
+  /** Persist a patch to the account defaults (POST /me/settings, server-side
+   * merge) and reflect it locally. Shared by the engine, look, and world
+   * controls — each just supplies its patch and status setter. */
+  async function saveDefaults(patch: CampaignSettingsPatch | { provider: string; model: string }, setState: (s: SaveState) => void) {
     setState("saving");
+    setDefaults((prev) => ({ ...prev, ...patch }));
     try {
-      const next = await updateCampaignSettings(connection, campaignId, patch);
-      setSettings(next);
+      await saveUserDefaults(connection, patch as Partial<CampaignSettings>);
       setState("saved");
     } catch {
       setState("error");
     }
   }
 
-  /** ADR-0019: copy this game's engine/look/play settings into the user's
-   * account defaults, so every NEW chronicle starts from them. worldSetting is
-   * excluded — that's each game's own premise, typed fresh (ADR-0014). */
-  async function saveAsDefaults() {
-    if (!settings) return;
-    setDefaultsSave("saving");
-    try {
-      const { worldSetting: _world, ...rest } = settings;
-      await saveUserDefaults(connection, rest);
-      setDefaultsSave("saved");
-    } catch {
-      setDefaultsSave("error");
-    }
+  /** Switching the default engine picks that provider's default model — the two
+   * providers share no models, so the old model can't carry over. */
+  function pickProvider(providerId: string) {
+    if (defaults?.provider === providerId) return;
+    const prov = providers.find((p) => p.id === providerId);
+    const model = prov?.default ?? defaults?.model ?? "";
+    void saveDefaults({ provider: providerId, model }, setEngineSave);
   }
 
-  /** ADR-0020: persist a music preference and refresh the local config so the
-   * source picker / Navidrome fields reflect it. */
+  function pickModel(modelId: string) {
+    if (defaults?.model === modelId) return;
+    void saveDefaults({ model: modelId } as CampaignSettingsPatch & { model: string }, setEngineSave);
+  }
+
+  /** ADR-0020: persist an account music preference and refresh the local config
+   * so the source picker / Navidrome fields reflect it. */
   async function patchMusic(
     patch: Partial<{ enabled: boolean; source: MusicSource; navidromeUrl: string; navidromePlaylist: string }>
   ) {
@@ -262,39 +184,6 @@ export function Settings({
       setNavUrl(cfg.navidrome.url);
     } catch {
       // best-effort — the toggle just won't reflect until a working save
-    }
-  }
-
-  /** #109: persist a per-game music override and refresh both the effective
-   * config (drives the editor) and the stored settings.music (drives the
-   * override-present state). */
-  async function patchGameMusic(patch: MusicOverride) {
-    if (!campaignId) return;
-    try {
-      await saveCampaignMusicSettings(connection, campaignId, patch);
-      const [cfg, s] = await Promise.all([
-        getMusicConfig(connection, campaignId),
-        getCampaignSettings(connection, campaignId),
-      ]);
-      setGameMusic(cfg);
-      setSettings(s);
-    } catch {
-      // best-effort — the control just won't reflect until a working save
-    }
-  }
-
-  async function resetGameMusic() {
-    if (!campaignId) return;
-    try {
-      await resetCampaignMusicSettings(connection, campaignId);
-      const [cfg, s] = await Promise.all([
-        getMusicConfig(connection, campaignId),
-        getCampaignSettings(connection, campaignId),
-      ]);
-      setGameMusic(cfg);
-      setSettings(s);
-    } catch {
-      // best-effort
     }
   }
 
@@ -318,518 +207,248 @@ export function Settings({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10, ...columnStyle }}>
-        <button className="icon-button" data-testid="settings-back" onClick={onBack}>
-          <span className="back-chevron" />
-        </button>
-        <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, letterSpacing: 2, color: "var(--ink)" }}>
-          SETTINGS
-        </div>
+          <button className="icon-button" data-testid="settings-back" onClick={onBack}>
+            <span className="back-chevron" />
+          </button>
+          <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, letterSpacing: 2, color: "var(--ink)" }}>
+            SETTINGS
+          </div>
         </div>
       </div>
 
       <div className="cx-scroll" style={{ flex: 1, overflowY: "auto", padding: "20px 18px 40px" }}>
         <div style={columnStyle}>
-        {/* THE ENGINE */}
-        <div style={{ ...sectionHeadingStyle, margin: "2px 0 4px" }}>THE ENGINE</div>
-        {settingsStatus === "loading" ? (
-          <div style={{ fontSize: 12, color: "var(--ink-faint)", fontStyle: "italic" }}>Reading campaign settings…</div>
-        ) : !settings ? (
-          <div
-            data-testid="settings-no-campaign"
-            style={{ fontSize: 12, color: "var(--ink-faint)", fontStyle: "italic", lineHeight: 1.55 }}
-          >
-            {settingsStatus === "no-campaign"
-              ? "No game yet — start or open a campaign to set its engine, look, and world. Music and account settings below still work."
-              : "Couldn't load campaign settings. Check the connection below, then reopen Settings."}
+          <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 4 }}>
+            These are your defaults for <strong style={{ color: "var(--ink-dim)" }}>new chronicles</strong>. To change a
+            game already in progress, open its settings from the gear in Active Play.
           </div>
-        ) : (
-          <>
-            {providers.length > 0 && (
-              <div style={{ display: "flex", gap: 7, marginBottom: 10 }}>
-                {providers.map((p) => {
-                  const active = settings.provider === p.id;
-                  return (
-                    <button
-                      key={p.id}
-                      data-testid="provider-option"
-                      data-selected={active}
-                      title={p.label}
-                      onClick={() => pickProvider(p.id)}
-                      style={{
-                        flex: 1,
-                        cursor: "pointer",
-                        padding: "9px 12px",
-                        borderRadius: 4,
-                        fontFamily: "var(--font-display)",
-                        fontWeight: 600,
-                        fontSize: 13,
-                        color: active ? "var(--ink)" : "var(--ink-faint)",
-                        background: active ? "rgba(124,61,32,.24)" : "rgba(28,20,12,.5)",
-                        border: `1px solid ${active ? "rgba(211,112,60,.55)" : "rgba(109,90,56,.32)"}`,
-                      }}
-                    >
-                      {p.label.split("—")[0].trim()}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {(providers.find((p) => p.id === settings.provider)?.models ?? models).map((option) => {
-              const selected = settings.model === option.id;
-              return (
-                <button
-                  key={option.id}
-                  data-testid="model-option"
-                  data-selected={selected}
-                  onClick={() => pickModel(option.id)}
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    textAlign: "left",
-                    cursor: "pointer",
-                    marginBottom: 7,
-                    padding: "12px 14px",
-                    borderRadius: 4,
-                    background: selected ? "rgba(124,61,32,.24)" : "rgba(28,20,12,.5)",
-                    border: `1px solid ${selected ? "rgba(211,112,60,.55)" : "rgba(109,90,56,.32)"}`,
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>
-                      {option.label}
-                    </span>
-                    <span
-                      style={{
-                        width: 15,
-                        height: 15,
-                        borderRadius: "50%",
-                        border: `1.5px solid ${selected ? "#d3703c" : "#6d5a38"}`,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        flexShrink: 0,
-                      }}
-                    >
-                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: selected ? "#d3703c" : "transparent" }} />
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-            <div data-testid="model-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 2 }}>
-              {modelSave === "saving" && "Updating…"}
-              {modelSave === "saved" && "Model updated (POST /session/start)."}
-              {modelSave === "error" && "Couldn't update the model — try again."}
+
+          {/* THE ENGINE — account default (#114) */}
+          <div style={{ ...sectionHeadingStyle, margin: "12px 0 4px" }}>THE ENGINE</div>
+          {defaultsStatus === "loading" ? (
+            <div style={{ fontSize: 12, color: "var(--ink-faint)", fontStyle: "italic" }}>Reading your defaults…</div>
+          ) : !defaults ? (
+            <div style={{ fontSize: 12, color: "var(--ink-faint)", fontStyle: "italic", lineHeight: 1.55 }}>
+              Couldn't load your defaults. Check the connection below, then reopen Settings.
             </div>
-          </>
-        )}
-
-        {/* THE LOOK — campaign-scoped; hidden until a campaign loads (#96) */}
-        {settings && (
-          <>
-            <div style={sectionHeadingStyle}>THE LOOK</div>
-            <ToggleRow
-              testId="images-toggle"
-              title="Generate scene art"
-              description="Off by default · needs Grok Build configured"
-              checked={!!settings.generateImages}
-              onChange={(next) => patchSettings({ generateImages: next }, setLookSave)}
-            />
-
-            {/* Issue #56: auto-illustrate each turn — only meaningful (and only
-                shown) when scene art is on, since it needs Grok Build too. */}
-            {settings.generateImages && (
-              <ToggleRow
-                testId="auto-illustrate-toggle"
-                title="Auto-illustrate each turn"
-                description="Draws every DM reply · the image appears a moment after the text"
-                checked={!!settings.autoIllustrateTurns}
-                onChange={(next) => patchSettings({ autoIllustrateTurns: next }, setLookSave)}
-                containerStyle={{ marginTop: 8 }}
+          ) : (
+            <>
+              <EnginePicker
+                providers={providers}
+                models={models}
+                provider={defaults.provider ?? ""}
+                model={defaults.model ?? ""}
+                onPickProvider={pickProvider}
+                onPickModel={pickModel}
+                status={
+                  <div data-testid="model-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 2 }}>
+                    {engineSave === "saving" && "Saving…"}
+                    {engineSave === "saved" && "Saved as your default engine."}
+                    {engineSave === "error" && "Couldn't save — try again."}
+                  </div>
+                }
               />
-            )}
 
-            <ArtStylePicker
-              artStyle={settings.artStyle ?? ""}
-              onChange={(style) => patchSettings({ artStyle: style }, setLookSave)}
-            />
-            <div data-testid="look-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 6 }}>
-              {lookSave === "saving" && "Saving…"}
-              {lookSave === "saved" && "Saved (POST /settings)."}
-              {lookSave === "error" && "Couldn't save — try again."}
-            </div>
-          </>
-        )}
+              {/* THE LOOK — account default */}
+              <div style={sectionHeadingStyle}>THE LOOK</div>
+              <LookSettingsEditor value={defaults} onPatch={(patch) => saveDefaults(patch, setLookSave)} />
+              <div data-testid="look-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 6 }}>
+                {lookSave === "saving" && "Saving…"}
+                {lookSave === "saved" && "Saved as your default."}
+                {lookSave === "error" && "Couldn't save — try again."}
+              </div>
 
-        {/* THE WORLD — campaign-scoped; hidden until a campaign loads (#96) */}
-        {settings && (
-          <>
-            <div style={sectionHeadingStyle}>THE WORLD</div>
-            <div style={{ fontSize: 12, color: "var(--ink-dim)", marginBottom: 6 }}>
-              Setting <span style={{ color: "var(--ink-faint)" }}>— empty keeps standard fantasy</span>
-            </div>
-            <input
-              defaultValue={settings.worldSetting ?? ""}
-              onBlur={(e) => patchSettings({ worldSetting: e.target.value.trim() }, setWorldSave)}
-              placeholder="e.g. underwater merfolk city-states…"
-              data-testid="world-setting-input"
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                background: "rgba(12,8,5,.5)",
-                border: "1px solid rgba(109,90,56,.4)",
-                borderRadius: 4,
-                padding: "11px 13px",
-                color: "var(--ink)",
-                fontFamily: "var(--font-body)",
-                fontStyle: "italic",
-                fontSize: 14,
-                outline: "none",
-              }}
-            />
+              {/* THE WORLD — account default */}
+              <div style={sectionHeadingStyle}>THE WORLD</div>
+              <WorldSettingsEditor value={defaults} onPatch={(patch) => saveDefaults(patch, setWorldSave)} />
+              <div data-testid="world-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 6 }}>
+                {worldSave === "saving" && "Saving…"}
+                {worldSave === "saved" && "Saved as your default."}
+                {worldSave === "error" && "Couldn't save — try again."}
+              </div>
+            </>
+          )}
 
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "18px 0 5px" }}>
-              <span style={{ fontSize: 12, color: "var(--ink-dim)" }}>Tone &amp; whimsy</span>
-              <span
-                data-testid="whimsy-label"
-                style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 1, color: "var(--ember)" }}
-              >
-                {whimsyLabel(whimsyDraft)}
-              </span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={whimsyDraft}
-              onChange={(e) => {
-                const next = Number(e.target.value);
-                setWhimsyDraft(next);
-                patchSettings({ toneWhimsy: next }, setWorldSave);
-              }}
-              data-testid="whimsy-slider"
-              style={{ width: "100%", accentColor: "#d3703c", height: 4 }}
-            />
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--ink-faint)", marginTop: 3 }}>
-              <span>grounded</span>
-              <span>deeply strange</span>
-            </div>
-
-            <div style={{ fontSize: 12, color: "var(--ink-dim)", margin: "18px 0 6px" }}>Content intensity</div>
-            <div style={{ display: "flex", gap: 7 }}>
-              {INTENSITY_OPTIONS.map((option) => {
-                const selected = (settings.contentIntensity ?? "standard") === option.id;
-                return (
-                  <button
-                    key={option.id}
-                    data-testid="intensity-option"
-                    data-selected={selected}
-                    onClick={() => patchSettings({ contentIntensity: option.id }, setWorldSave)}
-                    style={{
-                      flex: 1,
-                      cursor: "pointer",
-                      textAlign: "left",
-                      padding: "11px 13px",
-                      borderRadius: 4,
-                      background: selected ? "rgba(124,61,32,.24)" : "rgba(28,20,12,.5)",
-                      border: `1px solid ${selected ? "rgba(211,112,60,.55)" : "rgba(109,90,56,.32)"}`,
-                    }}
-                  >
-                    <div style={{ fontFamily: "var(--font-display)", fontSize: 13, color: selected ? "#efe6d2" : "var(--ink-dim)" }}>
-                      {option.label}
-                    </div>
-                    <div style={{ fontSize: 10.5, color: "var(--ink-faint)", marginTop: 3, lineHeight: 1.35 }}>{option.note}</div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Issue #69: how long/detailed the DM's replies run. Absent === detailed. */}
-            <div style={{ fontSize: 12, color: "var(--ink-dim)", margin: "18px 0 6px" }}>Reply length</div>
-            <div style={{ display: "flex", gap: 7 }}>
-              {LENGTH_OPTIONS.map((option) => {
-                const selected = (settings.responseLength ?? "detailed") === option.id;
-                return (
-                  <button
-                    key={option.id}
-                    data-testid="length-option"
-                    data-selected={selected}
-                    onClick={() => patchSettings({ responseLength: option.id }, setWorldSave)}
-                    style={{
-                      flex: 1,
-                      cursor: "pointer",
-                      textAlign: "left",
-                      padding: "11px 13px",
-                      borderRadius: 4,
-                      background: selected ? "rgba(124,61,32,.24)" : "rgba(28,20,12,.5)",
-                      border: `1px solid ${selected ? "rgba(211,112,60,.55)" : "rgba(109,90,56,.32)"}`,
-                    }}
-                  >
-                    <div style={{ fontFamily: "var(--font-display)", fontSize: 13, color: selected ? "#efe6d2" : "var(--ink-dim)" }}>
-                      {option.label}
-                    </div>
-                    <div style={{ fontSize: 10.5, color: "var(--ink-faint)", marginTop: 3, lineHeight: 1.35 }}>{option.note}</div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Issue #44: engine rolls dice by default; off = you provide values. */}
-            <ToggleRow
-              testId="dice-toggle"
-              title="Auto-roll dice"
-              description="On: the DM rolls for you · Off: you supply your own roll values"
-              checked={settings.autoRollDice !== false} // absent === on
-              onChange={(next) => patchSettings({ autoRollDice: next }, setWorldSave)}
-              containerStyle={{ margin: "18px 0 0" }}
-            />
-
-            <div data-testid="world-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 6 }}>
-              {worldSave === "saving" && "Saving…"}
-              {worldSave === "saved" && "Saved (POST /settings)."}
-              {worldSave === "error" && "Couldn't save — try again."}
-            </div>
-          </>
-        )}
-
-        {/* MUSIC FOR THIS GAME (#109 / ADR-0020 amended): a per-game override of
-            the account music default below. Only shown with an active campaign;
-            its editor resolves campaign → account → .env. */}
-        {settings && gameMusic && (
-          <>
-            <div style={sectionHeadingStyle}>MUSIC FOR THIS GAME</div>
-            <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 8 }}>
-              Give this chronicle its own music, or leave it following your account
-              default below. You can change it any time — even mid-game.
-            </div>
-            <MusicOverrideEditor
-              connection={connection}
-              campaignId={campaignId}
-              override={settings.music}
-              effective={gameMusic}
-              onPatch={patchGameMusic}
-              onReset={resetGameMusic}
-            />
-          </>
-        )}
-
-        {/* THE MUSIC — ACCOUNT DEFAULT (ADR-0020): background music for every
-            game that hasn't set its own override above. Your own local files or a
-            Navidrome LAN playlist. Off by default; when on, the mute button
-            appears in Active Play. */}
-        {music && (
-          <>
-            <div style={sectionHeadingStyle}>MUSIC — ACCOUNT DEFAULT</div>
-            <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 8 }}>
-              The music every game uses unless it overrides it above.
-            </div>
-            <ToggleRow
-              testId="music-enabled"
-              title="Play background music"
-              description="Off by default · when on, a mute button appears during play"
-              checked={music.enabled}
-              onChange={(next) => patchMusic({ enabled: next })}
-              containerStyle={{ margin: "4px 0 0" }}
-            />
-            {music.enabled && (
-              <>
-                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                  {(["local", "navidrome"] as const).map((src) => (
-                    <button
-                      key={src}
-                      data-testid={`music-source-${src}`}
-                      onClick={() => patchMusic({ source: src })}
-                      style={{
-                        flex: 1,
-                        cursor: "pointer",
-                        padding: "9px 10px",
-                        borderRadius: 4,
-                        background: music.source === src ? "rgba(168,81,31,.25)" : "rgba(12,8,5,.5)",
-                        border: `1px solid ${music.source === src ? "var(--ember)" : "rgba(109,90,56,.4)"}`,
-                        color: "var(--ink)",
-                        fontFamily: "var(--font-display)",
-                        fontSize: 12,
-                        letterSpacing: 1,
-                      }}
-                    >
-                      {src === "local" ? "LOCAL FILES" : "NAVIDROME"}
-                    </button>
-                  ))}
-                </div>
-
-                {music.source === "local" && (
-                  <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginTop: 8 }}>
-                    {music.localTrackCount > 0
-                      ? `${music.localTrackCount} track${music.localTrackCount === 1 ? "" : "s"} found in the music/ folder — played in shuffle.`
-                      : "No files yet — drop .mp3/.wav/.ogg/.flac/.m4a into the music/ folder on the host."}
+          {/* THE MUSIC — ACCOUNT DEFAULT (ADR-0020): background music for every
+              game that hasn't set its own override. Your own local files or a
+              Navidrome LAN playlist. Off by default; when on, the mute button
+              appears in Active Play. */}
+          {music && (
+            <>
+              <div style={sectionHeadingStyle}>MUSIC — ACCOUNT DEFAULT</div>
+              <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 8 }}>
+                The music every game uses unless it sets its own from the in-game settings.
+              </div>
+              <ToggleRow
+                testId="music-enabled"
+                title="Play background music"
+                description="Off by default · when on, a mute button appears during play"
+                checked={music.enabled}
+                onChange={(next) => patchMusic({ enabled: next })}
+                containerStyle={{ margin: "4px 0 0" }}
+              />
+              {music.enabled && (
+                <>
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    {(["local", "navidrome"] as const).map((src) => (
+                      <button
+                        key={src}
+                        data-testid={`music-source-${src}`}
+                        onClick={() => patchMusic({ source: src })}
+                        style={{
+                          flex: 1,
+                          cursor: "pointer",
+                          padding: "9px 10px",
+                          borderRadius: 4,
+                          background: music.source === src ? "rgba(168,81,31,.25)" : "rgba(12,8,5,.5)",
+                          border: `1px solid ${music.source === src ? "var(--ember)" : "rgba(109,90,56,.4)"}`,
+                          color: "var(--ink)",
+                          fontFamily: "var(--font-display)",
+                          fontSize: 12,
+                          letterSpacing: 1,
+                        }}
+                      >
+                        {src === "local" ? "LOCAL FILES" : "NAVIDROME"}
+                      </button>
+                    ))}
                   </div>
-                )}
 
-                {music.source === "navidrome" && (
-                  <div style={{ marginTop: 8 }}>
-                    <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 8 }}>
-                      {music.navidrome.configured
-                        ? "Streamed through your home server (credentials stay on the host)."
-                        : "Set NAVIDROME_URL / USER / PASSWORD in the host's .env to enable streaming."}
+                  {music.source === "local" && (
+                    <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginTop: 8 }}>
+                      {music.localTrackCount > 0
+                        ? `${music.localTrackCount} track${music.localTrackCount === 1 ? "" : "s"} found in the music/ folder — played in shuffle.`
+                        : "No files yet — drop .mp3/.wav/.ogg/.flac/.m4a into the music/ folder on the host."}
                     </div>
-                    <div style={{ fontSize: 11, color: "var(--ink-dim)", marginBottom: 4 }}>Navidrome URL</div>
-                    <input
-                      value={navUrl}
-                      onChange={(e) => setNavUrl(e.target.value)}
-                      onBlur={() => navUrl !== music.navidrome.url && patchMusic({ navidromeUrl: navUrl })}
-                      placeholder="http://192.168.1.214:4533"
-                      style={textInputStyle}
-                    />
-                    <div style={{ fontSize: 11, color: "var(--ink-dim)", margin: "11px 0 4px" }}>Playlist</div>
-                    {/* #110: pick from the chronicle-tagged playlists (or add your own). */}
-                    <PlaylistPicker
-                      connection={connection}
-                      campaignId={null}
-                      value={music.navidrome.playlist}
-                      onChange={(name) => name !== music.navidrome.playlist && patchMusic({ navidromePlaylist: name })}
-                    />
-                  </div>
-                )}
-              </>
-            )}
-          </>
-        )}
+                  )}
 
-        {/* ACCOUNT DEFAULTS (ADR-0019): make this game's settings the baseline
-            for every new chronicle you start. Per-game settings above always
-            override these defaults. */}
-        {settings && (
-          <>
-            <div style={sectionHeadingStyle}>NEW-CHRONICLE DEFAULTS</div>
-            <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 8 }}>
-              Save this game's engine, look, and play settings as the defaults every
-              new chronicle you begin will start from. Each game can still override them.
+                  {music.source === "navidrome" && (
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 8 }}>
+                        {music.navidrome.configured
+                          ? "Streamed through your home server (credentials stay on the host)."
+                          : "Set NAVIDROME_URL / USER / PASSWORD in the host's .env to enable streaming."}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--ink-dim)", marginBottom: 4 }}>Navidrome URL</div>
+                      <input
+                        value={navUrl}
+                        onChange={(e) => setNavUrl(e.target.value)}
+                        onBlur={() => navUrl !== music.navidrome.url && patchMusic({ navidromeUrl: navUrl })}
+                        placeholder="http://192.168.1.214:4533"
+                        style={textInputStyle}
+                      />
+                      <div style={{ fontSize: 11, color: "var(--ink-dim)", margin: "11px 0 4px" }}>Playlist</div>
+                      {/* #110: pick from the chronicle-tagged playlists (or add your own). */}
+                      <PlaylistPicker
+                        connection={connection}
+                        campaignId={null}
+                        value={music.navidrome.playlist}
+                        onChange={(name) => name !== music.navidrome.playlist && patchMusic({ navidromePlaylist: name })}
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+
+          {/* THE HEARTH */}
+          <div style={sectionHeadingStyle}>THE HEARTH</div>
+          <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 10 }}>
+            Your phone only talks to your home server over the LAN — that server is what reaches out to Claude and Grok.
+          </div>
+
+          {/* ADR-0019: signed-in account. Passphrase is gone — identity is your
+              account now, obtained on the login screen. */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "10px 13px",
+              background: "rgba(12,8,5,.5)",
+              border: "1px solid rgba(109,90,56,.4)",
+              borderRadius: 4,
+              marginBottom: 12,
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 10.5, color: "var(--ink-dim)", letterSpacing: 1 }}>SIGNED IN AS</div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 14, color: "var(--ink)" }} data-testid="account-username">
+                {connection.username || "—"}
+              </div>
             </div>
             <button
-              onClick={saveAsDefaults}
-              data-testid="save-defaults"
+              onClick={onLogout}
+              data-testid="logout"
               style={{
                 cursor: "pointer",
-                padding: "9px 14px",
+                padding: "8px 14px",
                 borderRadius: 3,
                 background: "rgba(36,26,16,.6)",
                 border: "1px solid var(--brass-dim)",
                 color: "var(--ink-dim)",
                 fontFamily: "var(--font-display)",
                 fontSize: 11,
-                letterSpacing: 1.2,
+                letterSpacing: 1.5,
               }}
             >
-              SAVE AS MY DEFAULTS
+              LOG OUT
             </button>
-            <div data-testid="defaults-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 6 }}>
-              {defaultsSave === "saving" && "Saving…"}
-              {defaultsSave === "saved" && "Saved as your defaults for new chronicles."}
-              {defaultsSave === "error" && "Couldn't save — try again."}
-            </div>
-          </>
-        )}
-
-        {/* THE HEARTH */}
-        <div style={sectionHeadingStyle}>THE HEARTH</div>
-        <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 10 }}>
-          Your phone only talks to your home server over the LAN — that
-          server is what reaches out to Claude and Grok.
-        </div>
-
-        {/* ADR-0019: signed-in account. Passphrase is gone — identity is your
-            account now, obtained on the login screen. */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "10px 13px",
-            background: "rgba(12,8,5,.5)",
-            border: "1px solid rgba(109,90,56,.4)",
-            borderRadius: 4,
-            marginBottom: 12,
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 10.5, color: "var(--ink-dim)", letterSpacing: 1 }}>SIGNED IN AS</div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 14, color: "var(--ink)" }} data-testid="account-username">
-              {connection.username || "—"}
-            </div>
           </div>
+
+          <div style={{ fontSize: 11, color: "var(--ink-dim)", marginBottom: 4 }}>Server address</div>
+          <input
+            value={serverAddress}
+            onChange={(e) => setServerAddress(e.target.value)}
+            placeholder="192.168.1.24:4317"
+            style={textInputStyle}
+          />
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <div style={{ width: 7, height: 7, borderRadius: "50%", background: dotColor, boxShadow: `0 0 8px ${dotColor}` }} />
+              <span style={{ fontSize: 11.5, color: "var(--ink-dim)" }}>{STATUS_LABEL[connectionStatus]}</span>
+            </div>
+            <button
+              onClick={onTestConnection}
+              style={{
+                cursor: "pointer",
+                padding: "8px 14px",
+                borderRadius: 3,
+                background: "rgba(36,26,16,.6)",
+                border: "1px solid var(--brass-dim)",
+                color: "var(--ink-dim)",
+                fontFamily: "var(--font-display)",
+                fontSize: 11,
+                letterSpacing: 1.5,
+              }}
+            >
+              TEST
+            </button>
+          </div>
+
           <button
-            onClick={onLogout}
-            data-testid="logout"
+            data-testid="save-reconnect"
+            disabled={connectionStatus === "checking"}
+            onClick={() => onSaveConnection({ ...connection, serverAddress })}
             style={{
-              cursor: "pointer",
-              padding: "8px 14px",
+              marginTop: 18,
+              width: "100%",
+              cursor: connectionStatus === "checking" ? "default" : "pointer",
+              opacity: connectionStatus === "checking" ? 0.7 : 1,
+              padding: 12,
               borderRadius: 3,
-              background: "rgba(36,26,16,.6)",
-              border: "1px solid var(--brass-dim)",
-              color: "var(--ink-dim)",
+              background: "linear-gradient(180deg,#d8743e,#a8511f)",
+              border: "none",
+              color: "#faf0e2",
               fontFamily: "var(--font-display)",
-              fontSize: 11,
+              fontWeight: 700,
+              fontSize: 13,
               letterSpacing: 1.5,
             }}
           >
-            LOG OUT
+            {connectionStatus === "checking" ? "RECONNECTING…" : "SAVE & RECONNECT"}
           </button>
-        </div>
-
-        <div style={{ fontSize: 11, color: "var(--ink-dim)", marginBottom: 4 }}>Server address</div>
-        <input
-          value={serverAddress}
-          onChange={(e) => setServerAddress(e.target.value)}
-          placeholder="192.168.1.24:4317"
-          style={textInputStyle}
-        />
-
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-            <div style={{ width: 7, height: 7, borderRadius: "50%", background: dotColor, boxShadow: `0 0 8px ${dotColor}` }} />
-            <span style={{ fontSize: 11.5, color: "var(--ink-dim)" }}>{STATUS_LABEL[connectionStatus]}</span>
-          </div>
-          <button
-            onClick={onTestConnection}
-            style={{
-              cursor: "pointer",
-              padding: "8px 14px",
-              borderRadius: 3,
-              background: "rgba(36,26,16,.6)",
-              border: "1px solid var(--brass-dim)",
-              color: "var(--ink-dim)",
-              fontFamily: "var(--font-display)",
-              fontSize: 11,
-              letterSpacing: 1.5,
-            }}
-          >
-            TEST
-          </button>
-        </div>
-
-        <button
-          data-testid="save-reconnect"
-          disabled={connectionStatus === "checking"}
-          onClick={() => onSaveConnection({ ...connection, serverAddress })}
-          style={{
-            marginTop: 18,
-            width: "100%",
-            cursor: connectionStatus === "checking" ? "default" : "pointer",
-            opacity: connectionStatus === "checking" ? 0.7 : 1,
-            padding: 12,
-            borderRadius: 3,
-            background: "linear-gradient(180deg,#d8743e,#a8511f)",
-            border: "none",
-            color: "#faf0e2",
-            fontFamily: "var(--font-display)",
-            fontWeight: 700,
-            fontSize: 13,
-            letterSpacing: 1.5,
-          }}
-        >
-          {connectionStatus === "checking" ? "RECONNECTING…" : "SAVE & RECONNECT"}
-        </button>
         </div>
       </div>
     </div>

@@ -180,7 +180,6 @@ export function App() {
         <Settings
           onBack={() => setScreen(hasConnection(connection) ? "home" : "auth")}
           connection={connection}
-          campaignId={campaignId}
           connectionStatus={connectionStatus}
           onSaveConnection={handleSaveConnection}
           onTestConnection={handleTestConnection}
