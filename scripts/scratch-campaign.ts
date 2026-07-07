@@ -4,10 +4,13 @@
  *
  * Usage:
  *   npx tsx scripts/scratch-campaign.ts create
+ *   npx tsx scripts/scratch-campaign.ts create --provider grok --model grok-build --images
  *   npx tsx scripts/scratch-campaign.ts delete <id>
  *
- * `create` prints the new campaign id to stdout. `delete` hard-refuses any
- * id that doesn't start with "scratch-" — this is the actual safety rail,
+ * `create` prints the new campaign id to stdout. Its optional flags let a
+ * parity/validation run (scripts/verify-grok-parity.ts) scaffold a campaign on
+ * a specific engine instead of the Claude/Sonnet default. `delete` hard-refuses
+ * any id that doesn't start with "scratch-" — this is the actual safety rail,
  * not a confirmation prompt that could be bypassed.
  */
 import fs from "node:fs";
@@ -38,12 +41,38 @@ const EMPTY_CHARACTER_SHEET = {
   spellSlots: {},
 };
 
-function createScratchCampaign(): string {
+interface CreateOptions {
+  provider?: string;
+  model?: string;
+  images?: boolean;
+}
+
+/** Parse `--provider x --model y --images` off create's remaining argv. Unknown
+ * flags are ignored — this is a validation helper, not a strict CLI. */
+function parseCreateOptions(argv: string[]): CreateOptions {
+  const opts: CreateOptions = {};
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--provider") opts.provider = argv[++i];
+    else if (argv[i] === "--model") opts.model = argv[++i];
+    else if (argv[i] === "--images") opts.images = true;
+  }
+  return opts;
+}
+
+function createScratchCampaign(opts: CreateOptions = {}): string {
   // Lowercased: campaign-store.ts's CAMPAIGN_ID_PATTERN only allows
   // lowercase letters, and toISOString()'s literal "T"/"Z" would otherwise
   // produce an id that resolveCampaignDir() rejects.
   const id = `${SCRATCH_PREFIX}${new Date().toISOString().replace(/[:.]/g, "-")}`.toLowerCase();
-  scaffoldCampaign(id, EMPTY_CHARACTER_SHEET, { model: "claude-sonnet-5" });
+  // Written verbatim into campaign-settings.json; readCampaignProvider/Settings
+  // read provider/model straight back out. Default matches the plain create.
+  const settings: Record<string, unknown> = {
+    model: opts.model ?? "claude-sonnet-5",
+    autoRollDice: true,
+  };
+  if (opts.provider) settings.provider = opts.provider;
+  if (opts.images) settings.generateImages = true;
+  scaffoldCampaign(id, EMPTY_CHARACTER_SHEET, settings);
   console.log(id);
   return id;
 }
@@ -74,7 +103,7 @@ const [, , command, arg] = process.argv;
 
 switch (command) {
   case "create":
-    createScratchCampaign();
+    createScratchCampaign(parseCreateOptions(process.argv.slice(3)));
     break;
   case "delete":
     if (!arg) {

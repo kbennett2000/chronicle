@@ -17,16 +17,28 @@ typing friction, and campaigns/NPCs/missions that don't feel recycled.
 Two decoupled services. Neither is aware of the other's internals — they
 communicate through the campaign's persistent state files.
 
-### 2.1 DM Engine — Claude Agent SDK
-- Embeds the same agent loop that powers Claude Code (file read/write, tool
-  execution, session management) directly in the app's backend process —
-  not the interactive CLI.
-- One Agent SDK session per active campaign, working directory = that
+### 2.1 DM Engine — pluggable backend (Claude Agent SDK or Grok)
+- A `DmBackend` seam (ADR-0018) lets the DM brain run on either the **Claude
+  Agent SDK** (default) or the **Grok** headless CLI, chosen **per campaign**
+  like the model is (§8). Both implement the same `runTurn(...) → TurnResult`,
+  so everything downstream (transcript, session persistence, response shape) is
+  provider-agnostic.
+- Claude path: embeds the same agent loop that powers Claude Code (file
+  read/write, tool execution, session management) directly in the backend
+  process — one Agent SDK session per active campaign, working directory = that
   campaign's state folder.
-- Responsible for: narration, rules adjudication, updating state files,
-  emitting asset-request events.
+- Grok path: `grok -p … --cwd <campaignDir> --sandbox workspace
+  --system-prompt-override <systemPrompt>` headless, with the four host tools
+  (dice / seed / texture / image) exposed as stdio MCP servers wired per turn
+  via `.grok/config.toml`. The kernel sandbox + a pre-tool-use hook confine
+  writes to the campaign dir. See ADR-0018.
+- Either way, responsible for: narration, rules adjudication, updating state
+  files, emitting asset-request events.
 
 ### 2.2 Asset Engine — Grok Build (headless)
+- Note: Grok appears in two distinct roles — here as the always-headless
+  **image** worker, and (ADR-0018) as an optional **DM** backend in §2.1. They
+  are separate invocations with separate isolation.
 - Runs `grok -p "/imagine <prompt>"` non-interactively (or via ACP) as a
   separate worker process, triggered by DM Engine events — not called by the
   DM Engine's own reasoning loop.
@@ -165,17 +177,26 @@ Fires only on **first creation** of a registry entry, not every mention:
 - A boss/major antagonist's reveal
 
 Settings screen: single **Generate Images** toggle (video toggle stubbed,
-hidden/off, for later), plus a **model selector**:
-- Default: `claude-sonnet-5` — matched to this workload (narrative +
-  rules-following state management), not a cost compromise.
-- Optional upgrade: `claude-opus-4-8`, labeled for players who want maximum
-  rules/narrative fidelity and don't mind a higher per-session cost.
-- Optional budget option: `claude-haiku-4-5`, labeled honestly as
-  faster/cheaper but less precise on rules — a testing/casual-session
-  option, not the recommended default.
-- Model choice is per-campaign (stored alongside campaign state), not
-  global — a long-running campaign shouldn't silently change adjudication
-  quality mid-story unless the player chooses to switch it.
+hidden/off, for later), plus a **provider toggle** and a **model selector**
+(ADR-0018):
+- **Provider toggle** (Claude / Grok): picks the DM backend (§2.1). Claude is
+  the recommended default. The model list below shows the selected provider's
+  models.
+- **Claude models:** default `claude-sonnet-5` — matched to this workload
+  (narrative + rules-following state management), not a cost compromise;
+  optional upgrade `claude-opus-4-8` (maximum rules/narrative fidelity, higher
+  per-session cost); optional budget `claude-haiku-4-5` (faster/cheaper, less
+  precise on rules — a testing/casual option, not the default).
+- **Grok models:** `grok-build` (512K context, the recommended Grok DM) and
+  `grok-composer-2.5-fast` (200K, faster/cheaper but coding-tuned, so prose may
+  read plainer).
+- Both provider and model are **per-campaign** (stored in
+  `campaign-settings.json`), not global, and changing either **resets the DM
+  session** — a long-running campaign shouldn't silently change adjudication
+  quality or engine mid-story unless the player chooses to switch it. Because
+  Grok's DM runs under a workspace sandbox, a Grok campaign's anti-repetition
+  seed registry is kept per-campaign rather than in the shared global registry
+  (ADR-0018 Slice 5).
 
 ## 9. Open Decisions To Confirm With Her Directly
 - How much visual competes with prose — dashboard-heavy vs. book-with-a-dice-tray.
@@ -218,8 +239,8 @@ matters as much as the feature itself.
 ## 12. Per-Campaign Customization: Style, Setting, Tone, Intensity
 
 See ADR-0004 for the architecture decision. Four dials, all stored
-alongside the existing model selection in `campaign-settings.json`, all
-optional with sensible defaults:
+alongside the existing provider + model selection (§8) in
+`campaign-settings.json`, all optional with sensible defaults:
 
 - **Art style** — freeform string appended to image-generation prompts.
   UI offers presets (comic book, Lego-style, pencil sketch, watercolor,

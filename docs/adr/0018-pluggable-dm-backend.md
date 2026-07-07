@@ -1,8 +1,13 @@
 # ADR-0018: Pluggable DM-Engine Backend (Claude + Grok)
 
 ## Status
-Accepted (Slice 0 — validation-spike evidence recorded below; implementation
-proceeds in subsequent slices)
+Accepted and **implemented** (Slices 0–7, issues #77–#87). Slice 0's
+validation-spike evidence is recorded below; the two items it deferred were
+confirmed in build: **MCP-server reachability** (Slice 3, #80 — the four host
+tools run as stdio MCP servers wired per-turn via `.grok/config.toml`) and
+**SRD reads / rules adjudication under the sandbox** (Slice 4, #81). A player
+selects the engine per campaign in Settings / New Chronicle (Slice 6, #87), and
+`npm run verify:grok-parity` drives a scratch campaign end-to-end (Slice 7).
 
 ## Context
 The DM engine — narration, 5e adjudication, and the per-turn state-file update
@@ -96,9 +101,16 @@ sandbox, but not driven by a combat/rules turn in the spike).
 - Plan risks #2 (10K prompt cap) and #3 (sandbox vs SRD) are **retired** by
   `--system-prompt-override` and `--sandbox workspace`. Remaining risks: Grok
   rules-adherence at scale (mitigated — the per-campaign, session-resetting
-  selector lets a player fall back to Claude anytime), and the cross-process
-  content-registry write race (acceptable under the `active.busy` single-flight
-  lock; a solo player runs one turn at a time).
+  selector lets a player fall back to Claude anytime).
+- **Seed registry under the sandbox (resolved in Slice 5, #86):** the shared
+  anti-repetition registry (`campaigns/_registry/content-registry.md`) is a
+  sibling *outside* `campaignDir`, so `--sandbox workspace` blocks it. A Grok
+  turn therefore writes a *per-campaign* registry at
+  `<campaignDir>/content-registry.md` (the seed stdio server passes
+  `localRegistry=true`; the existing scratch-campaign redirect generalized). A
+  Grok campaign dedups against its own history; Claude campaigns keep the global
+  registry. This also sidesteps the earlier cross-process write-race concern for
+  Grok, since its registry is campaign-local rather than shared.
 - This extends ADR-0002 (permission scope: the sandbox + pre-tool-use hook are
   the Grok-side enforcement), ADR-0004 (per-turn `.grok/config.toml` + live
   settings reads re-establish "no cross-campaign bleed" out-of-process),
