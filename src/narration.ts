@@ -72,6 +72,18 @@ const SECOND_PERSON = /\byou(?:r|rs|rself|rselves)?\b/i;
  * tokens) is left untouched. */
 const BACKSTAGE_DIVIDER = /-{3,}[ \t]*(?:\n|$)/;
 
+/** Issue #103 (4th reopen — the "Danny the Horse" leak): a DM turn ends when it
+ * hands control back to the player with a standalone "What do you do?" prompt.
+ * This matches that hand-back only as its OWN line (its own paragraph): leading
+ * markdown emphasis is tolerated, but the line must be essentially just the
+ * question. Anchoring to a lone line is the false-positive guard — an embedded
+ * NPC line like "What do you do for a living?" (trailing words) or a quoted
+ * `"What do you do?"` inside a sentence is not a standalone line and won't match.
+ * Everything after this line is a second turn's worth of the model thinking out
+ * loud (backstage chatter + a duplicate scene), not part of the turn. */
+const HANDBACK_LINE =
+  /^[ \t]*(?:\*+[ \t]*)?What (?:do|will|would) you do(?:[ \t]+(?:now|next))?[ \t]*\?[ \t]*$/im;
+
 const META_PATTERNS: RegExp[] = [
   // "Let me / I'll / I need to — update|record|save|write|log ... state|files|sheet|roster|quest log|inventory ..."
   /\b(?:let me|i['’]ll|i will|i need to|now,?\s*(?:let me|i['’]ll)|first,?\s*let me)\b[^.!?\n]*?\b(?:update|record|save|writ(?:e|ing)|log|jot|note)\b[^.!?\n]*?\b(?:state|files?|character[-\s]?sheet|the sheet|world[-\s]?state|quest[-\s]?log|session[-\s]?log|npc[-\s]?roster|inventory|hp)\b[^.!?\n]*?[.!?:]/gi,
@@ -108,6 +120,12 @@ const META_PATTERNS: RegExp[] = [
   // Inline rules math the model emits while setting up state.
   /\ba level \d+ [^.!?\n]*?\bshould have hp\b[^.!?\n]*?[.!?:]/gi,
   /\bwith (?:con|dex|str|int|wis|cha) \d+,? that'?s\b[^.!?\n]*?[.!?:]/gi,
+  // Issue #103 (4th reopen): the model sometimes hands back referring to the PC
+  // in the THIRD person on its own line ("What does Danny the Horse do now?").
+  // That is never player-facing — the DM addresses the player as "you". Matched
+  // only as a standalone line, and only when it contains no second-person "you"/
+  // "your" (so a legitimate "What does your companion do now?" is left alone).
+  /^[ \t]*What does\b(?![^\n]*\byou(?:r|rself)?\b)[^?\n]*?\bdo (?:now|next)\b[^?\n]*?\?[ \t]*$/gim,
 ];
 
 /** Issue #44: backstage "let me roll for stealth" chatter only when the engine
@@ -118,18 +136,68 @@ const META_PATTERNS: RegExp[] = [
 const DICE_META_PATTERN =
   /\b(?:let me|i['’]ll|now i['’]ll)\b[^.!?\n]*?\b(?:roll for|call the|adjudicate)\b[^.!?\n]*?\b(?:stealth|dice|check|contested)\b[^.!?\n]*?[.!?:]/gi;
 
+/** Two complementary gates: the plumbing-NOUN branch (BACKSTAGE_SIGNAL), and the
+ * FORM branch (issue #103 3rd reopen) — first-person authoring-planning language
+ * with no second-person narration in the segment. Shared by the leading-preamble
+ * and trailing-tail divider cuts. */
+function looksBackstage(segment: string): boolean {
+  return (
+    BACKSTAGE_SIGNAL.test(segment) ||
+    (ASSISTANT_PLANNING.test(segment) && !SECOND_PERSON.test(segment))
+  );
+}
+
 function stripBackstagePreamble(text: string): string {
   const match = BACKSTAGE_DIVIDER.exec(text);
   if (!match) return text;
   const preamble = text.slice(0, match.index);
-  // Two complementary gates: the plumbing-NOUN branch (BACKSTAGE_SIGNAL), and the
-  // FORM branch (issue #103 3rd reopen) — first-person authoring-planning language
-  // with no second-person narration anywhere in the preamble.
-  const isBackstage =
-    BACKSTAGE_SIGNAL.test(preamble) ||
-    (ASSISTANT_PLANNING.test(preamble) && !SECOND_PERSON.test(preamble));
-  if (!isBackstage) return text;
+  if (!looksBackstage(preamble)) return text;
   return text.slice(match.index + match[0].length).trimStart();
+}
+
+/** Issue #103 (4th reopen — "Danny the Horse"): the mirror of the preamble cut.
+ * The model finishes a correct opening, then draws a `---` and keeps thinking out
+ * loud below it ("Now I'll append an entry to the session log.", a duplicate
+ * scene, a third-person hand-back). The preamble cut can't see this — the text
+ * ABOVE the divider is real fiction. So if the block immediately AFTER a `---`
+ * divider OPENS with backstage language, drop the divider and everything after
+ * it. We test only the first sentence of the tail (not the whole block), so a
+ * legitimate `---` scene break followed by real second-person prose ("Hours
+ * later, you wake to torchlight…") is left untouched. */
+function stripBackstageTail(text: string): string {
+  const divider = /-{3,}[ \t]*(?:\n|$)/g;
+  let match: RegExpExecArray | null;
+  while ((match = divider.exec(text)) !== null) {
+    const after = text.slice(match.index + match[0].length);
+    if (!after.trim()) break; // trailing divider with nothing after — leave it
+    if (looksBackstage(firstSentenceOf(after))) {
+      const kept = text.slice(0, match.index).trimEnd();
+      return kept.trim() ? kept : text; // never blank the whole reply
+    }
+  }
+  return text;
+}
+
+/** The first sentence of a segment (up to the first ., !, ?, or :), used to gate
+ * the trailing-tail cut on how the block OPENS rather than any signal buried in
+ * later legitimate prose. Falls back to a short lead if there's no terminator. */
+function firstSentenceOf(segment: string): string {
+  const trimmed = segment.replace(/^\s+/, "");
+  const match = /^[\s\S]*?[.!?:](?=\s|$)/.exec(trimmed);
+  return match ? match[0] : trimmed.slice(0, 200);
+}
+
+/** Issue #103 (4th reopen): a DM turn ends at its first standalone player
+ * hand-back ("What do you do?"). Anything after that line is not part of the turn
+ * — a second scene or backstage chatter the model tacked on. Keep the prompt,
+ * drop the rest. Only fires when real content actually follows, so a normal turn
+ * that simply ends on the prompt is unchanged. */
+function truncateAfterHandback(text: string): string {
+  const match = HANDBACK_LINE.exec(text);
+  if (!match) return text;
+  const end = match.index + match[0].length;
+  if (!text.slice(end).trim()) return text; // nothing trailing to cut
+  return text.slice(0, end).trimEnd();
 }
 
 /** Issue #72: the model sometimes declares the session over mid-play — a bold
@@ -173,11 +241,17 @@ export function stripMetaChatter(text: string, opts: { autoRoll?: boolean } = {}
   // reads badly and can hide a boundary from the patterns below.
   let out = text.replace(/([.!?:])(?=[A-Z"'“‘])/g, "$1 ");
   out = stripBackstagePreamble(out);
+  // Issue #103 (4th reopen): the mirror of the preamble cut — backstage chatter
+  // the model tacked on AFTER a `---`, below a correct opening.
+  out = stripBackstageTail(out);
   // Issue #72: drop any "session over" epilogue the model tacked on mid-play.
   out = stripSessionEndEpilogue(out);
   for (const re of META_PATTERNS) out = out.replace(re, "");
   // Only scrub "let me roll for stealth" backstage chatter when the engine rolls
   // (issue #44). With auto-roll off, that phrasing is the DM asking the player.
   if (opts.autoRoll !== false) out = out.replace(DICE_META_PATTERN, "");
+  // Issue #103 (4th reopen): the turn ends at the first player hand-back — drop
+  // any second scene / babble the model appended after "What do you do?".
+  out = truncateAfterHandback(out);
   return tidyWhitespace(out);
 }
