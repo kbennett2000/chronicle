@@ -72,23 +72,40 @@ export interface MusicPlayerState {
   currentName: string | null;
   /** A human-readable problem (no tracks, Navidrome unreachable), else null. */
   error: string | null;
+  /** Whether playback is manually paused — distinct from muted (issue #108). */
+  isPaused: boolean;
+  /** Pause playback (manual, independent of mute). */
+  pause: () => void;
+  /** Resume playback after a manual pause. */
+  resume: () => void;
+  /** Skip to the next track (clears a manual pause). */
+  next: () => void;
+  /** Skip to the previous track (clears a manual pause). */
+  prev: () => void;
 }
 
 /** Owns an Audio element and a shuffled playlist. Loads the user's music config,
  * fetches tracks for the chosen source, and plays through them (advancing on
- * `ended`). Respects `muted` (pause/resume) and browser autoplay blocking (arms
- * a one-shot gesture listener). Nothing plays unless music is enabled AND
- * unmuted. */
+ * `ended`). Respects `muted` and a manual `paused` flag (issue #108: a separate
+ * pause so the transport controls don't fight the mute button), plus browser
+ * autoplay blocking (arms a one-shot gesture listener). Nothing plays unless
+ * music is enabled AND unmuted AND not manually paused. */
 export function useMusicPlayer(connection: Connection, muted: boolean): MusicPlayerState {
   const [enabled, setEnabled] = useState(false);
   const [currentName, setCurrentName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [paused, setPaused] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playlistRef = useRef<Track[]>([]);
   const indexRef = useRef(0);
   const sourceRef = useRef<MusicSource>("local");
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
+  // The live next/prev closures live inside the load effect (they close over
+  // playCurrent); the returned callbacks are stable and delegate through this ref.
+  const controlsRef = useRef<{ next: () => void; prev: () => void }>({ next: () => {}, prev: () => {} });
 
   // Load config + playlist once per connection.
   useEffect(() => {
@@ -103,15 +120,28 @@ export function useMusicPlayer(connection: Connection, muted: boolean): MusicPla
       const track = list[indexRef.current % list.length];
       audio.src = trackUrl(connection, sourceRef.current, track.id);
       setCurrentName(track.name);
-      if (!mutedRef.current) audio.play().catch(() => armGesture());
+      if (!mutedRef.current && !pausedRef.current) audio.play().catch(() => armGesture());
+    };
+    // A manual skip always resumes playback (clearing any manual pause).
+    const clearPaused = () => {
+      pausedRef.current = false;
+      setPaused(false);
     };
     const next = () => {
       indexRef.current = (indexRef.current + 1) % Math.max(1, playlistRef.current.length);
+      clearPaused();
       playCurrent();
     };
+    const prev = () => {
+      const len = Math.max(1, playlistRef.current.length);
+      indexRef.current = (indexRef.current - 1 + len) % len;
+      clearPaused();
+      playCurrent();
+    };
+    controlsRef.current = { next, prev };
     let armed = false;
     const onGesture = () => {
-      if (!mutedRef.current) audio.play().catch(() => {});
+      if (!mutedRef.current && !pausedRef.current) audio.play().catch(() => {});
       disarm();
     };
     const disarm = () => {
@@ -165,13 +195,29 @@ export function useMusicPlayer(connection: Connection, muted: boolean): MusicPla
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection.serverAddress, connection.token]);
 
-  // React to mute changes.
+  // React to mute OR manual-pause changes. Playback resumes only when BOTH are
+  // clear, so muting and manually pausing stay independent (issue #108: unmuting
+  // must not override a manual pause, and resuming must not override a mute).
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (muted) audio.pause();
+    const shouldPlay = !muted && !paused;
+    if (!shouldPlay) audio.pause();
     else if (audio.src) audio.play().catch(() => {});
-  }, [muted]);
+  }, [muted, paused]);
 
-  return { enabled, currentName, error };
+  // Stable callbacks (identity preserved across renders) so Play.tsx buttons and
+  // effects don't churn. next/prev delegate to the live closures in controlsRef.
+  const next = useRef(() => controlsRef.current.next()).current;
+  const prev = useRef(() => controlsRef.current.prev()).current;
+  const pause = useRef(() => {
+    pausedRef.current = true;
+    setPaused(true);
+  }).current;
+  const resume = useRef(() => {
+    pausedRef.current = false;
+    setPaused(false);
+  }).current;
+
+  return { enabled, currentName, error, isPaused: paused, pause, resume, next, prev };
 }

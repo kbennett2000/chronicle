@@ -12,8 +12,12 @@ a server on the LAN — chosen in the (now per-user, ADR-0019) settings screen.
 
 ## Decision
 1. **Two sources, chosen per user:** `local` or `navidrome`. Music is opt-in
-   (off by default); when enabled, the existing mute button in Active Play
-   controls it (and is hidden when music is off).
+   (off by default); when enabled, a small transport in the Active Play header
+   controls it (and is hidden when music is off). The transport is
+   previous / play-pause / next alongside the mute button (issue #108). **Manual
+   pause is a separate flag from mute:** playback resumes only when the track is
+   both unmuted and not manually paused, so the two controls never override each
+   other (unmuting does not un-pause; skipping tracks clears a manual pause).
 
 2. **Local files:** a top-level `music/` folder (gitignored — it's the user's
    own media). Users drop `.mp3/.wav/.ogg/.flac/.m4a` files in, sub-foldered
