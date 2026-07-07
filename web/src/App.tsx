@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Home } from "./screens/Home";
 import { Play } from "./screens/Play";
 import { Settings } from "./screens/Settings";
+import { GameSettings } from "./screens/GameSettings";
 import { NewCharacter } from "./screens/NewCharacter";
 import { Auth } from "./screens/Auth";
 import { checkConnection, type ConnectionStatus } from "./lib/api";
@@ -15,7 +16,7 @@ import {
 } from "./lib/connection";
 import { getCampaignId, listCampaigns } from "./lib/campaign";
 
-type Screen = "home" | "play" | "settings" | "newcharacter" | "auth";
+type Screen = "home" | "play" | "settings" | "gamesettings" | "newcharacter" | "auth";
 
 /** The one-off SVG filter every parchment surface references via
  * filter:url(#deckle) — ported verbatim from the handoff. */
@@ -164,7 +165,15 @@ export function App() {
         />
       )}
       {screen === "play" && campaignId && (
-        <Play connection={connection} campaignId={campaignId} onGoHome={() => setScreen("home")} />
+        <Play
+          connection={connection}
+          campaignId={campaignId}
+          onGoHome={() => setScreen("home")}
+          onOpenSettings={() => setScreen("gamesettings")}
+        />
+      )}
+      {screen === "gamesettings" && campaignId && (
+        <GameSettings connection={connection} campaignId={campaignId} onBack={() => setScreen("play")} />
       )}
       {screen === "newcharacter" && (
         <NewCharacter

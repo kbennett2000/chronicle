@@ -28,6 +28,8 @@ interface PlayProps {
   connection: Connection;
   campaignId: string;
   onGoHome: () => void;
+  /** #114: open this game's in-game settings screen (the header gear). */
+  onOpenSettings: () => void;
 }
 
 type LoadState = { status: "loading" } | { status: "error"; message: string } | { status: "ready" };
@@ -497,7 +499,7 @@ function PanelPending({ label }: { label: string }) {
   );
 }
 
-export function Play({ connection, campaignId, onGoHome }: PlayProps) {
+export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayProps) {
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
   const [chapters, setChapters] = useState<string[]>([]);
   const [turns, setTurns] = useState<DisplayTurn[]>([]);
@@ -1024,6 +1026,18 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
             off), so a player can give this game its own music mid-session. A
             change reloads playback via useMusicPlayer.reload. */}
         <GameMusicPopover connection={connection} campaignId={campaignId} onChanged={music.reload} />
+        {/* #114: this game's settings — Look/World/music and the (locked) engine. */}
+        <button
+          className="icon-button"
+          onClick={onOpenSettings}
+          aria-label="Game settings"
+          data-testid="game-settings-open"
+        >
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--brass)" strokeWidth="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </button>
       </div>
 
       {isDesktop ? (
