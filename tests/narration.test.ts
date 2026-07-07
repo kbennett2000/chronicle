@@ -81,6 +81,29 @@ test("keeps a legitimate --- scene break in ordinary prose (no backstage tokens)
   assert.equal(stripMetaChatter(raw), raw);
 });
 
+test("strips a second opening-setup variant: hallucinated tool + colon-glued --- (#103 reopen)", () => {
+  // The reopened-#103 leak: a *different* wording than the Bob-the-Guy case —
+  // a hallucinated "texture-tables tool", "append the opening to the session
+  // log", and the dashes glued onto a COLON ("...session log:---"), none of
+  // which the first fix's punctuation-only divider or exact-tool-name signal
+  // caught. Only the prose after the divider must survive.
+  const raw =
+    "I don't have access to the texture-tables tool in this context. Now I'll append the opening to the session log:---\n\nThe cave is cold and close, stone pressing in from above and behind. Your enormous slug body glistens with moisture in the dying firelight.";
+  assert.equal(
+    stripMetaChatter(raw),
+    "The cave is cold and close, stone pressing in from above and behind. Your enormous slug body glistens with moisture in the dying firelight."
+  );
+});
+
+test("keeps first-person NPC dialogue before a --- scene break (#103 reopen guard)", () => {
+  // "I don't have access to..." is legitimate fiction in an NPC's mouth. The
+  // signal is plumbing-only vocabulary (no generic "access"/"context"), so a
+  // real scene break after such dialogue must be preserved verbatim.
+  const raw =
+    "\"I don't have access to the vault,\" the guard mutters, turning away.\n\n---\n\nYou step into the corridor, the torchlight guttering behind you.";
+  assert.equal(stripMetaChatter(raw), raw);
+});
+
 test("strips directory and tool-access meta without a divider", () => {
   const raw =
     "I'm restricted to the active campaign's own directory. The DM tools are not available through direct tool calls. The corridor is dark ahead.";

@@ -13,18 +13,33 @@
  * line of defense (it tells the model not to emit this at all); this is the
  * safety net for when it does anyway. */
 
-/** Signals that text before a `---` divider is backstage reasoning, not fiction. */
+/** Signals that text before a `---` divider is backstage reasoning, not fiction.
+ * These are deliberately restricted to app-plumbing vocabulary that never appears
+ * in second-person D&D narration — tool/table/log/state/generation nouns — rather
+ * than specific sentence phrasings, so the whole preamble is dropped in one move
+ * regardless of how the model words it (issue #103 kept slipping through when the
+ * wording changed game to game). Two tokens are intentionally generalized:
+ * `[\w-]*tables? tool` catches the real `seed-tables tool` AND the hallucinated
+ * `texture-tables tool` (and any future `<x>-tables tool`), and `image[-\s]?generation`
+ * catches "image generation call" / "image-generation step" alike. Generic
+ * phrases like "don't have access" / "in this context" are deliberately NOT here:
+ * they false-positive on legitimate first-person NPC dialogue before a real
+ * `---` scene break. */
 const BACKSTAGE_SIGNAL =
-  /(?:campaign directory|working directory|campaign state files?|character sheet shows|initialize the (?:character|campaign)|dm tools|not available through|restricted to the active campaign|set up .{0,60}character sheet|set up the world-state|dice tool directly|seed-tables tool|seed the opening|roll_seed|listed as deferred|these tools are available|image generation call|adjudicate the outcome directly)/i;
+  /(?:campaign directory|working directory|campaign state files?|campaign (?:state|files)|character sheet shows|initialize the (?:character|campaign)|dm tools|not available through|restricted to the active campaign|set up .{0,60}character sheet|set up the world-state|world-state|dice tool directly|[\w-]*tables?\s+tool|seed the opening|roll_seed|append the opening|session[-\s]?log|listed as deferred|these tools are available|image[-\s]?generation|adjudicate the outcome directly)/i;
 
 /** A `---` scene-divider, tolerant of the model gluing the dashes onto the end
- * of the preceding sentence (issue #103: "...into action immediately.---\n\n")
- * rather than emitting the clean "\n---\n" the older split assumed. Requires a
- * newline or end-of-text after the dashes so an inline "word --- word" em-dash
- * usage never counts. This only ever fires when the preamble also matches
- * BACKSTAGE_SIGNAL, so a legitimate mid-scene "\n---\n" break in real fiction
- * (no backstage tokens) is left untouched. */
-const BACKSTAGE_DIVIDER = /(?:^|\n|[ \t.!?…])[ \t]*-{3,}[ \t]*(?:\n|$)/;
+ * of the preceding token whatever it is — issue #103 first surfaced this with a
+ * sentence-final glue ("...into action immediately.---\n\n"), then again with the
+ * dashes fused to a colon ("...append the opening to the session log:---\n\n"),
+ * neither of which the older clean-"\n---\n" split (or the punctuation-only lead
+ * char class) caught. We now match 3+ dashes anywhere, as long as a newline or
+ * end-of-text follows them, which still excludes inline "word --- word" em-dash
+ * usage (there prose, not a newline, follows the dashes) and the single "—"
+ * glyph. This only ever fires when the preamble also matches BACKSTAGE_SIGNAL,
+ * so a legitimate mid-scene "\n---\n" break in real fiction (no backstage
+ * tokens) is left untouched. */
+const BACKSTAGE_DIVIDER = /-{3,}[ \t]*(?:\n|$)/;
 
 const META_PATTERNS: RegExp[] = [
   // "Let me / I'll / I need to — update|record|save|write|log ... state|files|sheet|roster|quest log|inventory ..."
