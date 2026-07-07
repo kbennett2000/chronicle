@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ConnectionStatus } from "../lib/api";
+import { ApiError, type ConnectionStatus } from "../lib/api";
 import type { Connection } from "../lib/connection";
 import { getState, listCampaigns, startSession, deleteCampaign, type CampaignSummary, type StateSnapshot } from "../lib/campaign";
 import { findMarkdownSection } from "../lib/markdown";
@@ -8,7 +8,11 @@ import { useIsDesktop } from "../lib/useIsDesktop";
 
 interface HomeProps {
   connection: Connection;
-  campaignId: string;
+  /** null when the player has no active campaign selected yet (issue #97). */
+  campaignId: string | null;
+  /** App is still resolving which campaign to show — render loading, not the
+   * first-run empty state, so a returning player doesn't see a flash of it. */
+  campaignResolving: boolean;
   connectionStatus: ConnectionStatus;
   onContinue: () => void;
   /** Switch the active campaign to `id` and enter Play (ADR-0010). */
@@ -20,11 +24,16 @@ interface HomeProps {
   onOpenSettings: () => void;
 }
 
-type LoadState = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; snapshot: StateSnapshot };
+type LoadState =
+  | { status: "loading" }
+  | { status: "empty" }
+  | { status: "error"; message: string }
+  | { status: "ready"; snapshot: StateSnapshot };
 
 export function Home({
   connection,
   campaignId,
+  campaignResolving,
   connectionStatus,
   onContinue,
   onEnterCampaign,
@@ -43,18 +52,34 @@ export function Home({
 
   useEffect(() => {
     let cancelled = false;
+    // No active campaign: show a loading shimmer while App is still resolving
+    // one, otherwise the first-run empty state (issue #97).
+    if (!campaignId) {
+      setLoad({ status: campaignResolving ? "loading" : "empty" });
+      return;
+    }
     setLoad({ status: "loading" });
     getState(connection, campaignId)
       .then((snapshot) => {
         if (!cancelled) setLoad({ status: "ready", snapshot });
       })
       .catch((err) => {
-        if (!cancelled) setLoad({ status: "error", message: err instanceof Error ? err.message : String(err) });
+        if (cancelled) return;
+        // A 404 means this campaign no longer exists for the user — a stale
+        // ?campaign= link or a deleted game (issue #97: e.g. Kris's `qroky-qrok`).
+        // Rather than dead-ending on a raw error, drop to the recoverable empty
+        // state; the OTHER CHRONICLES list below lets them pick a real one in a
+        // tap. Other failures (server unreachable) still surface as an error.
+        if (err instanceof ApiError && err.status === 404) {
+          setLoad({ status: "empty" });
+          return;
+        }
+        setLoad({ status: "error", message: err instanceof Error ? err.message : String(err) });
       });
     return () => {
       cancelled = true;
     };
-  }, [connection, campaignId]);
+  }, [connection, campaignId, campaignResolving]);
 
   // The other chronicles to switch to (ADR-0010). Best-effort: a failure just
   // leaves the list empty, since the primary card above still works.
@@ -83,6 +108,7 @@ export function Home({
   }
 
   async function handleContinue() {
+    if (!campaignId) return;
     setStarting(true);
     setStartError(null);
     try {
@@ -179,6 +205,16 @@ export function Home({
                 Reading the chronicle…
               </div>
             )}
+            {load.status === "empty" && (
+              <div
+                data-testid="home-no-campaign"
+                style={{ fontStyle: "italic", color: "var(--ink-dim)", fontSize: 13.5, textAlign: "center", lineHeight: 1.5 }}
+              >
+                {others.length > 0
+                  ? "That chronicle isn't available — choose one below, or begin anew."
+                  : "No chronicle yet — begin your first tale below."}
+              </div>
+            )}
             {load.status === "error" && (
               <div style={{ fontStyle: "italic", color: "var(--ember)", fontSize: 13, textAlign: "center" }}>
                 Couldn't read this campaign: {load.message}
@@ -215,7 +251,8 @@ export function Home({
                     aria-label={`Delete ${load.snapshot.characterSheet.name}`}
                     onClick={() => {
                       setDeleteError(null);
-                      setConfirmDelete({ id: campaignId, name: String(load.snapshot.characterSheet.name) });
+                      // `ready` implies an active campaign, so campaignId is set.
+                      setConfirmDelete({ id: campaignId!, name: String(load.snapshot.characterSheet.name) });
                     }}
                     style={{ ...trashButtonStyle, marginLeft: "auto" }}
                   >

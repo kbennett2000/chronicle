@@ -1,11 +1,14 @@
 import { ApiError, apiFetch, apiFetchRaw } from "./api";
 import type { Connection } from "./connection";
 
-/** No "list campaigns" endpoint exists (per the Slice 14 plan) — the old
- * bare-JS UI took the campaign id from a ?campaign= query param,
- * defaulting to the one fixture that exists today. Same convention here. */
-export function getCampaignId(): string {
-  return new URLSearchParams(window.location.search).get("campaign") || "test-campaign";
+/** The active campaign id from a ?campaign= query param (kept for shareable
+ * links and the e2e harness), or `null` when absent. Issue #97: this used to
+ * fall back to the `test-campaign` fixture, which real multi-user accounts don't
+ * own — so a fresh load 404'd every campaign-scoped fetch (state, settings). The
+ * app now resolves the user's own campaign from GET /campaigns instead (App.tsx),
+ * and shows a first-run empty state when they have none. */
+export function getCampaignId(): string | null {
+  return new URLSearchParams(window.location.search).get("campaign");
 }
 
 /** character-sheet.json's shape per docs/design/handoff-2026-07/
