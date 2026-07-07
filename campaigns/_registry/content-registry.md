@@ -32,6 +32,7 @@ instant they're rolled, before use, so a crash mid-turn can't lose the log.
 - A well that returns exactly what's thrown into it, transformed into what you actually needed
 - A chapel that answers prayers literally, precisely, and unhelpfully
 - A guild hall for a profession that stopped existing three centuries ago, still fully staffed
+- A well that shows you your death if you look too long, but also quietly shows you how to avoid it
 
 ## npc
 - town crier or herald | has accepted they will never be truly happy and has made peace with it | is genuinely afraid of their own reflection
