@@ -305,10 +305,9 @@ export const GENERATE_IMAGE_TOOL_NAME = "mcp__image-tools__generate_image";
  * module state, so one campaign's in-flight turn can't pick up another's
  * cwd or style. Only wired into a turn's mcpServers/allowedTools when
  * settings.generateImages is true (see dm-engine.ts). */
-export function createImageMcpServer(campaignDir: string, settings: CampaignSettings) {
-  const generateImageTool = tool(
-    "generate_image",
-    `Generate and save a portrait/scene image for a NEWLY created entity. Call
+/** Shared tool metadata (ADR-0018): one source of truth for the in-process
+ * Claude tool and the stdio MCP server (src/mcp-servers/image-server.ts). */
+export const GENERATE_IMAGE_DESCRIPTION = `Generate and save a portrait/scene image for a NEWLY created entity. Call
 this ONCE, only on first creation, for one of the five trigger points: character
 creation, first appearance of a named/major NPC, first entry into a significant
 location, discovery of a notable item (magic/legendary gear, quest-critical
@@ -323,31 +322,48 @@ field for NPCs/bosses, an "Image" line under the location's world-state.md
 bullet, an "Image" note on the item/quest entry, a portraitImage field on
 character-sheet.json) so it is never regenerated on a later mention. On
 failure, note nothing in the state file and continue narrating normally — an
-image is best-effort, never a blocker.`,
-    {
-      entityType: z
-        .enum(["character", "npc", "location", "item", "boss"])
-        .describe("Which kind of entity this image is for."),
-      name: z.string().describe("The entity's name — used to build the saved filename."),
-      description: z
-        .string()
-        .describe(
-          "The entity's already-established visual description, drawn from your narration/state files, not invented fresh here."
-        ),
-    },
-    async ({ entityType, name, description }) => {
-      const result = await generateImage(campaignDir, entityType, name, description, settings);
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: result.ok
-              ? `Image generated and saved at ${result.relPath}. Record this path in ${name}'s state-file entry now.`
-              : `Image generation failed (${result.error}). Continue narrating normally without an image for ${name} — do not retry this turn.`,
-          },
-        ],
-      };
-    }
+image is best-effort, never a blocker.`;
+
+export const GENERATE_IMAGE_INPUT_SHAPE = {
+  entityType: z
+    .enum(["character", "npc", "location", "item", "boss"])
+    .describe("Which kind of entity this image is for."),
+  name: z.string().describe("The entity's name — used to build the saved filename."),
+  description: z
+    .string()
+    .describe(
+      "The entity's already-established visual description, drawn from your narration/state files, not invented fresh here."
+    ),
+};
+
+/** Provider-neutral tool body. `campaignDir`/`settings` come from the caller:
+ * a per-turn closure in-process, or env + the campaign's live settings in the
+ * stdio server. */
+export async function runGenerateImageTool(
+  args: { entityType: "character" | "npc" | "location" | "item" | "boss"; name: string; description: string },
+  campaignDir: string,
+  settings: CampaignSettings
+): Promise<{ content: { type: "text"; text: string }[] }> {
+  const { entityType, name, description } = args;
+  const result = await generateImage(campaignDir, entityType, name, description, settings);
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: result.ok
+          ? `Image generated and saved at ${result.relPath}. Record this path in ${name}'s state-file entry now.`
+          : `Image generation failed (${result.error}). Continue narrating normally without an image for ${name} — do not retry this turn.`,
+      },
+    ],
+  };
+}
+
+export function createImageMcpServer(campaignDir: string, settings: CampaignSettings) {
+  const generateImageTool = tool(
+    "generate_image",
+    GENERATE_IMAGE_DESCRIPTION,
+    GENERATE_IMAGE_INPUT_SHAPE,
+    async (args) => runGenerateImageTool(args, campaignDir, settings)
   );
 
   return createSdkMcpServer({ name: "image-tools", tools: [generateImageTool] });

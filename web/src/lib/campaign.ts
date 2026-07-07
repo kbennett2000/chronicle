@@ -82,6 +82,9 @@ export interface SessionStartResult {
   resumed: boolean;
   sessionLogPath: string;
   model: string;
+  /** ADR-0018: which engine the (re)started session runs on. The server may
+   * have auto-corrected the model to fit the provider, so trust this pair. */
+  provider: string;
 }
 
 /** Mirrors src/campaign-store.ts's CampaignSettings. `model` is included
@@ -91,13 +94,19 @@ export interface SessionStartResult {
  * off the request body. The only way to change it is
  * POST /campaigns/:id/session/start (see startSession above) — that
  * split is real, not a frontend simplification, so CampaignSettingsPatch
- * below deliberately excludes it rather than silently no-opping it. */
+ * below deliberately excludes it rather than silently no-opping it.
+ * `provider` (ADR-0018) is the peer of `model`: readable here, changeable
+ * only via POST /session/start, so it's excluded from the patch type too. */
 /** Issue #69: narration length/detail. Absent is treated as "detailed" by the
  * server, so the UI shows "detailed" as the effective value when unset. */
 export type ResponseLength = "concise" | "standard" | "detailed";
 
+
 export interface CampaignSettings {
   model: string;
+  /** ADR-0018: which engine runs the DM ("claude" | "grok"). Always present in
+   * GET's response; never settable via POST /settings (see startSession). */
+  provider: string;
   artStyle?: string;
   worldSetting?: string;
   toneWhimsy?: number;
@@ -112,11 +121,20 @@ export interface CampaignSettings {
   autoIllustrateTurns?: boolean;
 }
 
-export type CampaignSettingsPatch = Partial<Omit<CampaignSettings, "model">>;
+export type CampaignSettingsPatch = Partial<Omit<CampaignSettings, "model" | "provider">>;
 
 export interface ModelOption {
   id: string;
   label: string;
+}
+
+/** ADR-0018: one entry per DM engine, each carrying its own model list + default,
+ * as returned by GET /models `providers`. */
+export interface ProviderOption {
+  id: string;
+  label: string;
+  models: readonly ModelOption[];
+  default: string;
 }
 
 export async function getCampaignSettings(connection: Connection, campaignId: string): Promise<CampaignSettings> {
@@ -148,8 +166,15 @@ export async function setCharacterAppearance(
   return result.appearance;
 }
 
-export async function getModels(connection: Connection): Promise<{ models: ModelOption[]; default: string }> {
-  return (await apiFetch(connection, "/models")) as { models: ModelOption[]; default: string };
+export async function getModels(
+  connection: Connection
+): Promise<{ models: ModelOption[]; default: string; providers: ProviderOption[]; defaultProvider: string }> {
+  return (await apiFetch(connection, "/models")) as {
+    models: ModelOption[];
+    default: string;
+    providers: ProviderOption[];
+    defaultProvider: string;
+  };
 }
 
 /** Issue #64: the look/play/model settings a new game should pre-fill from —
@@ -159,6 +184,23 @@ export async function getModels(connection: Connection): Promise<{ models: Model
 export async function getNewGameDefaults(connection: Connection): Promise<Partial<CampaignSettings>> {
   const result = (await apiFetch(connection, "/new-game-defaults")) as { settings: Partial<CampaignSettings> };
   return result.settings;
+}
+
+/** ADR-0019: the signed-in user's *default* settings — the per-user baseline
+ * every new campaign inherits (seeded from .env at registration, editable here).
+ * Unlike a campaign patch, this accepts model/provider too. */
+export async function getUserDefaults(connection: Connection): Promise<Partial<CampaignSettings>> {
+  return (await apiFetch(connection, "/me/settings")) as Partial<CampaignSettings>;
+}
+
+export async function saveUserDefaults(
+  connection: Connection,
+  settings: Partial<CampaignSettings>
+): Promise<Partial<CampaignSettings>> {
+  return (await apiFetch(connection, "/me/settings", {
+    method: "POST",
+    body: JSON.stringify(settings),
+  })) as Partial<CampaignSettings>;
 }
 
 /** Mirrors src/campaign-store.ts's CampaignSummary — the Home chronicle list
@@ -207,6 +249,10 @@ export interface CampaignCreationSettings {
   /** Issue #57: the model the new campaign should start on. Omitted keeps the
    * server default (Sonnet). */
   model?: string;
+  /** ADR-0018: the DM engine the new campaign should start on ("claude" |
+   * "grok"). Omitted keeps the server default (Claude). The server validates
+   * that any given `model` belongs to this provider. */
+  provider?: string;
   /** Issue #64: look/play defaults, pre-filled on the New Chronicle screen from
    * the most recently played campaign (GET /new-game-defaults) so a new game
    * doesn't revert to images-off. The create screen sends these explicitly;
@@ -244,11 +290,15 @@ export async function getState(connection: Connection, campaignId: string): Prom
 export async function startSession(
   connection: Connection,
   campaignId: string,
-  model?: string
+  model?: string,
+  provider?: string
 ): Promise<SessionStartResult> {
+  const body: { model?: string; provider?: string } = {};
+  if (model) body.model = model;
+  if (provider) body.provider = provider;
   return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/session/start`, {
     method: "POST",
-    body: JSON.stringify(model ? { model } : {}),
+    body: JSON.stringify(body),
   })) as SessionStartResult;
 }
 

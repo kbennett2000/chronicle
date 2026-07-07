@@ -167,10 +167,9 @@ const CATEGORY_TRIGGER_HINTS: Record<TextureCategory, string> = {
 /** Builds the texture-tables MCP server, bound to one campaign's own
  * texture-registry.md. A fresh server is built per turn (see dm-engine.ts),
  * same pattern as createSeedMcpServer. */
-export function createTextureMcpServer(campaignDir: string, wildcardChance: number = WILDCARD_CHANCE) {
-  const rollTextureTool = tool(
-    "roll_texture",
-    `Roll a fresh texture beat — a travel event, rumor, encounter twist,
+/** Shared tool metadata (ADR-0018): one source of truth for the in-process
+ * Claude tool and the stdio MCP server (src/mcp-servers/texture-server.ts). */
+export const ROLL_TEXTURE_DESCRIPTION = `Roll a fresh texture beat — a travel event, rumor, encounter twist,
 emotional beat, or surreal moment — when you judge the moment calls for
 one. These are NOT fixed-cadence rolls: don't call this on every travel
 scene, every tavern visit, or every encounter, or it will feel mechanical
@@ -182,29 +181,41 @@ Elaborate the returned beat in your own words as natural narration; never
 quote or recite its wording verbatim, it's inspiration, not dialogue. The
 beat is drawn from this campaign's own texture registry, so it won't
 repeat something already used earlier in this same story (a different
-campaign is free to reuse it — this is texture, not identity).`,
-    {
-      category: z
-        .enum(["travel_event", "rumor", "encounter_twist", "emotional_beat", "surreal_moment"])
-        .describe(
-          "travel_event: a beat for a journey between locations. rumor: overheard gossip in a social/downtime scene. encounter_twist: a hook that makes a combat/tense encounter memorable. emotional_beat: an emotionally resonant moment tagged [happy]/[sad]/[bittersweet]/[funny]/[awe]. surreal_moment: a sparing, strange 'what just happened' beat."
-        ),
-    },
-    async ({ category }) => {
-      const result = rollTexture(category, campaignDir, wildcardChance);
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Texture (${result.category}): ${result.value}${
-              result.exhausted
-                ? "\n(Every option in this table has been used at least once in this campaign — this is a reuse. Vary your elaboration so it doesn't read like a repeat.)"
-                : ""
-            }`,
-          },
-        ],
-      };
-    }
+campaign is free to reuse it — this is texture, not identity).`;
+
+export const ROLL_TEXTURE_INPUT_SHAPE = {
+  category: z
+    .enum(["travel_event", "rumor", "encounter_twist", "emotional_beat", "surreal_moment"])
+    .describe(
+      "travel_event: a beat for a journey between locations. rumor: overheard gossip in a social/downtime scene. encounter_twist: a hook that makes a combat/tense encounter memorable. emotional_beat: an emotionally resonant moment tagged [happy]/[sad]/[bittersweet]/[funny]/[awe]. surreal_moment: a sparing, strange 'what just happened' beat."
+    ),
+};
+
+/** Provider-neutral tool body. `campaignDir` (per-campaign registry) is
+ * required; `wildcardChance` comes from the campaign's live toneWhimsy. */
+export function runRollTextureTool(
+  args: { category: TextureCategory },
+  campaignDir: string,
+  wildcardChance: number = WILDCARD_CHANCE
+): { content: { type: "text"; text: string }[] } {
+  const result = rollTexture(args.category, campaignDir, wildcardChance);
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: `Texture (${result.category}): ${result.value}${
+          result.exhausted
+            ? "\n(Every option in this table has been used at least once in this campaign — this is a reuse. Vary your elaboration so it doesn't read like a repeat.)"
+            : ""
+        }`,
+      },
+    ],
+  };
+}
+
+export function createTextureMcpServer(campaignDir: string, wildcardChance: number = WILDCARD_CHANCE) {
+  const rollTextureTool = tool("roll_texture", ROLL_TEXTURE_DESCRIPTION, ROLL_TEXTURE_INPUT_SHAPE, async (args) =>
+    runRollTextureTool(args, campaignDir, wildcardChance)
   );
 
   return createSdkMcpServer({ name: "texture-tables", tools: [rollTextureTool] });

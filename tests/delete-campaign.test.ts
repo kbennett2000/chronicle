@@ -5,24 +5,24 @@ import path from "node:path";
 import {
   scaffoldCampaign,
   deleteCampaign,
-  CAMPAIGNS_ROOT,
   CampaignProtectedError,
   CampaignNotFoundError,
 } from "../src/campaign-store.js";
 
-// Uses a throwaway id under the real CAMPAIGNS_ROOT (deleteCampaign only
-// operates there) with a guaranteed-unique suffix so it never collides with a
-// real campaign, and always cleans itself up.
+// ADR-0019: campaigns nest under a user dir now. Tests use a throwaway user +
+// id under the real CAMPAIGNS_ROOT with a guaranteed-unique suffix so they
+// never collide with a real campaign, and always clean up.
+const TEST_USER = "zz-delete-test-user";
 function uniqueId(): string {
   return `zz-delete-test-${process.pid}-${process.hrtime.bigint()}`;
 }
 
 test("deleteCampaign removes a scaffolded campaign directory (#50)", () => {
   const id = uniqueId();
-  const dir = scaffoldCampaign(id, { name: "Doomed", race: "Human", class: "Rogue", level: 1 });
+  const dir = scaffoldCampaign(TEST_USER, id, { name: "Doomed", race: "Human", class: "Rogue", level: 1 });
   try {
     assert.ok(fs.existsSync(dir));
-    deleteCampaign(id);
+    deleteCampaign(TEST_USER, id);
     assert.equal(fs.existsSync(dir), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -30,11 +30,11 @@ test("deleteCampaign removes a scaffolded campaign directory (#50)", () => {
 });
 
 test("deleteCampaign refuses the tracked test-campaign fixture", () => {
-  assert.throws(() => deleteCampaign("test-campaign"), CampaignProtectedError);
-  // And the fixture is still there (guard fired before any fs work).
-  assert.ok(fs.existsSync(path.join(CAMPAIGNS_ROOT, "test-campaign")));
+  // The protected-id guard fires on the campaign id before any fs work, so the
+  // fixture is untouched wherever it lives (post-migration: campaigns/kris/).
+  assert.throws(() => deleteCampaign(TEST_USER, "test-campaign"), CampaignProtectedError);
 });
 
 test("deleteCampaign on a non-existent id throws CampaignNotFoundError, not a silent success", () => {
-  assert.throws(() => deleteCampaign(uniqueId()), CampaignNotFoundError);
+  assert.throws(() => deleteCampaign(TEST_USER, uniqueId()), CampaignNotFoundError);
 });

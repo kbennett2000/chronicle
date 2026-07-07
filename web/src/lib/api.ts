@@ -2,7 +2,7 @@ import { type Connection, serverOrigin } from "./connection";
 
 export class AuthError extends Error {
   constructor() {
-    super("Not authorized — check the server address and passphrase in Settings.");
+    super("Your session has expired — please log in again.");
   }
 }
 
@@ -46,7 +46,7 @@ export async function apiFetchRaw(
       ...options,
       headers: {
         "Content-Type": "application/json",
-        "X-Chronicle-Token": connection.passphrase,
+        "X-Chronicle-Token": connection.token,
         ...options?.headers,
       },
     });
@@ -73,7 +73,7 @@ export async function fetchImageBlob(connection: Connection, path: string): Prom
   let res: Response;
   try {
     res = await fetch(`${serverOrigin(connection)}${path}`, {
-      headers: { "X-Chronicle-Token": connection.passphrase },
+      headers: { "X-Chronicle-Token": connection.token },
     });
   } catch (err) {
     throw connectionError(err);

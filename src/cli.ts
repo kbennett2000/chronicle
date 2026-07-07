@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { createInterface } from "node:readline";
 import { runTurn } from "./dm-engine.js";
 import {
@@ -8,8 +9,13 @@ import {
   readCampaignModel,
   readCampaignSettings,
 } from "./campaign-store.js";
+import { userIdForUsername } from "./user-store.js";
 
-const campaignDir = resolveCampaignDir("test-campaign");
+// ADR-0019: campaigns nest under a user dir now. The CLI harness plays the
+// tracked test-campaign, owned by the bootstrap user (BOOTSTRAP_USERNAME in
+// .env, default "kris") after the multi-user migration.
+const bootstrapUserId = userIdForUsername(process.env.BOOTSTRAP_USERNAME ?? "kris");
+const campaignDir = resolveCampaignDir(bootstrapUserId, "test-campaign");
 const model = readCampaignModel(campaignDir);
 const settings = readCampaignSettings(campaignDir);
 

@@ -9,10 +9,10 @@ import {
   newGameDefaultSettings,
 } from "../src/campaign-store.js";
 
-// Throwaway ids under the real CAMPAIGNS_ROOT with a guaranteed-unique suffix,
-// always cleaned up. newGameDefaultSettings scans the whole root, so recency is
-// pinned with fs.utimes to a far-future time to win deterministically over
-// whatever real campaigns (test-campaign, etc.) happen to be present.
+// ADR-0019: newGameDefaultSettings scans one USER's campaigns dir now, so a
+// throwaway test user isolates these fixtures from any real campaigns entirely.
+// Recency is still pinned with fs.utimes so `newer` deterministically wins.
+const TEST_USER = "zz-newgame-user";
 function uniqueId(suffix: string): string {
   return `zz-newgame-${suffix}-${process.pid}-${process.hrtime.bigint()}`;
 }
@@ -30,8 +30,8 @@ function stampTranscript(campaignDir: string, whenMs: number): void {
 test("newGameDefaultSettings copies the most recently played campaign, minus worldSetting (#64)", () => {
   const older = uniqueId("older");
   const newer = uniqueId("newer");
-  const olderDir = scaffoldCampaign(older, { name: "Older", race: "Human", class: "Rogue", level: 1 });
-  const newerDir = scaffoldCampaign(newer, { name: "Newer", race: "Elf", class: "Wizard", level: 1 });
+  const olderDir = scaffoldCampaign(TEST_USER, older, { name: "Older", race: "Human", class: "Rogue", level: 1 });
+  const newerDir = scaffoldCampaign(TEST_USER, newer, { name: "Newer", race: "Elf", class: "Wizard", level: 1 });
   try {
     persistCampaignModel(olderDir, "claude-sonnet-5");
     persistCampaignSettings(olderDir, { generateImages: false, autoRollDice: true });
@@ -51,7 +51,7 @@ test("newGameDefaultSettings copies the most recently played campaign, minus wor
     stampTranscript(olderDir, Date.parse("2000-01-01T00:00:00Z"));
     stampTranscript(newerDir, Date.parse("2099-01-01T00:00:00Z"));
 
-    const defaults = newGameDefaultSettings();
+    const defaults = newGameDefaultSettings(TEST_USER);
     assert.equal(defaults.model, "claude-haiku-4-5");
     assert.equal(defaults.generateImages, true);
     assert.equal(defaults.artStyle, "Lego-style");

@@ -6,6 +6,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const CAMPAIGNS_ROOT = path.resolve(__dirname, "../campaigns");
 
 const CAMPAIGN_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+/** ADR-0019: campaigns nest under a per-user dir. A user id has the same shape
+ * as a campaign id; the shared `_registry` helper starts with `_` and so fails
+ * this pattern (it can never be mistaken for a user or campaign). */
+const USER_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 export class InvalidCampaignIdError extends Error {}
 export class CampaignNotFoundError extends Error {}
@@ -18,15 +22,31 @@ export class CampaignProtectedError extends Error {}
  * deliberately-tracked test-campaign needs naming here. */
 const PROTECTED_CAMPAIGN_IDS = new Set(["test-campaign"]);
 
-/** Resolves a campaign id to its working directory, rejecting anything
- * that isn't a plain directory name directly under CAMPAIGNS_ROOT (no
- * path traversal, no absolute paths). */
-export function resolveCampaignDir(campaignId: string): string {
+/** ADR-0019: the campaigns root for one user, `campaigns/<userId>`. Validates
+ * the user id can't traverse out of CAMPAIGNS_ROOT. */
+export function userCampaignsRoot(userId: string): string {
+  if (!USER_ID_PATTERN.test(userId)) {
+    throw new InvalidCampaignIdError(`invalid user id: ${userId}`);
+  }
+  const dir = path.resolve(CAMPAIGNS_ROOT, userId);
+  if (path.dirname(dir) !== CAMPAIGNS_ROOT) {
+    throw new InvalidCampaignIdError(`invalid user id: ${userId}`);
+  }
+  return dir;
+}
+
+/** Resolves a (userId, campaignId) pair to its working directory, rejecting
+ * anything that isn't a plain directory name directly under the user's own
+ * campaigns dir (no path traversal, no absolute paths). ADR-0019: the userId
+ * always comes from the caller's session, never the URL, so a user can only
+ * ever resolve their own campaigns. */
+export function resolveCampaignDir(userId: string, campaignId: string): string {
+  const root = userCampaignsRoot(userId);
   if (!CAMPAIGN_ID_PATTERN.test(campaignId)) {
     throw new InvalidCampaignIdError(`invalid campaign id: ${campaignId}`);
   }
-  const dir = path.resolve(CAMPAIGNS_ROOT, campaignId);
-  if (path.dirname(dir) !== CAMPAIGNS_ROOT) {
+  const dir = path.resolve(root, campaignId);
+  if (path.dirname(dir) !== root) {
     throw new InvalidCampaignIdError(`invalid campaign id: ${campaignId}`);
   }
   if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
@@ -39,11 +59,11 @@ export function resolveCampaignDir(campaignId: string): string {
  * enforces the id is a plain name that exists directly under CAMPAIGNS_ROOT
  * (no traversal), and the maintained fixtures are refused up front — so a
  * delete can neither escape campaigns/ nor destroy tracked test data. */
-export function deleteCampaign(campaignId: string): void {
+export function deleteCampaign(userId: string, campaignId: string): void {
   if (PROTECTED_CAMPAIGN_IDS.has(campaignId)) {
     throw new CampaignProtectedError(`campaign '${campaignId}' is protected and cannot be deleted`);
   }
-  const dir = resolveCampaignDir(campaignId);
+  const dir = resolveCampaignDir(userId, campaignId);
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -91,15 +111,17 @@ _(none yet)_
  * that fails the pattern or already exists — this is the one primitive used by
  * both scripts/scratch-campaign.ts and POST /campaigns (ADR-0010). */
 export function scaffoldCampaign(
+  userId: string,
   campaignId: string,
   characterSheet: unknown,
   settings: Record<string, unknown> = { model: DEFAULT_MODEL, autoRollDice: true }
 ): string {
+  const root = userCampaignsRoot(userId);
   if (!CAMPAIGN_ID_PATTERN.test(campaignId)) {
     throw new InvalidCampaignIdError(`invalid campaign id: ${campaignId}`);
   }
-  const dir = path.resolve(CAMPAIGNS_ROOT, campaignId);
-  if (path.dirname(dir) !== CAMPAIGNS_ROOT) {
+  const dir = path.resolve(root, campaignId);
+  if (path.dirname(dir) !== root) {
     throw new InvalidCampaignIdError(`invalid campaign id: ${campaignId}`);
   }
   if (fs.existsSync(dir)) {
@@ -180,15 +202,16 @@ export function readCharacterIdentity(campaignDir: string): CharacterIdentity {
   }
 }
 
-/** Every campaign under CAMPAIGNS_ROOT (skipping the _registry helper dir and
- * any dir without a character-sheet.json), for the Home list (ADR-0010). */
-export function listCampaigns(): CampaignSummary[] {
-  if (!fs.existsSync(CAMPAIGNS_ROOT)) return [];
+/** Every campaign under one user's campaigns dir (skipping any dir without a
+ * character-sheet.json), for that user's Home list (ADR-0010 / ADR-0019). */
+export function listCampaigns(userId: string): CampaignSummary[] {
+  const root = userCampaignsRoot(userId);
+  if (!fs.existsSync(root)) return [];
   const out: CampaignSummary[] = [];
-  for (const entry of fs.readdirSync(CAMPAIGNS_ROOT, { withFileTypes: true })) {
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.name === "_registry") continue;
     if (!CAMPAIGN_ID_PATTERN.test(entry.name)) continue;
-    const dir = path.join(CAMPAIGNS_ROOT, entry.name);
+    const dir = path.join(root, entry.name);
     const sheetPath = path.join(dir, "character-sheet.json");
     if (!fs.existsSync(sheetPath)) continue;
     let sheet: Record<string, unknown> = {};
@@ -216,7 +239,7 @@ export function listCampaigns(): CampaignSummary[] {
  * fidelity/cost tradeoff rather than just the raw model id. Stored
  * per-campaign, not globally — a long-running campaign shouldn't
  * silently change adjudication quality mid-story. */
-export const MODEL_OPTIONS = [
+export const MODEL_OPTIONS_CLAUDE = [
   {
     id: "claude-sonnet-5",
     label:
@@ -234,11 +257,65 @@ export const MODEL_OPTIONS = [
   },
 ] as const;
 
+/** ADR-0018: Grok as an alternate DM brain. Both models validated in Slice 0. */
+export const MODEL_OPTIONS_GROK = [
+  {
+    id: "grok-build",
+    label:
+      "Grok Build (512K context) — xAI's general agent model. The recommended Grok DM.",
+  },
+  {
+    id: "grok-composer-2.5-fast",
+    label:
+      "Grok Composer 2.5 Fast (200K) — faster and cheaper, but tuned for coding, so prose may read plainer.",
+  },
+] as const;
+
+/** Flat union kept for `isValidModelId` and the legacy GET /models `{ models }`
+ * shape. Provider-scoped lists live in `PROVIDERS` below. */
+export const MODEL_OPTIONS = [...MODEL_OPTIONS_CLAUDE, ...MODEL_OPTIONS_GROK] as const;
+
 export type ModelId = (typeof MODEL_OPTIONS)[number]["id"];
 export const DEFAULT_MODEL: ModelId = "claude-sonnet-5";
 
 export function isValidModelId(value: string): value is ModelId {
   return MODEL_OPTIONS.some((m) => m.id === value);
+}
+
+/** ADR-0018: which engine runs the DM. A per-campaign, session-resetting choice
+ * like model — each provider carries its own model list and default. */
+export type ProviderId = "claude" | "grok";
+export const DEFAULT_PROVIDER: ProviderId = "claude";
+
+export const PROVIDERS = [
+  {
+    id: "claude",
+    label: "Claude — Anthropic. The recommended default DM engine.",
+    models: MODEL_OPTIONS_CLAUDE,
+    default: "claude-sonnet-5",
+  },
+  {
+    id: "grok",
+    label: "Grok — xAI. An alternate DM brain (ADR-0018).",
+    models: MODEL_OPTIONS_GROK,
+    default: "grok-build",
+  },
+] as const;
+
+export function isValidProviderId(value: string): value is ProviderId {
+  return PROVIDERS.some((p) => p.id === value);
+}
+
+export function modelsForProvider(provider: ProviderId): readonly { id: string; label: string }[] {
+  return PROVIDERS.find((p) => p.id === provider)?.models ?? [];
+}
+
+export function isModelValidForProvider(provider: ProviderId, model: string): boolean {
+  return modelsForProvider(provider).some((m) => m.id === model);
+}
+
+export function defaultModelForProvider(provider: ProviderId): ModelId {
+  return (PROVIDERS.find((p) => p.id === provider)?.default ?? DEFAULT_MODEL) as ModelId;
 }
 
 const campaignSettingsFile = (campaignDir: string) =>
@@ -272,6 +349,20 @@ export function persistCampaignModel(campaignDir: string, model: ModelId): void 
   writeRawSettings(campaignDir, { ...readRawSettings(campaignDir), model });
 }
 
+/** ADR-0018: which engine runs the DM. Every existing campaign with no stored
+ * value defaults to Claude, so this is backward-compatible with no migration. */
+export function readCampaignProvider(campaignDir: string): ProviderId {
+  const raw = readRawSettings(campaignDir);
+  return typeof raw.provider === "string" && isValidProviderId(raw.provider)
+    ? raw.provider
+    : DEFAULT_PROVIDER;
+}
+
+/** Merge-write like persistCampaignModel — never clobber the other settings. */
+export function persistCampaignProvider(campaignDir: string, provider: ProviderId): void {
+  writeRawSettings(campaignDir, { ...readRawSettings(campaignDir), provider });
+}
+
 /** Per ADR-0004: optional per-campaign narration-layer dials, stored
  * alongside model selection. All absent = standard fantasy defaults,
  * existing WILDCARD_CHANCE, no content bounding — this feature is opt-in. */
@@ -289,6 +380,9 @@ export const DEFAULT_RESPONSE_LENGTH: ResponseLength = "detailed";
 
 export interface CampaignSettings {
   model: ModelId;
+  /** ADR-0018: which engine runs the DM. Like `model`, this is read-only via
+   * GET and only changes through POST /session/start (session reset). */
+  provider: ProviderId;
   artStyle?: string;
   worldSetting?: string;
   /** 0-1. Overrides seed-selector's WILDCARD_CHANCE when set (per ADR-0004,
@@ -316,7 +410,10 @@ export interface CampaignSettings {
 
 export function readCampaignSettings(campaignDir: string): CampaignSettings {
   const raw = readRawSettings(campaignDir);
-  const settings: CampaignSettings = { model: readCampaignModel(campaignDir) };
+  const settings: CampaignSettings = {
+    model: readCampaignModel(campaignDir),
+    provider: readCampaignProvider(campaignDir),
+  };
   if (typeof raw.artStyle === "string" && raw.artStyle.trim()) {
     settings.artStyle = raw.artStyle.trim();
   }
@@ -355,7 +452,7 @@ export function readCampaignSettings(campaignDir: string): CampaignSettings {
  * rather than being stored as a literal empty string. */
 export function persistCampaignSettings(
   campaignDir: string,
-  updates: Partial<Omit<CampaignSettings, "model">>
+  updates: Partial<Omit<CampaignSettings, "model" | "provider">>
 ): CampaignSettings {
   const raw = readRawSettings(campaignDir);
   const merged: Record<string, unknown> = { ...raw, ...updates };
@@ -402,13 +499,14 @@ function campaignRecencyMs(campaignDir: string): number {
  * is deliberately excluded — it's the premise of each specific game, typed fresh
  * on the New Chronicle screen. Returns {} when no eligible campaign exists yet,
  * so the create screen falls back to neutral defaults. */
-export function newGameDefaultSettings(): Partial<CampaignSettings> {
-  if (!fs.existsSync(CAMPAIGNS_ROOT)) return {};
+export function newGameDefaultSettings(userId: string): Partial<CampaignSettings> {
+  const root = userCampaignsRoot(userId);
+  if (!fs.existsSync(root)) return {};
   let best: { dir: string; recency: number } | undefined;
-  for (const entry of fs.readdirSync(CAMPAIGNS_ROOT, { withFileTypes: true })) {
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.name === "_registry") continue;
     if (!CAMPAIGN_ID_PATTERN.test(entry.name)) continue;
-    const dir = path.join(CAMPAIGNS_ROOT, entry.name);
+    const dir = path.join(root, entry.name);
     if (!fs.existsSync(path.join(dir, "character-sheet.json"))) continue;
     const recency = campaignRecencyMs(dir);
     if (!best || recency > best.recency) best = { dir, recency };

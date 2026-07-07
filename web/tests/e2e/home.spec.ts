@@ -42,12 +42,12 @@ test.describe("Home screen — connected state", () => {
     await expect(page.getByText("ACTIVE PLAY")).toBeVisible();
   });
 
-  test("without a stored connection, still redirects to Settings (Slice 15 regression)", async ({
+  test("without a stored token, redirects to the login screen (ADR-0019)", async ({
     page,
     chronicleServer,
   }) => {
     await page.goto(`${chronicleServer.baseURL}/?campaign=${chronicleServer.campaignId}`);
-    await expect(page.getByText("SETTINGS", { exact: true })).toBeVisible();
-    await expect(page.getByText("THE HEARTH")).toBeVisible();
+    await expect(page.getByTestId("auth-submit")).toBeVisible();
+    await expect(page.getByTestId("auth-username")).toBeVisible();
   });
 });

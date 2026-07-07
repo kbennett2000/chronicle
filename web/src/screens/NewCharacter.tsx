@@ -8,6 +8,7 @@ import {
   type CharacterCreationInput,
   type CampaignCreationSettings,
   type ModelOption,
+  type ProviderOption,
   type ResponseLength,
 } from "../lib/campaign";
 import { ToggleRow, ArtStylePicker } from "../components/LookControls";
@@ -137,6 +138,10 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
   // game — so a new game doesn't silently start on Sonnet after you set Haiku.
   const [models, setModels] = useState<ModelOption[]>([]);
   const [model, setModel] = useState<string | null>(null);
+  // ADR-0018: pick the DM engine (Claude/Grok) up front, seeded from the last
+  // game's provider. The model list below is filtered to this provider.
+  const [providers, setProviders] = useState<ProviderOption[]>([]);
+  const [provider, setProvider] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,10 +149,20 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
       .then(([modelsResult, defaults]) => {
         if (cancelled) return;
         setModels(modelsResult.models);
+        setProviders(modelsResult.providers);
         // Pre-fill every dial from the last game's settings, falling back to the
         // neutral scaffold defaults when a field — or the whole last game — is
         // absent (a fresh install with no prior campaign).
-        setModel(defaults.model ?? modelsResult.default);
+        // Resolve the provider first (last game's or the server default), then
+        // reconcile the model against it: keep the last model only if it belongs
+        // to that provider, else fall back to the provider's default. This keeps
+        // the {provider, model} pair valid, which the server enforces on create.
+        const nextProvider = defaults.provider ?? modelsResult.defaultProvider;
+        setProvider(nextProvider);
+        const p = modelsResult.providers.find((x) => x.id === nextProvider);
+        const wantModel = defaults.model;
+        const modelValid = !!wantModel && !!p && p.models.some((m) => m.id === wantModel);
+        setModel(modelValid ? wantModel! : p?.default ?? modelsResult.default);
         setGenerateImages(defaults.generateImages ?? false);
         setAutoIllustrateTurns(defaults.autoIllustrateTurns ?? false);
         setArtStyle(defaults.artStyle ?? "");
@@ -161,6 +176,16 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
       cancelled = true;
     };
   }, [connection]);
+
+  /** Switch engine: reset the selected model to the new provider's default
+   * unless the current one already belongs to it. */
+  function pickProvider(providerId: string) {
+    setProvider(providerId);
+    const p = providers.find((x) => x.id === providerId);
+    if (p && (!model || !p.models.some((m) => m.id === model))) setModel(p.default);
+  }
+
+  const providerModels = providers.find((p) => p.id === provider)?.models ?? models;
 
   const spent = useMemo(() => ABILITIES.reduce((sum, a) => sum + POINT_COST[scores[a.key]], 0), [scores]);
   const remaining = POINT_BUY_BUDGET - spent;
@@ -246,6 +271,9 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
     };
     if (artStyle.trim()) settings.artStyle = artStyle.trim();
     if (worldSetting.trim()) settings.worldSetting = worldSetting.trim();
+    // ADR-0018: seed the new campaign with the chosen engine + model. The server
+    // validates that model belongs to provider.
+    if (provider) settings.provider = provider;
     if (model) settings.model = model;
     try {
       const campaignId = await createCampaign(connection, character, settings);
@@ -482,7 +510,38 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
             <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2, color: "var(--brass)", margin: "26px 0 6px" }}>
               THE ENGINE
             </div>
-            {models.map((option) => {
+            {providers.length > 0 && (
+              <div style={{ display: "flex", gap: 7, marginBottom: 10 }}>
+                {providers.map((p) => {
+                  const active = provider === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      data-testid="newchar-provider-option"
+                      data-selected={active}
+                      title={p.label}
+                      onClick={() => pickProvider(p.id)}
+                      style={{
+                        flex: 1,
+                        cursor: "pointer",
+                        padding: "9px 12px",
+                        borderRadius: 4,
+                        fontFamily: "var(--font-display)",
+                        fontWeight: 600,
+                        fontSize: 13,
+                        color: active ? "var(--ink)" : "var(--ink-faint)",
+                        background: active ? "rgba(124,61,32,.24)" : "rgba(28,20,12,.5)",
+                        border: `1px solid ${active ? "rgba(211,112,60,.55)" : "rgba(109,90,56,.32)"}`,
+                      }}
+                    >
+                      {p.label.split("—")[0].trim()}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {providerModels.map((option) => {
               const selected = model === option.id;
               return (
                 <button

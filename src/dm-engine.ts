@@ -19,7 +19,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  * own cwd (it's shared across all campaigns, not per-campaign state), so it
  * needs its own allowedTools grant — the campaign-scoped `Read(./**)` rule
  * from ADR-0002 wouldn't otherwise reach it. */
-const SRD_DIR = path.resolve(__dirname, "../reference/srd");
+export const SRD_DIR = path.resolve(__dirname, "../reference/srd");
 
 const STATE_FILES = [
   "character-sheet.json",
@@ -131,6 +131,33 @@ items, or verbatim lines/quotes. Invent your own original names for every
 character, faction, location, and object the setting calls for — reskin
 the property's *feel*, not its specific copyrighted content.`;
 
+/** The tool names the DM prompt tells the model to call. They differ by provider:
+ * Claude's in-process MCP tools are `mcp__<server>__<tool>`, while Grok namespaces
+ * its config.toml MCP tools as `<server>__<tool>` (no `mcp__` prefix). ADR-0018. */
+export interface ToolNames {
+  seed: string;
+  texture: string;
+  dice: string;
+  image: string;
+}
+
+export const CLAUDE_TOOL_NAMES: ToolNames = {
+  seed: SEED_TOOL_NAME,
+  texture: TEXTURE_TOOL_NAME,
+  dice: DICE_TOOL_NAME,
+  image: GENERATE_IMAGE_TOOL_NAME,
+};
+
+/** Grok exposes each stdio MCP server's tool as `<serverName>__<toolName>`,
+ * where serverName matches the `[mcp_servers.<name>]` key Chronicle writes into
+ * the per-turn config.toml (see src/mcp-servers/*). */
+export const GROK_TOOL_NAMES: ToolNames = {
+  seed: "seed-tables__roll_seed",
+  texture: "texture-tables__roll_texture",
+  dice: "dice__roll_dice",
+  image: "image-tools__generate_image",
+};
+
 /** Issue #69: rule 9's length guidance, keyed on the campaign's
  * responseLength setting. "detailed" is the default (see
  * DEFAULT_RESPONSE_LENGTH) — players reported replies were too short. Each
@@ -153,11 +180,12 @@ const NARRATION_LENGTH_RULE: Record<ResponseLength, string> = {
    character (that is theirs alone — see the player-agency rule below).`,
 };
 
-function systemPrompt(
+export function systemPrompt(
   campaignDir: string,
   sessionLogPath: string,
   settings: CampaignSettings,
-  character: CharacterIdentity
+  character: CharacterIdentity,
+  toolNames: ToolNames = CLAUDE_TOOL_NAMES
 ): string {
   // Issue #69: narration length is a per-campaign dial; absent → detailed.
   const lengthRule = NARRATION_LENGTH_RULE[settings.responseLength ?? DEFAULT_RESPONSE_LENGTH];
@@ -232,7 +260,7 @@ Every turn:
 ${lengthRule}
 10. Before you invent a brand-new NPC (a new npc-roster.md entry), a new
     location (not previously visited in world-state.md), or a new quest
-    thread (a new quest-log.md entry), call the ${SEED_TOOL_NAME} tool
+    thread (a new quest-log.md entry), call the ${toolNames.seed} tool
     first with the matching category and elaborate what it returns in
     your own words. This does not apply to NPCs/locations/quests that
     already exist in the state files — only to their first creation.
@@ -287,7 +315,7 @@ ${lengthRule}
     by computing or counting it in reasoning alone.
 15. Beyond NPCs/locations/quests (rule 10), texture beats — travel events,
     rumors, encounter twists, emotional beats, surreal moments — are
-    available via the ${TEXTURE_TOOL_NAME} tool. Unlike rule 10, these are
+    available via the ${toolNames.texture} tool. Unlike rule 10, these are
     judgment calls, not mandatory-on-creation: call it only when you
     genuinely judge the moment fits (a travel stretch, a social/downtime
     scene, a fresh encounter, a moment that earns emotional weight, or
@@ -385,18 +413,18 @@ favor of a gentler one, regardless of what's rolled.`);
     sections.push(`Image generation is enabled for this campaign. On character creation, the
 first appearance of a named/major NPC, first entry into a significant
 location, discovery of a notable item, or a boss/major antagonist's reveal —
-call the ${GENERATE_IMAGE_TOOL_NAME} tool ONCE for that entity, using its
+call the ${toolNames.image} tool ONCE for that entity, using its
 already-established description, then record the returned image path in that
 entity's state-file entry. Do not call it again for an entity that already
 has one recorded, and do not call it on every mention — only first creation,
-the same discipline as ${SEED_TOOL_NAME}. If it fails, continue narrating
+the same discipline as ${toolNames.seed}. If it fails, continue narrating
 normally without an image; never let it block or delay your response.`);
   }
 
   if (settings.autoRollDice !== false) {
     sections.push(`Dice: whenever the rules call for a roll — an ability check, attack roll,
 saving throw, damage roll, initiative, death save, or any d20 test — call the
-${DICE_TOOL_NAME} tool and use its result as the authoritative outcome. Never
+${toolNames.dice} tool and use its result as the authoritative outcome. Never
 invent the number yourself, and never ask the player what they rolled: you
 roll for them now. Pass standard notation (e.g. "1d20+5", "2d6", "d100") and
 use the mode argument for advantage/disadvantage. Apply the natural-20 /

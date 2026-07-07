@@ -1,7 +1,9 @@
 # ADR-0003: LAN Exposure and Minimal Auth
 
 ## Status
-Proposed — to be finalized as part of the LAN-hosting slice
+Superseded in part by ADR-0019 — the single shared-secret auth described here
+was replaced by per-user accounts (issue #83). The LAN-exposure posture
+(home-LAN-only, no HTTPS) still stands; only the auth mechanism changed.
 
 ## Context
 Per ADR-0002, the DM engine's permission scope was deliberately revisited
@@ -42,3 +44,6 @@ LAN interface.
   Chronicle is ever reachable beyond that (hosted, multi-user, exposed to
   the internet), this ADR does not cover that case — treat it as a new
   decision when that day comes, not an extension of this one.
+- **Update:** the multi-user case did arrive — see **ADR-0019**, which replaced
+  the single shared secret with per-user accounts + session tokens. The LAN
+  trust boundary and out-of-scope HTTPS decision here are unchanged.

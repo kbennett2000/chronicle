@@ -14,10 +14,13 @@
     "setup": "npm ci && npm --prefix web ci && npm run build:web",
     "start": "npm run serve",
     "typecheck": "tsc --noEmit",
-    "test:unit": "node --import tsx --test tests/*.test.ts"
+    "test:unit": "node --import tsx --test tests/*.test.ts",
+    "migrate:multi-user": "tsx scripts/migrate-to-multi-user.ts",
+    "verify:grok-parity": "tsx scripts/verify-grok-parity.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.201",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "dotenv": "^17.4.2",
     "zod": "^4.0.0"
   },

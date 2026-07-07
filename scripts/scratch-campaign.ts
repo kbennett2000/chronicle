@@ -4,17 +4,31 @@
  *
  * Usage:
  *   npx tsx scripts/scratch-campaign.ts create
+ *   npx tsx scripts/scratch-campaign.ts create --provider grok --model grok-build --images
  *   npx tsx scripts/scratch-campaign.ts delete <id>
  *
- * `create` prints the new campaign id to stdout. `delete` hard-refuses any
- * id that doesn't start with "scratch-" — this is the actual safety rail,
+ * `create` prints the new campaign id to stdout. Its optional flags let a
+ * parity/validation run (scripts/verify-grok-parity.ts) scaffold a campaign on
+ * a specific engine instead of the Claude/Sonnet default. `delete` hard-refuses
+ * any id that doesn't start with "scratch-" — this is the actual safety rail,
  * not a confirmation prompt that could be bypassed.
  */
+import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
-import { CAMPAIGNS_ROOT, scaffoldCampaign } from "../src/campaign-store.js";
+import { scaffoldCampaign, userCampaignsRoot } from "../src/campaign-store.js";
+import { userIdForUsername } from "../src/user-store.js";
 
 const SCRATCH_PREFIX = "scratch-";
+
+// ADR-0019: campaigns nest under a user dir. Scratch campaigns live under the
+// bootstrap user by default (BOOTSTRAP_USERNAME in .env, default "kris"),
+// overridable with `--user <name>`.
+function resolveUserId(argv: string[]): string {
+  const idx = argv.indexOf("--user");
+  const name = idx !== -1 ? argv[idx + 1] : process.env.BOOTSTRAP_USERNAME ?? "kris";
+  return userIdForUsername(name);
+}
 
 const EMPTY_CHARACTER_SHEET = {
   name: "",
@@ -38,17 +52,43 @@ const EMPTY_CHARACTER_SHEET = {
   spellSlots: {},
 };
 
-function createScratchCampaign(): string {
+interface CreateOptions {
+  provider?: string;
+  model?: string;
+  images?: boolean;
+}
+
+/** Parse `--provider x --model y --images` off create's remaining argv. Unknown
+ * flags are ignored — this is a validation helper, not a strict CLI. */
+function parseCreateOptions(argv: string[]): CreateOptions {
+  const opts: CreateOptions = {};
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--provider") opts.provider = argv[++i];
+    else if (argv[i] === "--model") opts.model = argv[++i];
+    else if (argv[i] === "--images") opts.images = true;
+  }
+  return opts;
+}
+
+function createScratchCampaign(userId: string, opts: CreateOptions = {}): string {
   // Lowercased: campaign-store.ts's CAMPAIGN_ID_PATTERN only allows
   // lowercase letters, and toISOString()'s literal "T"/"Z" would otherwise
   // produce an id that resolveCampaignDir() rejects.
   const id = `${SCRATCH_PREFIX}${new Date().toISOString().replace(/[:.]/g, "-")}`.toLowerCase();
-  scaffoldCampaign(id, EMPTY_CHARACTER_SHEET, { model: "claude-sonnet-5" });
+  // Written verbatim into campaign-settings.json; readCampaignProvider/Settings
+  // read provider/model straight back out. Default matches the plain create.
+  const settings: Record<string, unknown> = {
+    model: opts.model ?? "claude-sonnet-5",
+    autoRollDice: true,
+  };
+  if (opts.provider) settings.provider = opts.provider;
+  if (opts.images) settings.generateImages = true;
+  scaffoldCampaign(userId, id, EMPTY_CHARACTER_SHEET, settings);
   console.log(id);
   return id;
 }
 
-function deleteScratchCampaign(id: string): void {
+function deleteScratchCampaign(userId: string, id: string): void {
   if (!id.startsWith(SCRATCH_PREFIX)) {
     console.error(
       `refusing to delete "${id}": only campaign ids starting with "${SCRATCH_PREFIX}" may be deleted by this tool`
@@ -56,8 +96,9 @@ function deleteScratchCampaign(id: string): void {
     process.exit(1);
   }
 
-  const dir = path.join(CAMPAIGNS_ROOT, id);
-  if (path.dirname(dir) !== CAMPAIGNS_ROOT) {
+  const root = userCampaignsRoot(userId);
+  const dir = path.join(root, id);
+  if (path.dirname(dir) !== root) {
     console.error(`refusing to delete "${id}": resolves outside campaigns/`);
     process.exit(1);
   }
@@ -71,17 +112,18 @@ function deleteScratchCampaign(id: string): void {
 }
 
 const [, , command, arg] = process.argv;
+const userId = resolveUserId(process.argv);
 
 switch (command) {
   case "create":
-    createScratchCampaign();
+    createScratchCampaign(userId, parseCreateOptions(process.argv.slice(3)));
     break;
   case "delete":
     if (!arg) {
       console.error("usage: tsx scripts/scratch-campaign.ts delete <id>");
       process.exit(1);
     }
-    deleteScratchCampaign(arg);
+    deleteScratchCampaign(userId, arg);
     break;
   default:
     console.error("usage: tsx scripts/scratch-campaign.ts <create|delete <id>>");
