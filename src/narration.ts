@@ -24,9 +24,40 @@
  * catches "image generation call" / "image-generation step" alike. Generic
  * phrases like "don't have access" / "in this context" are deliberately NOT here:
  * they false-positive on legitimate first-person NPC dialogue before a real
- * `---` scene break. */
+ * `---` scene break.
+ *
+ * This noun list is a losing game on its own — issue #103 reopened a third time
+ * (the "Therman" leak) with a preamble that named NONE of these plumbing nouns
+ * ("existing state files", "his world", "generate the opening scene"). So the
+ * divider gate is now ALSO backed by ASSISTANT_PLANNING, a FORM-based branch (see
+ * below) that keys off the shape of first-person authoring language rather than
+ * specific nouns. */
 const BACKSTAGE_SIGNAL =
   /(?:campaign directory|working directory|campaign state files?|campaign (?:state|files)|character sheet shows|initialize the (?:character|campaign)|dm tools|not available through|restricted to the active campaign|set up .{0,60}character sheet|set up the world-state|world-state|dice tool directly|[\w-]*tables?\s+tool|seed the opening|roll_seed|append the opening|session[-\s]?log|listed as deferred|these tools are available|image[-\s]?generation|adjudicate the outcome directly)/i;
+
+/** Issue #103 (3rd reopen — the "Therman" leak): FORM-based backstage detection.
+ * The preamble before the `---` is first-person assistant-planning language
+ * ABOUT authoring the scene ("Now I'll generate the opening scene", "I'll begin
+ * by reading the existing state files", "Let me set it in motion..."). Unlike the
+ * plumbing NOUNS in BACKSTAGE_SIGNAL this FORM is stable across wording, which is
+ * where the noun list keeps losing.
+ *
+ * To stay as conservative as this module's existing "verb paired with an object"
+ * rule, a match requires all three of: a first-person planning marker + an
+ * authoring verb + a narrative-authoring object. So NPC dialogue like "Let me set
+ * the table" (marker + verb, but "table" is not an authoring object) is NOT
+ * matched. The subject alternation deliberately omits bare "I": "I don't have
+ * access..." (legitimate NPC dialogue) must not trip it. This branch is further
+ * gated by SECOND_PERSON below — any "you"/"your" in the preamble means it is (or
+ * contains) real fiction, so the form branch stands down. */
+const ASSISTANT_PLANNING =
+  /\b(?:i['’]ll|i will|i['’]m going to|i am going to|now,?\s*i['’]ll|let me|i need to|i['’]m about to|i intend to|first,?\s*i['’]ll)\b[^.!?\n]{0,80}?\b(?:read\w*|generat\w+|craft\w*|writ\w+|creat\w*|compos\w*|set\w*|seed\w*|establish\w*|prepar\w*|begin\w*|open\w*|start\w*|ground\w*|fram\w*|draft\w*|build\w*|describ\w*|narrat\w*|kick\w*)\b[^.!?\n]{0,40}?\b(?:opening|scenes?|stor(?:y|ies)|narrat\w+|encounter|situation|state\s+files?|world[-\s]?state|campaign|session)\b/i;
+
+/** Second-person narration marker. Real D&D narration is second person; if the
+ * pre-divider preamble contains any "you"/"your"/"yourself" it is real fiction,
+ * so the ASSISTANT_PLANNING form branch stands down (only the whole-preamble
+ * opening-leak shape, which never addresses "you", is cut). */
+const SECOND_PERSON = /\byou(?:r|rs|rself|rselves)?\b/i;
 
 /** A `---` scene-divider, tolerant of the model gluing the dashes onto the end
  * of the preceding token whatever it is — issue #103 first surfaced this with a
@@ -91,7 +122,13 @@ function stripBackstagePreamble(text: string): string {
   const match = BACKSTAGE_DIVIDER.exec(text);
   if (!match) return text;
   const preamble = text.slice(0, match.index);
-  if (!BACKSTAGE_SIGNAL.test(preamble)) return text;
+  // Two complementary gates: the plumbing-NOUN branch (BACKSTAGE_SIGNAL), and the
+  // FORM branch (issue #103 3rd reopen) — first-person authoring-planning language
+  // with no second-person narration anywhere in the preamble.
+  const isBackstage =
+    BACKSTAGE_SIGNAL.test(preamble) ||
+    (ASSISTANT_PLANNING.test(preamble) && !SECOND_PERSON.test(preamble));
+  if (!isBackstage) return text;
   return text.slice(match.index + match[0].length).trimStart();
 }
 

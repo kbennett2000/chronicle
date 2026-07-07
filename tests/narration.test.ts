@@ -104,6 +104,29 @@ test("keeps first-person NPC dialogue before a --- scene break (#103 reopen guar
   assert.equal(stripMetaChatter(raw), raw);
 });
 
+test("strips a first-person authoring preamble that names none of the plumbing nouns (#103 3rd reopen — Therman)", () => {
+  // The reported "Therman" leak: the preamble is pure first-person authoring
+  // planning ("Now I'll generate the opening scene", "reading the existing state
+  // files") and names NONE of the BACKSTAGE_SIGNAL plumbing nouns, with the
+  // dashes glued to the last word ("...in the world.---"). Only the story after
+  // the divider must survive. The FORM branch catches this.
+  const raw =
+    "I'll begin by reading the existing state files to understand what's already established about Therman and his world. Now I'll generate the opening scene. Let me set it in motion with an immediate, concrete situation that fits Therman's nature as a barbarian and grounds his striking appearance in the world.---\n\nThe common room of the Crooked Flagon reeks of stale ale. You stand near the bar.\n\nWhat do you do?";
+  assert.equal(
+    stripMetaChatter(raw),
+    "The common room of the Crooked Flagon reeks of stale ale. You stand near the bar.\n\nWhat do you do?"
+  );
+});
+
+test("keeps NPC dialogue with a planning-shaped verb but no authoring object before a --- break (#103 3rd reopen guard)", () => {
+  // Locks in the verb+object pairing of the FORM branch: "Let me set the table"
+  // has a planning marker and a verb ("set"), but "table" is not a
+  // narrative-authoring object, so real fiction before a scene break survives.
+  const raw =
+    "\"Let me set the table,\" she said, gesturing to the empty hall.\n\n---\n\nThe candles gutter as the guests file in.";
+  assert.equal(stripMetaChatter(raw), raw);
+});
+
 test("strips directory and tool-access meta without a divider", () => {
   const raw =
     "I'm restricted to the active campaign's own directory. The DM tools are not available through direct tool calls. The corridor is dark ahead.";
