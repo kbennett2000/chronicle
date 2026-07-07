@@ -21,7 +21,17 @@ export interface AuthedImage {
  * fetched successfully it's a blob: URL; on any failure (missing file,
  * network, auth) it settles back to null so the caller renders its
  * normal no-image state rather than a broken-image icon. */
-export function useAuthedImage(connection: Connection, campaignId: string, filename: string | undefined): AuthedImage {
+export function useAuthedImage(
+  connection: Connection,
+  campaignId: string,
+  filename: string | undefined,
+  // Issue #66: a changing token forces a refetch even when `filename` is
+  // unchanged. A regenerated image reuses the same deterministic filename, so
+  // without this the cached blob (and the browser's HTTP cache on the image
+  // URL) would keep serving the old picture. Bumping this on regenerate both
+  // re-runs the effect and adds a `?v=` query that bypasses the HTTP cache.
+  cacheBust?: string | number
+): AuthedImage {
   const [state, setState] = useState<AuthedImage>({ url: null, status: filename ? "loading" : "empty" });
 
   useEffect(() => {
@@ -37,9 +47,10 @@ export function useAuthedImage(connection: Connection, campaignId: string, filen
     // pattern excludes "/" entirely, so any directory prefix must be
     // stripped down to the bare basename before building this URL.
     const basename = filename.split("/").pop() || filename;
+    const bust = cacheBust ? `?v=${encodeURIComponent(String(cacheBust))}` : "";
     let objectUrl: string | null = null;
     let cancelled = false;
-    fetchImageBlob(connection, `/campaigns/${encodeURIComponent(campaignId)}/images/${encodeURIComponent(basename)}`)
+    fetchImageBlob(connection, `/campaigns/${encodeURIComponent(campaignId)}/images/${encodeURIComponent(basename)}${bust}`)
       .then((blob) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
@@ -52,7 +63,7 @@ export function useAuthedImage(connection: Connection, campaignId: string, filen
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [connection, campaignId, filename]);
+  }, [connection, campaignId, filename, cacheBust]);
 
   return state;
 }

@@ -6,8 +6,12 @@ import { createTextureMcpServer, TEXTURE_TOOL_NAME } from "./texture-selector.js
 import { createImageMcpServer, GENERATE_IMAGE_TOOL_NAME } from "./image-generator.js";
 import { createDiceMcpServer, DICE_TOOL_NAME } from "./dice.js";
 import { stripMetaChatter } from "./narration.js";
-import type { CampaignSettings } from "./campaign-store.js";
-import { readCharacterIdentity, type CharacterIdentity } from "./campaign-store.js";
+import type { CampaignSettings, ResponseLength } from "./campaign-store.js";
+import {
+  readCharacterIdentity,
+  type CharacterIdentity,
+  DEFAULT_RESPONSE_LENGTH,
+} from "./campaign-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -154,6 +158,28 @@ export const GROK_TOOL_NAMES: ToolNames = {
   image: "image-tools__generate_image",
 };
 
+/** Issue #69: rule 9's length guidance, keyed on the campaign's
+ * responseLength setting. "detailed" is the default (see
+ * DEFAULT_RESPONSE_LENGTH) — players reported replies were too short. Each
+ * variant cross-references the player-agency rule (#70): a longer reply is
+ * filled with the world, never by inventing the player character's actions. */
+const NARRATION_LENGTH_RULE: Record<ResponseLength, string> = {
+  concise: `9. Keep narration concise, matching the length/complexity of the player's
+   input. Don't pad with unnecessary prose.`,
+  standard: `9. Give narration room to breathe — a solid paragraph or two, scaling up
+   with the weight of the scene and down for a quick exchange. Ground it in
+   concrete sensory and world detail rather than padding. Add length only by
+   deepening the world, the environment, and the NPCs' reactions — never by
+   inventing actions, choices, or dialogue for the player character.`,
+  detailed: `9. Default to vivid, immersive, multi-paragraph narration rich in sensory,
+   environmental, and NPC detail — describe the space, the atmosphere, the
+   sounds and textures, and how the world and its people react. Let quiet
+   moments still land a few full paragraphs and big moments run longer; only a
+   truly trivial exchange should be short. Every added sentence must deepen the
+   WORLD, never invent actions, choices, feelings, or dialogue for the player
+   character (that is theirs alone — see the player-agency rule below).`,
+};
+
 export function systemPrompt(
   campaignDir: string,
   sessionLogPath: string,
@@ -161,11 +187,19 @@ export function systemPrompt(
   character: CharacterIdentity,
   toolNames: ToolNames = CLAUDE_TOOL_NAMES
 ): string {
+  // Issue #69: narration length is a per-campaign dial; absent → detailed.
+  const lengthRule = NARRATION_LENGTH_RULE[settings.responseLength ?? DEFAULT_RESPONSE_LENGTH];
   // Issues #51/#48: the player character is whoever character-sheet.json says
   // — never a hardcoded name. A blank race/class (older/edge sheets) degrades
   // to just the name rather than emitting a dangling "a  " descriptor.
   const descriptor = [character.race, character.class].filter(Boolean).join(" ").trim();
   const who = descriptor ? `${character.name}, a ${descriptor}` : character.name;
+  // Issue #71: if the sheet carries a physical description, tell the DM — so
+  // narration and any auto-generated portrait match the player's intent (a
+  // female Goliath was being rendered as a man for want of this).
+  const appearanceLine = character.appearance
+    ? `\n${character.name}'s appearance (honor this in narration and in any image you generate of them): ${character.appearance}`
+    : "";
   // Issue #63: address every state file by its ABSOLUTE path. The Agent SDK
   // reports the enclosing git repo root — not our `cwd: campaignDir` — as the
   // model's working directory, so a bare filename like "character-sheet.json"
@@ -177,7 +211,7 @@ export function systemPrompt(
   // relative, so this is purely about telling the model WHERE the files are.
   const stateFilePaths = STATE_FILES.map((f) => path.join(campaignDir, f));
   const base = `You are the Dungeon Master for a solo Dungeons & Dragons 5th Edition
-campaign for the player character ${who}. This campaign's persistent state
+campaign for the player character ${who}.${appearanceLine} This campaign's persistent state
 lives as plain files in the campaign directory ${campaignDir} — this is the
 source of truth, not your conversation memory. Always read and write these
 files by their full absolute paths below; do NOT assume they are in your
@@ -193,8 +227,11 @@ Every turn:
    location, factions, NPC identity/disposition, quest status). Do not
    rely on your memory of earlier turns for these facts — the files are
    ground truth.
-2. Narrate the outcome of the player's stated action, adjudicating D&D 5e
-   rules as best you can.
+2. Narrate the outcome of the player's stated action — meaning the world's
+   reaction to it (what happens, what NPCs do, what the environment reveals),
+   adjudicating D&D 5e rules as best you can. Narrate only the action the
+   player actually declared; never add further actions, decisions, or lines
+   of dialogue on their character's behalf (see the player-agency rule below).
 3. In the same turn, update every state file affected by what just
    happened (HP change, item gained/lost, condition applied/removed, XP
    gained, new location, new/updated NPC, quest progress). Don't defer
@@ -220,8 +257,7 @@ Every turn:
    them to npc-roster.md.
 8. Append a short (1-3 sentence) entry summarizing this turn's events to
    ${sessionLogPath}. Never overwrite prior entries in it — append only.
-9. Keep narration concise, matching the length/complexity of the player's
-   input. Don't pad with unnecessary prose.
+${lengthRule}
 10. Before you invent a brand-new NPC (a new npc-roster.md entry), a new
     location (not previously visited in world-state.md), or a new quest
     thread (a new quest-log.md entry), call the ${toolNames.seed} tool
@@ -309,6 +345,29 @@ Every turn:
     "Back to the story:", or similar segues. Perform the file writes
     silently and let the prose flow as if the state simply IS what you
     wrote. The only text you emit is the story the player reads.
+18. ${character.name} belongs to the player, not to you. Narrate only the
+    world: the environment, NPCs, creatures, and the consequences of what
+    the player declared. Never author the player character's own actions,
+    choices, decisions, dialogue, thoughts, feelings, or reactions beyond
+    exactly what the player stated this turn — do not decide what they do
+    next, do not put words in their mouth, do not narrate what they feel or
+    think, and do not have them move, speak, or commit to anything they
+    didn't say. Resolve the outcome of their stated action, then STOP and
+    hand control back: end on a live beat in the world (an NPC waiting on a
+    reply, a situation demanding a decision) that clearly invites their next
+    move, and let them supply it. If you catch yourself writing "you say",
+    "you decide", "you feel", "you draw your sword", or any other action or
+    line the player didn't give you, cut it — that choice is theirs to make.
+19. Never end, conclude, or "wrap up" the session, and never write an
+    epilogue, retrospective, or closing summary of the story so far. The
+    session runs continuously for as long as the player keeps playing — that
+    decision is theirs alone, never yours. Do not emit "Session End", "End
+    of Session", "End of the First Session", "The End", "To be continued",
+    "Fin", a scene-break line followed by a wrap-up, or any similar framing,
+    even after a climactic or natural-feeling stopping point. However
+    momentous the moment just was, there is always a next moment: keep the
+    world live and end every reply on an in-progress beat that invites the
+    player's next action, exactly as rule 18 requires.
 
 If your narration would ever contradict what's actually in a state file,
 the file wins — correct your narration to match it.`;
@@ -405,7 +464,8 @@ respond to yet.
 
 Narrate an immersive, present-tense opening that:
 - establishes exactly where ${character.name} is and what is happening around
-  them right now, in vivid sensory detail (a few tight paragraphs, not a wall);
+  them right now, in vivid sensory detail (follow your narration-length
+  guidance for how much to write);
 - fits the campaign's established world setting and tone;
 - naturally grounds ${character.name}'s appearance and the gear they carry, in
   the fiction (no stat block, no mechanics talk);

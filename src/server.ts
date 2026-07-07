@@ -21,17 +21,25 @@ import {
   readTurnTranscript,
   setTranscriptRecordImage,
   recordEntityImage,
+  setCharacterAppearance,
+  writePreTurnSnapshot,
+  hasPreTurnSnapshot,
+  restorePreTurnSnapshot,
+  truncateTranscript,
+  pruneSnapshotsAfter,
   readCampaignModel,
   persistCampaignModel,
   readCampaignProvider,
   persistCampaignProvider,
   readCampaignSettings,
   persistCampaignSettings,
+  newGameDefaultSettings,
   scaffoldCampaign,
   deleteCampaign,
   listCampaigns,
   CAMPAIGNS_ROOT,
   CONTENT_INTENSITIES,
+  RESPONSE_LENGTHS,
   isValidModelId,
   isValidProviderId,
   isModelValidForProvider,
@@ -43,12 +51,18 @@ import {
   CampaignExistsError,
   CampaignProtectedError,
   type ContentIntensity,
+  type ResponseLength,
   type CampaignSettings,
   type ProviderId,
   type ModelId,
 } from "./campaign-store.js";
 import { generateImage } from "./image-generator.js";
-import { buildCharacterSheet, deriveCampaignId, CharacterValidationError } from "./character-gen.js";
+import {
+  buildCharacterSheet,
+  deriveCampaignId,
+  CharacterValidationError,
+  MAX_APPEARANCE_CHARS,
+} from "./character-gen.js";
 
 const dotenvResult = loadDotenv();
 if (dotenvResult.error) {
@@ -156,6 +170,18 @@ const ROUTES: Array<{
     },
   },
   {
+    // Issue #64: the look/play/model defaults a NEW game should start from —
+    // copied server-side from the most recently played campaign so the New
+    // Chronicle screen pre-fills to the player's usual settings instead of the
+    // raw scaffold defaults. Top-level path (not /campaigns/...) so it can't be
+    // shadowed by the /campaigns/:id matcher below. `{}` when no campaign exists.
+    method: "GET",
+    pattern: /^\/new-game-defaults$/,
+    async handler(_req, res) {
+      sendJson(res, 200, { settings: newGameDefaultSettings() });
+    },
+  },
+  {
     // ADR-0010: list every campaign for Home's chronicle picker.
     method: "GET",
     pattern: /^\/campaigns$/,
@@ -240,6 +266,16 @@ const ROUTES: Array<{
           return;
         }
         creationSettings.contentIntensity = creation.contentIntensity as ContentIntensity;
+      }
+      if (creation.responseLength !== undefined) {
+        if (
+          typeof creation.responseLength !== "string" ||
+          !RESPONSE_LENGTHS.includes(creation.responseLength as ResponseLength)
+        ) {
+          sendJson(res, 400, { error: `responseLength must be one of ${RESPONSE_LENGTHS.join(", ")}` });
+          return;
+        }
+        creationSettings.responseLength = creation.responseLength as ResponseLength;
       }
       // Issue #60: a new game also carries the player's remembered look/play
       // defaults (generateImages/artStyle/autoIllustrateTurns/autoRollDice) so
@@ -417,6 +453,13 @@ const ROUTES: Array<{
 
       try {
         console.log(`[${campaignId}] turn on model ${active.model}`);
+        // Issue #68 (ADR-0016): snapshot state BEFORE this turn runs, so it can
+        // later be edited and re-run from exactly this point.
+        writePreTurnSnapshot(
+          campaignDir,
+          active.sessionLogPath,
+          readTurnTranscript(campaignDir, active.sessionLogPath).length
+        );
         const settings = readCampaignSettings(campaignDir);
         // Issue #57: only resume the SDK session when it was created under the
         // same model. If the player switched models mid-campaign, resuming would
@@ -515,6 +558,8 @@ const ROUTES: Array<{
 
       try {
         console.log(`[${campaignId}] opening scene on model ${active.model}`);
+        // Issue #68 (ADR-0016): snapshot the blank pre-opening state (turn 0).
+        writePreTurnSnapshot(campaignDir, active.sessionLogPath, 0);
         const settings = readCampaignSettings(campaignDir);
         const result = await getBackend(active.provider).runTurn({
           campaignDir,
@@ -554,6 +599,108 @@ const ROUTES: Array<{
     },
   },
   {
+    // Issue #68 (ADR-0016): edit a past player message and re-run from there,
+    // discarding every turn after it. Restores the pre-turn snapshot (rewinding
+    // the state files + prose log), truncates the transcript, and re-runs on a
+    // FRESH SDK session — the SDK conversation is linear and files are the
+    // source of truth (ADR-0001), so a fresh session loses no state.
+    method: "POST",
+    pattern: /^\/campaigns\/([^/]+)\/turns\/(\d+)\/edit$/,
+    async handler(req, res, [campaignId, turnIndexStr]) {
+      const campaignDir = resolveCampaignDir(campaignId);
+      const active = activeSessions.get(campaignId);
+      if (!active) {
+        sendJson(res, 409, {
+          error: `no active session for campaign '${campaignId}' — start one before editing a turn`,
+        });
+        return;
+      }
+
+      const turnIndex = Number(turnIndexStr);
+      const transcript = readTurnTranscript(campaignDir, active.sessionLogPath);
+      if (!Number.isInteger(turnIndex) || turnIndex < 0 || turnIndex >= transcript.length) {
+        sendJson(res, 400, { error: `turnIndex must be an integer in [0, ${transcript.length - 1}]` });
+        return;
+      }
+      // Turn-zero opening has an empty playerMessage (ADR-0013) — re-run the
+      // opening directive rather than requiring a player message.
+      const isOpening = turnIndex === 0 && transcript[0].playerMessage === "";
+      const body = (await readJsonBody(req)) as { message?: unknown };
+      const message = body.message;
+      if (!isOpening && (typeof message !== "string" || message.trim() === "")) {
+        sendJson(res, 400, { error: "request body must include a non-empty string 'message'" });
+        return;
+      }
+
+      if (active.busy) {
+        sendJson(res, 409, {
+          error: `a turn is already in progress for campaign '${campaignId}' — wait for it to finish`,
+        });
+        return;
+      }
+      // Snapshots only exist for turns played after this feature shipped.
+      if (!hasPreTurnSnapshot(campaignDir, active.sessionLogPath, turnIndex)) {
+        sendJson(res, 409, {
+          error: "this turn can't be rewound — it was played before editable history was enabled",
+        });
+        return;
+      }
+      active.busy = true;
+
+      try {
+        const discardedCount = transcript.length - 1 - turnIndex;
+        console.log(`[${campaignId}] editing turn ${turnIndex} (discarding ${discardedCount}) on model ${active.model}`);
+        // Rewind state to just before this turn, drop it and everything after,
+        // and invalidate the now-orphaned later snapshots.
+        restorePreTurnSnapshot(campaignDir, active.sessionLogPath, turnIndex);
+        truncateTranscript(campaignDir, active.sessionLogPath, turnIndex);
+        pruneSnapshotsAfter(campaignDir, active.sessionLogPath, turnIndex);
+
+        // Fresh SDK session: the rewound files are the truth, so we don't (and
+        // can't) resume the old linear conversation. This also means the re-run
+        // always honors the current model choice.
+        active.sessionId = undefined;
+        const settings = readCampaignSettings(campaignDir);
+        const userInput = isOpening ? openingDirective(campaignDir) : (message as string);
+        // ADR-0018: dispatch through the campaign's DM backend (Claude/Grok),
+        // like /turns and /opening — never the raw dm-engine runTurn.
+        const result = await getBackend(active.provider).runTurn({
+          campaignDir,
+          sessionLogPath: active.sessionLogPath,
+          userInput,
+          resumeSessionId: undefined,
+          model: active.model,
+          settings,
+          onText: () => {},
+        });
+
+        if (result.sessionId) {
+          active.sessionId = result.sessionId;
+          active.sessionModel = active.model;
+          persistSessionId(campaignDir, result.sessionId);
+        }
+
+        // Persist the re-run record at index `turnIndex` (transcript was
+        // truncated to that length). Match /opening: don't persist a broken
+        // opening; a broken normal turn is still recorded (as /turns does).
+        if (!result.isError || !isOpening) {
+          appendTurnTranscript(campaignDir, active.sessionLogPath, isOpening ? "" : (message as string), result.text);
+        }
+
+        sendJson(res, result.isError ? 502 : 200, {
+          narration: result.text,
+          sessionId: result.sessionId ?? null,
+          model: result.model,
+          isError: result.isError,
+          turnIndex,
+          discardedCount,
+        });
+      } finally {
+        active.busy = false;
+      }
+    },
+  },
+  {
     method: "GET",
     pattern: /^\/campaigns\/([^/]+)\/state$/,
     async handler(_req, res, [campaignId]) {
@@ -583,6 +730,7 @@ const ROUTES: Array<{
         worldSetting?: string;
         toneWhimsy?: number;
         contentIntensity?: ContentIntensity;
+        responseLength?: ResponseLength;
         generateImages?: boolean;
         autoRollDice?: boolean;
         autoIllustrateTurns?: boolean;
@@ -621,6 +769,18 @@ const ROUTES: Array<{
         }
         updates.contentIntensity = body.contentIntensity as ContentIntensity;
       }
+      if (body.responseLength !== undefined) {
+        if (
+          typeof body.responseLength !== "string" ||
+          !RESPONSE_LENGTHS.includes(body.responseLength as ResponseLength)
+        ) {
+          sendJson(res, 400, {
+            error: `responseLength must be one of ${RESPONSE_LENGTHS.join(", ")}`,
+          });
+          return;
+        }
+        updates.responseLength = body.responseLength as ResponseLength;
+      }
       if (body.generateImages !== undefined) {
         if (typeof body.generateImages !== "boolean") {
           sendJson(res, 400, { error: "generateImages must be a boolean" });
@@ -644,6 +804,27 @@ const ROUTES: Array<{
       }
 
       sendJson(res, 200, persistCampaignSettings(campaignDir, updates));
+    },
+  },
+  {
+    // Issue #71: set/clear the player character's free-text appearance on an
+    // existing sheet, so a character created before this field existed (or one
+    // whose portrait came out wrong) can be fixed without remaking the campaign.
+    method: "POST",
+    pattern: /^\/campaigns\/([^/]+)\/character\/appearance$/,
+    async handler(req, res, [campaignId]) {
+      const campaignDir = resolveCampaignDir(campaignId);
+      const body = (await readJsonBody(req)) as Record<string, unknown>;
+      if (typeof body.appearance !== "string") {
+        sendJson(res, 400, { error: "appearance must be a string" });
+        return;
+      }
+      if (body.appearance.trim().length > MAX_APPEARANCE_CHARS) {
+        sendJson(res, 400, { error: `appearance must be ${MAX_APPEARANCE_CHARS} characters or fewer` });
+        return;
+      }
+      const appearance = setCharacterAppearance(campaignDir, body.appearance);
+      sendJson(res, 200, { appearance: appearance ?? null });
     },
   },
   {
@@ -699,8 +880,11 @@ const ROUTES: Array<{
           sendJson(res, 404, { error: `no turn ${body.turnIndex} in the active session` });
           return;
         }
-        // The narration is the scene description; keep the /imagine prompt sane.
-        const description = record.narration.trim().slice(0, 500) || "a scene from the story";
+        // The narration is the scene description by default; keep the /imagine
+        // prompt sane. Issue #66: a regenerate can pass an explicit `description`
+        // to refine the prompt (e.g. "the same scene, but at night").
+        const override = typeof body.description === "string" && body.description.trim() ? body.description.trim() : "";
+        const description = (override || record.narration.trim()).slice(0, 500) || "a scene from the story";
         const sessionBase = path.basename(active.sessionLogPath).replace(/\.md$/, "");
         const name = `${sessionBase}-turn-${body.turnIndex}`;
 

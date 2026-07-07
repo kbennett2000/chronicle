@@ -4,9 +4,15 @@
   "private": true,
   "description": "Mobile-first solo D&D 5e app with a file-backed Claude Agent SDK DM engine.",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dm": "tsx src/cli.ts",
     "serve": "tsx src/server.ts",
+    "build:web": "npm --prefix web run build",
+    "setup": "npm ci && npm --prefix web ci && npm run build:web",
+    "start": "npm run serve",
     "typecheck": "tsc --noEmit",
     "test:unit": "node --import tsx --test tests/*.test.ts",
     "verify:grok-parity": "tsx scripts/verify-grok-parity.ts"
