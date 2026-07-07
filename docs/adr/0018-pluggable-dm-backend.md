@@ -127,3 +127,25 @@ sandbox, but not driven by a combat/rules turn in the spike).
   needed.
 - **Copying SRD into each campaign dir** to satisfy a stricter sandbox —
   unnecessary given `workspace` reads everywhere.
+
+## Postscript — intermittent silent Grok turn (issue #100, 2026-07)
+Playtesting surfaced Grok games that "don't start": with images generating fine,
+the opening scene never rendered. Root cause: `grok-build` (agent
+`grok-build-plan`) is an agentic *coding* model that **intermittently** completes
+a DM turn through tool/file side-effects alone — reading state, editing files,
+generating images — and ends the turn with an **empty `.text`** (no narration).
+The backend treated empty narration as an engine error and the `/opening` route
+discards errored turns, so the campaign stayed at 0 turns. Because it is
+probabilistic (four controlled repro runs all narrated; only a real production
+run went silent), the Slice-0 spike and single parity runs never caught it — so
+the earlier claim that `.text` is *always* the clean narration was optimistic.
+
+**Mitigation (kept model-agnostic):** `runGrokTurn` now **retries once** on an
+empty/unparseable turn, resuming the session the first attempt created
+(`--resume`) with a prose-forcing nudge appended to the user input ("Write the
+scene now as narrated prose in your reply text. Do not answer only through tool
+calls or file edits."). Only if the retry is *also* silent does it fall through
+to the existing `isError`/502 behavior (leave the campaign at 0 turns so
+re-entering Play retries cleanly). `grok-build` stays the recommended Grok
+default — it narrates well the large majority of the time, and the retry covers
+the tail. Regression-guarded by `tests/grok-backend-retry.test.ts`.
