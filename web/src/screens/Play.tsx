@@ -953,6 +953,52 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
             ACTIVE PLAY
           </div>
         </div>
+        {/* Issue #108: playback transport (prev / play-pause / next) beside the
+            mute button, only when music is enabled. Pause is independent of mute. */}
+        {music.enabled && (
+          <>
+            <button
+              className="icon-button"
+              onClick={music.prev}
+              aria-label="Previous track"
+              data-testid="music-prev"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="var(--brass)" aria-hidden="true">
+                <rect x="3" y="3" width="2" height="10" rx="1" />
+                <path d="M13 3.5v9L6 8z" />
+              </svg>
+            </button>
+            <button
+              className="icon-button"
+              onClick={music.isPaused ? music.resume : music.pause}
+              aria-pressed={music.isPaused}
+              aria-label={music.isPaused ? "Play" : "Pause"}
+              data-testid="music-playpause"
+            >
+              {music.isPaused ? (
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="var(--brass)" aria-hidden="true">
+                  <path d="M4 3l9 5-9 5z" />
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="var(--brass)" aria-hidden="true">
+                  <rect x="4" y="3" width="3" height="10" rx="1" />
+                  <rect x="9" y="3" width="3" height="10" rx="1" />
+                </svg>
+              )}
+            </button>
+            <button
+              className="icon-button"
+              onClick={music.next}
+              aria-label="Next track"
+              data-testid="music-next"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="var(--brass)" aria-hidden="true">
+                <path d="M3 3.5v9L10 8z" />
+                <rect x="11" y="3" width="2" height="10" rx="1" />
+              </svg>
+            </button>
+          </>
+        )}
         {music.enabled && (
           <button
             className="icon-button"
