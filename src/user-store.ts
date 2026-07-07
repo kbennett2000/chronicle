@@ -248,13 +248,27 @@ export function readUserSettings(userId: string): Record<string, unknown> {
   }
 }
 
-/** Merge-write, like campaign settings: never clobber sibling fields. An
- * empty-string artStyle/worldSetting clears that field back to absent. */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/** Merge-write, like campaign settings: never clobber sibling fields. Nested
+ * plain-object values (e.g. `music`) are merged one level deep, so a partial
+ * patch like `{ music: { source } }` keeps the stored `{ music: { enabled } }`
+ * — issue #95: a shallow top-level spread replaced the whole `music` object,
+ * dropping `enabled`, which then re-defaulted to false and switched music off
+ * the moment the user changed the source or Navidrome URL. An empty-string
+ * artStyle/worldSetting clears that field back to absent. */
 export function writeUserSettings(
   userId: string,
   updates: Record<string, unknown>
 ): Record<string, unknown> {
-  const merged: Record<string, unknown> = { ...readUserSettings(userId), ...updates };
+  const merged: Record<string, unknown> = { ...readUserSettings(userId) };
+  for (const [key, value] of Object.entries(updates)) {
+    const prev = merged[key];
+    merged[key] =
+      isPlainObject(prev) && isPlainObject(value) ? { ...prev, ...value } : value;
+  }
   if (merged.artStyle === "") delete merged.artStyle;
   if (merged.worldSetting === "") delete merged.worldSetting;
   fs.mkdirSync(userDir(userId), { recursive: true });
