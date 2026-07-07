@@ -14,6 +14,7 @@ import {
 } from "../lib/campaign";
 import { ToggleRow, ArtStylePicker } from "../components/LookControls";
 import { MusicOverrideEditor } from "../components/MusicOverrideEditor";
+import { PlaylistPicker } from "../components/PlaylistPicker";
 import { useIsDesktop } from "../lib/useIsDesktop";
 import {
   getMusicConfig,
@@ -127,7 +128,6 @@ export function Settings({
   const [defaultsSave, setDefaultsSave] = useState<SaveState>("idle");
   const [music, setMusic] = useState<MusicConfig | null>(null);
   const [navUrl, setNavUrl] = useState("");
-  const [navPlaylist, setNavPlaylist] = useState("");
   // #109: the campaign-resolved effective config (campaign → user → .env) for the
   // per-game override editor. Distinct from `music` above, which is the account
   // default (no campaignId). Null until an active campaign's config loads.
@@ -140,7 +140,6 @@ export function Settings({
         if (cancelled) return;
         setMusic(cfg);
         setNavUrl(cfg.navidrome.url);
-        setNavPlaylist(cfg.navidrome.playlist);
       })
       .catch(() => {});
     // #96: fetch models and campaign settings independently. They were coupled in
@@ -261,7 +260,6 @@ export function Settings({
       const cfg = await getMusicConfig(connection);
       setMusic(cfg);
       setNavUrl(cfg.navidrome.url);
-      setNavPlaylist(cfg.navidrome.playlist);
     } catch {
       // best-effort — the toggle just won't reflect until a working save
     }
@@ -606,6 +604,8 @@ export function Settings({
               default below. You can change it any time — even mid-game.
             </div>
             <MusicOverrideEditor
+              connection={connection}
+              campaignId={campaignId}
               override={settings.music}
               effective={gameMusic}
               onPatch={patchGameMusic}
@@ -681,13 +681,13 @@ export function Settings({
                       placeholder="http://192.168.1.214:4533"
                       style={textInputStyle}
                     />
-                    <div style={{ fontSize: 11, color: "var(--ink-dim)", margin: "11px 0 4px" }}>Playlist name</div>
-                    <input
-                      value={navPlaylist}
-                      onChange={(e) => setNavPlaylist(e.target.value)}
-                      onBlur={() => navPlaylist !== music.navidrome.playlist && patchMusic({ navidromePlaylist: navPlaylist })}
-                      placeholder="chronicle"
-                      style={textInputStyle}
+                    <div style={{ fontSize: 11, color: "var(--ink-dim)", margin: "11px 0 4px" }}>Playlist</div>
+                    {/* #110: pick from the chronicle-tagged playlists (or add your own). */}
+                    <PlaylistPicker
+                      connection={connection}
+                      campaignId={null}
+                      value={music.navidrome.playlist}
+                      onChange={(name) => name !== music.navidrome.playlist && patchMusic({ navidromePlaylist: name })}
                     />
                   </div>
                 )}
