@@ -92,19 +92,55 @@ function envBool(v: string | undefined, fallback: boolean): boolean {
   return v === "true" ? true : v === "false" ? false : fallback;
 }
 
-export function resolveMusicConfig(userMusic: UserMusic = {}): MusicConfig {
+/** Validate/normalize a raw stored or posted music override into a UserMusic,
+ * dropping the Navidrome credentials (they stay server-side) and rejecting type
+ * violations. Shared by the user-defaults validator, the per-campaign settings
+ * route (#109), and readCampaignSettings so all three agree on the shape. */
+export function parseMusicBlock(raw: unknown): { value: UserMusic } | { error: string } {
+  if (typeof raw !== "object" || raw === null) return { error: "music must be an object" };
+  const m = raw as Record<string, unknown>;
+  const music: UserMusic = {};
+  if (m.enabled !== undefined) {
+    if (typeof m.enabled !== "boolean") return { error: "music.enabled must be a boolean" };
+    music.enabled = m.enabled;
+  }
+  if (m.source !== undefined) {
+    if (m.source !== "local" && m.source !== "navidrome") {
+      return { error: "music.source must be 'local' or 'navidrome'" };
+    }
+    music.source = m.source;
+  }
+  if (m.navidromeUrl !== undefined) {
+    if (typeof m.navidromeUrl !== "string") return { error: "music.navidromeUrl must be a string" };
+    music.navidromeUrl = m.navidromeUrl;
+  }
+  if (m.navidromePlaylist !== undefined) {
+    if (typeof m.navidromePlaylist !== "string") return { error: "music.navidromePlaylist must be a string" };
+    music.navidromePlaylist = m.navidromePlaylist;
+  }
+  return { value: music };
+}
+
+/** Effective, client-safe music config. Precedence is field-by-field:
+ * campaign override → user override → `.env` default (#109 / ADR-0020 amended).
+ * A per-game override wins where set; each unset field falls through to the
+ * user's account default, then to `.env`. */
+export function resolveMusicConfig(userMusic: UserMusic = {}, campaignMusic: UserMusic = {}): MusicConfig {
+  const pick = <K extends keyof UserMusic>(key: K): UserMusic[K] =>
+    campaignMusic[key] ?? userMusic[key];
+  const chosenSource = pick("source");
   const source: MusicSource =
-    userMusic.source === "navidrome" || userMusic.source === "local"
-      ? userMusic.source
+    chosenSource === "navidrome" || chosenSource === "local"
+      ? chosenSource
       : process.env.DEFAULT_MUSIC_SOURCE === "navidrome"
         ? "navidrome"
         : "local";
   return {
-    enabled: userMusic.enabled ?? envBool(process.env.DEFAULT_MUSIC_ENABLED, false),
+    enabled: pick("enabled") ?? envBool(process.env.DEFAULT_MUSIC_ENABLED, false),
     source,
     navidrome: {
-      url: (userMusic.navidromeUrl || process.env.NAVIDROME_URL || "").replace(/\/$/, ""),
-      playlist: userMusic.navidromePlaylist || process.env.NAVIDROME_PLAYLIST || "",
+      url: (pick("navidromeUrl") || process.env.NAVIDROME_URL || "").replace(/\/$/, ""),
+      playlist: pick("navidromePlaylist") || process.env.NAVIDROME_PLAYLIST || "",
       configured: Boolean(process.env.NAVIDROME_USER && process.env.NAVIDROME_PASSWORD),
     },
   };
