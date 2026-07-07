@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import type { CampaignSettings } from "./campaign-store.js";
+import { readCharacterIdentity } from "./campaign-store.js";
 import { buildImagePrompt } from "./image-prompt.js";
 import { stripMetaChatter } from "./narration.js";
 
@@ -336,6 +337,21 @@ export const GENERATE_IMAGE_INPUT_SHAPE = {
     ),
 };
 
+/** Issue #104: the DM model free-writes the `description` it passes for a
+ * character portrait, so the canonical appearance recorded on character-sheet.json
+ * (issue #71) isn't guaranteed to reach Grok — portraits come out "close but not
+ * matching". For the `character` entity type only, anchor the prompt with the
+ * stored appearance: prepend it (so it survives the 500-char cap) unless the
+ * model's description already restates it, avoiding pointless duplication. */
+export function mergeCharacterAppearance(campaignDir: string, description: string): string {
+  const { appearance } = readCharacterIdentity(campaignDir);
+  if (!appearance) return description;
+  const desc = description.trim();
+  if (!desc) return appearance;
+  if (desc.toLowerCase().includes(appearance.toLowerCase())) return desc;
+  return `${appearance} ${desc}`;
+}
+
 /** Provider-neutral tool body. `campaignDir`/`settings` come from the caller:
  * a per-turn closure in-process, or env + the campaign's live settings in the
  * stdio server. */
@@ -344,7 +360,9 @@ export async function runGenerateImageTool(
   campaignDir: string,
   settings: CampaignSettings
 ): Promise<{ content: { type: "text"; text: string }[] }> {
-  const { entityType, name, description } = args;
+  const { entityType, name } = args;
+  const description =
+    entityType === "character" ? mergeCharacterAppearance(campaignDir, args.description) : args.description;
   const result = await generateImage(campaignDir, entityType, name, description, settings);
   return {
     content: [

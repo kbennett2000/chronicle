@@ -44,9 +44,22 @@ dials in the same family.
      genre.
 5. **Art style** is a freeform string (with common presets offered in the
    UI: comic book, Lego-style, pencil sketch, watercolor, anime, pixel art,
-   noir, oil painting) appended to every image-generation prompt built
+   noir, oil painting) applied to every image-generation prompt built
    from state-file descriptions (§8 of the design doc) — it doesn't change
    what gets generated, only how it looks.
+
+   **Update (issue #104):** the style now *leads* the prompt as its own
+   clause (`"<artStyle>. <description>"`) rather than trailing as
+   `"<description>, in the style of <artStyle>"`. Image models read
+   "in the style of X" as an artist/movement reference, so adjectival render
+   styles (photorealistic, watercolor, oil painting) were effectively
+   ignored. Leading with the style weights it heavily and honors those
+   adjectival styles while still reading acceptably for a named-artist style.
+   See `buildImagePrompt` in `src/image-prompt.ts`. Separately, in-turn
+   **character** portraits now prepend the character sheet's stored
+   `appearance` (issue #71) to the model-authored description so the portrait
+   can't drift off the canonical look (`mergeCharacterAppearance` in
+   `src/image-generator.ts`).
 
 ## Consequences
 - No changes needed to `seed-selector.ts` or the registry — this is
