@@ -14,6 +14,7 @@ import { useAuthedImage } from "../lib/useAuthedImage";
 import { parseChapterHeadings } from "../lib/session-log";
 import { BottomSheet } from "../components/BottomSheet";
 import { SelfPanel } from "../panels/SelfPanel";
+import { CharacterSheetFull } from "../panels/CharacterSheetFull";
 import { FolkPanel } from "../panels/FolkPanel";
 import { QuestPanel } from "../panels/QuestPanel";
 import { GalleryPanel } from "../panels/GalleryPanel";
@@ -774,10 +775,13 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
 
   function renderPanel(tab: Tab) {
     if (tab === "Self") {
-      return characterSheet ? (
-        <SelfPanel connection={connection} campaignId={campaignId} sheet={characterSheet} onUpdated={refreshPanels} />
+      if (!characterSheet) return <PanelPending label="Self" />;
+      // ADR-0022: desktop's wide side panel shows the full official sheet; mobile
+      // keeps the compact collapsible SelfPanel.
+      return isDesktop ? (
+        <CharacterSheetFull connection={connection} campaignId={campaignId} sheet={characterSheet} onUpdated={refreshPanels} />
       ) : (
-        <PanelPending label="Self" />
+        <SelfPanel connection={connection} campaignId={campaignId} sheet={characterSheet} onUpdated={refreshPanels} />
       );
     }
     if (tab === "Folk") {
@@ -962,7 +966,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
           <aside
             data-testid="desktop-sidebar"
             style={{
-              width: activeTab === "Self" || activeTab === "Views" ? 500 : 400,
+              width: activeTab === "Self" ? 560 : activeTab === "Views" ? 500 : 400,
               flexShrink: 0,
               display: "flex",
               flexDirection: "column",
