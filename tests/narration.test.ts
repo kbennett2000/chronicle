@@ -81,6 +81,52 @@ test("keeps a legitimate --- scene break in ordinary prose (no backstage tokens)
   assert.equal(stripMetaChatter(raw), raw);
 });
 
+test("strips a second opening-setup variant: hallucinated tool + colon-glued --- (#103 reopen)", () => {
+  // The reopened-#103 leak: a *different* wording than the Bob-the-Guy case —
+  // a hallucinated "texture-tables tool", "append the opening to the session
+  // log", and the dashes glued onto a COLON ("...session log:---"), none of
+  // which the first fix's punctuation-only divider or exact-tool-name signal
+  // caught. Only the prose after the divider must survive.
+  const raw =
+    "I don't have access to the texture-tables tool in this context. Now I'll append the opening to the session log:---\n\nThe cave is cold and close, stone pressing in from above and behind. Your enormous slug body glistens with moisture in the dying firelight.";
+  assert.equal(
+    stripMetaChatter(raw),
+    "The cave is cold and close, stone pressing in from above and behind. Your enormous slug body glistens with moisture in the dying firelight."
+  );
+});
+
+test("keeps first-person NPC dialogue before a --- scene break (#103 reopen guard)", () => {
+  // "I don't have access to..." is legitimate fiction in an NPC's mouth. The
+  // signal is plumbing-only vocabulary (no generic "access"/"context"), so a
+  // real scene break after such dialogue must be preserved verbatim.
+  const raw =
+    "\"I don't have access to the vault,\" the guard mutters, turning away.\n\n---\n\nYou step into the corridor, the torchlight guttering behind you.";
+  assert.equal(stripMetaChatter(raw), raw);
+});
+
+test("strips a first-person authoring preamble that names none of the plumbing nouns (#103 3rd reopen — Therman)", () => {
+  // The reported "Therman" leak: the preamble is pure first-person authoring
+  // planning ("Now I'll generate the opening scene", "reading the existing state
+  // files") and names NONE of the BACKSTAGE_SIGNAL plumbing nouns, with the
+  // dashes glued to the last word ("...in the world.---"). Only the story after
+  // the divider must survive. The FORM branch catches this.
+  const raw =
+    "I'll begin by reading the existing state files to understand what's already established about Therman and his world. Now I'll generate the opening scene. Let me set it in motion with an immediate, concrete situation that fits Therman's nature as a barbarian and grounds his striking appearance in the world.---\n\nThe common room of the Crooked Flagon reeks of stale ale. You stand near the bar.\n\nWhat do you do?";
+  assert.equal(
+    stripMetaChatter(raw),
+    "The common room of the Crooked Flagon reeks of stale ale. You stand near the bar.\n\nWhat do you do?"
+  );
+});
+
+test("keeps NPC dialogue with a planning-shaped verb but no authoring object before a --- break (#103 3rd reopen guard)", () => {
+  // Locks in the verb+object pairing of the FORM branch: "Let me set the table"
+  // has a planning marker and a verb ("set"), but "table" is not a
+  // narrative-authoring object, so real fiction before a scene break survives.
+  const raw =
+    "\"Let me set the table,\" she said, gesturing to the empty hall.\n\n---\n\nThe candles gutter as the guests file in.";
+  assert.equal(stripMetaChatter(raw), raw);
+});
+
 test("strips directory and tool-access meta without a divider", () => {
   const raw =
     "I'm restricted to the active campaign's own directory. The DM tools are not available through direct tool calls. The corridor is dark ahead.";
