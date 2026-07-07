@@ -3,7 +3,7 @@ import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { userIdForUsername } from "../../../src/user-store.js";
+import { userIdForUsername, USERS_ROOT } from "../../../src/user-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
@@ -40,6 +40,24 @@ function createScratchCampaign(): string {
 
 function deleteScratchCampaign(campaignId: string): string {
   return runScratchScript(["delete", campaignId, "--user", HARNESS_USERNAME]);
+}
+
+/** Issue #114: the account defaults (users/<id>/settings.json) are now editable
+ * from the main Settings screen and inherited by every NEW campaign. They live
+ * on disk for the reused harness user, so a spec that changes them (e.g. the
+ * settings-panel specs switching the default engine) would otherwise leak into
+ * every later spec — a freshly-created campaign inheriting a switched engine,
+ * the Settings screen opening on a polluted state, etc. Reset to a clean slate
+ * per test so the suite stays order-independent. Music is deliberately left out:
+ * the server's DEFAULT_MUSIC_* env provides the fallback the mute specs rely on,
+ * so an empty defaults file is exactly the right clean baseline. */
+function resetHarnessUserDefaults(): void {
+  const file = path.join(USERS_ROOT, HARNESS_USER_ID, "settings.json");
+  try {
+    fs.writeFileSync(file, "{}\n");
+  } catch {
+    // best-effort — if the user dir isn't there yet, authenticate() creates it
+  }
 }
 
 /** Register (or log in, if a prior run already created it) the harness user and
@@ -227,6 +245,9 @@ async function bootServer(
   try {
     await waitForReady(baseURL);
     token = await authenticate(baseURL);
+    // #114: clean the reused harness user's account defaults so per-test state
+    // is deterministic (this user persists across tests and runs on disk).
+    resetHarnessUserDefaults();
   } catch (err) {
     killServerTree(proc);
     deleteScratchCampaign(campaignId);
