@@ -80,6 +80,15 @@ async function getNavidromeTracks(connection: Connection, campaignId?: string | 
   return tracks.map((t) => ({ id: t.id, name: t.artist ? `${t.artist} — ${t.title}` : t.title }));
 }
 
+/** #110: the chronicle-tagged playlist names on the shared Navidrome server, for
+ * the picker dropdown. Passes campaignId so a per-game Navidrome URL resolves. */
+export async function getNavidromePlaylists(connection: Connection, campaignId?: string | null): Promise<string[]> {
+  const { playlists } = (await apiFetch(connection, `/music/navidrome/playlists${campaignQuery(campaignId)}`)) as {
+    playlists: string[];
+  };
+  return playlists;
+}
+
 /** Stream URL for the current source, with the session token as a query param so
  * the bare <audio> request authenticates (ADR-0020). For Navidrome the active
  * campaign is passed too, so the per-game override resolves the same URL the

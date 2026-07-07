@@ -218,6 +218,34 @@ export async function navidromePlaylistTracks(creds: NavidromeCreds): Promise<Na
   }));
 }
 
+/** #110: curation tag. Only Navidrome playlists whose description (Subsonic
+ * `comment`) contains this word — case-insensitive — are offered in the app's
+ * playlist dropdown. Tagging a playlist's description is how a playlist is
+ * "published" to Chronicle players, without any app-side registry to maintain. */
+const PLAYLIST_TAG = "chronicle";
+
+/** #110: the names of the shared Navidrome server's playlists that are tagged for
+ * Chronicle (their description contains PLAYLIST_TAG). Reuses the same Subsonic
+ * `getPlaylists` call `navidromePlaylistTracks` makes; here we keep the whole list
+ * (filtered) to populate the picker dropdown. De-duped, order preserved. */
+export async function navidromePlaylists(creds: NavidromeCreds): Promise<string[]> {
+  const lists = await subsonicGet(creds, "getPlaylists");
+  const playlists: any[] = lists.playlists?.playlist ?? [];
+  const tag = PLAYLIST_TAG.toLowerCase();
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const p of playlists) {
+    const name = String(p.name ?? "").trim();
+    const comment = String(p.comment ?? "").toLowerCase();
+    if (!name || !comment.includes(tag)) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+  return names;
+}
+
 /** The full Navidrome stream URL (with fresh auth params) for one song — the
  * server fetches this and pipes it to the client (creds never reach the browser). */
 export function navidromeStreamUrl(creds: NavidromeCreds, songId: string): string {
