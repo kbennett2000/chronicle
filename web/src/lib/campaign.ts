@@ -219,6 +219,20 @@ export async function listCampaigns(connection: Connection): Promise<CampaignSum
   return result.campaigns;
 }
 
+/** Issue #105: references to every image across this user's own campaigns, for
+ * the new-game loading slideshow. `exclude` skips a campaign (the one being
+ * started). Each ref is loaded via the existing per-campaign image route. */
+export interface PastImageRef {
+  campaignId: string;
+  filename: string;
+}
+
+export async function listPastImages(connection: Connection, exclude?: string): Promise<PastImageRef[]> {
+  const query = exclude ? `?exclude=${encodeURIComponent(exclude)}` : "";
+  const result = (await apiFetch(connection, `/past-images${query}`)) as { images: PastImageRef[] };
+  return result.images;
+}
+
 export interface CharacterCreationInput {
   name: string;
   race: string;

@@ -37,6 +37,7 @@ import {
   scaffoldCampaign,
   deleteCampaign,
   listCampaigns,
+  listCampaignImages,
   userCampaignsRoot,
   CONTENT_INTENSITIES,
   RESPONSE_LENGTHS,
@@ -554,6 +555,18 @@ const ROUTES: Array<{
     pattern: /^\/campaigns$/,
     async handler(_req, res, _params, userId) {
       sendJson(res, 200, { campaigns: listCampaigns(userId) });
+    },
+  },
+  {
+    // Issue #105: every image across this user's own campaigns, for the
+    // new-game loading slideshow. `?exclude=<campaignId>` skips the campaign
+    // being started (which has no images yet anyway). Each ref is fetched
+    // through GET /campaigns/:id/images/:filename, so no bytes are served here.
+    method: "GET",
+    pattern: /^\/past-images$/,
+    async handler(req, res, _params, userId) {
+      const exclude = new URL(req.url ?? "", `http://localhost:${PORT}`).searchParams.get("exclude") ?? undefined;
+      sendJson(res, 200, { images: listCampaignImages(userId, exclude) });
     },
   },
   {

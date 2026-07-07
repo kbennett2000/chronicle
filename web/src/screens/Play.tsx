@@ -18,6 +18,7 @@ import { CharacterSheetFull } from "../panels/CharacterSheetFull";
 import { FolkPanel } from "../panels/FolkPanel";
 import { QuestPanel } from "../panels/QuestPanel";
 import { GalleryPanel } from "../panels/GalleryPanel";
+import { LoadingSlideshow } from "../components/LoadingSlideshow";
 import { loadMuted, saveMuted } from "../lib/mute";
 import { useMusicPlayer } from "../lib/music";
 import { useIsDesktop } from "../lib/useIsDesktop";
@@ -391,11 +392,12 @@ function TurnView({
  * many seconds. The old tiny top-left "setting the scene…" line on an otherwise
  * empty parchment left players unsure anything was happening. This is a
  * prominent, centered, reassuring state used only for the turn-zero opening. */
-function OpeningSceneLoader() {
+function OpeningSceneLoader({ connection, campaignId }: { connection: Connection; campaignId: string }) {
   return (
     <div
       data-testid="opening-loader"
       style={{
+        position: "relative",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -404,35 +406,51 @@ function OpeningSceneLoader() {
         minHeight: "60vh",
         gap: 18,
         padding: "0 24px",
+        overflow: "hidden",
+        borderRadius: 12,
       }}
     >
+      {/* Issue #105: a soft slideshow of the player's past-game art, behind the
+          loader. Renders nothing for a player with no prior images. */}
+      <LoadingSlideshow connection={connection} campaignId={campaignId} />
       <div
         style={{
-          width: 22,
-          height: 32,
-          background: "var(--ember)",
-          borderRadius: "50% 50% 50% 0",
-          transform: "rotate(-45deg)",
-          animation: "flicker 2.2s ease-in-out infinite",
-          boxShadow: "0 0 26px 6px rgba(211,112,60,.35)",
-        }}
-      />
-      <div
-        style={{
-          fontFamily: "var(--font-display)",
-          fontSize: 17,
-          letterSpacing: 1,
-          color: "var(--ink)",
+          position: "relative",
+          zIndex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 18,
         }}
       >
-        Weaving the opening of your tale
-        <span style={{ animation: "dotPulse 1.4s infinite" }}>.</span>
-        <span style={{ animation: "dotPulse 1.4s infinite .2s" }}>.</span>
-        <span style={{ animation: "dotPulse 1.4s infinite .4s" }}>.</span>
-      </div>
-      <div style={{ fontSize: 13, fontStyle: "italic", color: "var(--ink-faint)", maxWidth: 340, lineHeight: 1.5 }}>
-        The Dungeon Master is setting the scene. This can take a moment as your
-        world takes shape — no need to do anything yet.
+        <div
+          style={{
+            width: 22,
+            height: 32,
+            background: "var(--ember)",
+            borderRadius: "50% 50% 50% 0",
+            transform: "rotate(-45deg)",
+            animation: "flicker 2.2s ease-in-out infinite",
+            boxShadow: "0 0 26px 6px rgba(211,112,60,.35)",
+          }}
+        />
+        <div
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: 17,
+            letterSpacing: 1,
+            color: "var(--ink)",
+          }}
+        >
+          Weaving the opening of your tale
+          <span style={{ animation: "dotPulse 1.4s infinite" }}>.</span>
+          <span style={{ animation: "dotPulse 1.4s infinite .2s" }}>.</span>
+          <span style={{ animation: "dotPulse 1.4s infinite .4s" }}>.</span>
+        </div>
+        <div style={{ fontSize: 13, fontStyle: "italic", color: "var(--ink-faint)", maxWidth: 340, lineHeight: 1.5 }}>
+          The Dungeon Master is setting the scene. This can take a moment as your
+          world takes shape — no need to do anything yet.
+        </div>
       </div>
     </div>
   );
@@ -828,7 +846,9 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
         {load.status === "ready" && chapters.map((text, i) => <ChapterHeading key={i} text={text} />)}
         {/* ADR-0013: a zero-turn campaign is either having its opening scene
             woven now, or the opening failed and the player begins manually. */}
-        {load.status === "ready" && turns.length === 0 && !openingError && <OpeningSceneLoader />}
+        {load.status === "ready" && turns.length === 0 && !openingError && (
+          <OpeningSceneLoader connection={connection} campaignId={campaignId} />
+        )}
         {load.status === "ready" && turns.length === 0 && openingError && (
           <p
             data-testid="opening-error"

@@ -117,6 +117,19 @@ body {
   }
 }
 
+/* Issue #105: a very slow, gentle drift-zoom for the new-game loading
+   slideshow, so each held image feels alive rather than static. Paired with
+   an opacity transition on the layers for a soft cross-dissolve — nothing
+   sharp or jarring. */
+@keyframes slideshowDrift {
+  from {
+    transform: scale(1.02);
+  }
+  to {
+    transform: scale(1.09);
+  }
+}
+
 /* Ambient candlelight overlay — every screen carries this per the
    handoff's "Shape, depth, motion" spec. */
 .candlelight {
