@@ -209,6 +209,32 @@ appears.
 
 ---
 
+## Part D — (Optional) Music (ADR-0020)
+
+Background music is off by default. Turn it on per account in **Settings → The
+Music**, then pick a source. When music is on, a mute button appears in Active
+Play. Two sources:
+
+- **Local files** — drop `.mp3/.wav/.ogg/.flac/.m4a` into a `music/` folder at
+  the repo root (any sub-folder layout). `music/` is gitignored — it's your own
+  media. The app shuffles and plays them.
+- **Navidrome** — stream a playlist from a [Navidrome](https://navidrome.org)
+  server on your LAN, proxied through this server (the browser never sees the
+  Navidrome credentials). Set in `.env`:
+  ```
+  NAVIDROME_URL=http://192.168.1.214:4533
+  NAVIDROME_USER=your-navidrome-username
+  NAVIDROME_PASSWORD=your-navidrome-password
+  NAVIDROME_PLAYLIST=chronicle
+  ```
+  A user can override the URL and playlist in Settings; the credentials stay on
+  the host. Restart the server after changing `.env`.
+
+You can seed a default for new accounts with `DEFAULT_MUSIC_ENABLED` /
+`DEFAULT_MUSIC_SOURCE` (see `.env.example`).
+
+---
+
 ## Notes
 
 - This setup is for one trusted household LAN. Don't port-forward `4317` on your

@@ -197,7 +197,16 @@ async function bootServer(
   // group (pid === pgid) — see killServerTree below for why that matters.
   const proc: ChildProcess = spawn("npx", ["tsx", "src/server.ts"], {
     cwd: REPO_ROOT,
-    env: { ...process.env, PORT: String(port), HOST: host },
+    // ADR-0020: enable music so the mute control renders in Play for the specs
+    // that exercise it (local source, no tracks needed — the button is gated on
+    // music being enabled, not on a track existing).
+    env: {
+      ...process.env,
+      PORT: String(port),
+      HOST: host,
+      DEFAULT_MUSIC_ENABLED: "true",
+      DEFAULT_MUSIC_SOURCE: "local",
+    },
     stdio: "pipe",
     detached: true,
   });

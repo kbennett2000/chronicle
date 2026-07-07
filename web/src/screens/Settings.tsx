@@ -13,6 +13,7 @@ import {
   type ResponseLength,
 } from "../lib/campaign";
 import { ToggleRow, ArtStylePicker } from "../components/LookControls";
+import { getMusicConfig, saveMusicSettings, type MusicConfig, type MusicSource } from "../lib/music";
 
 interface SettingsProps {
   onBack: () => void;
@@ -109,9 +110,20 @@ export function Settings({
   const [lookSave, setLookSave] = useState<SaveState>("idle");
   const [worldSave, setWorldSave] = useState<SaveState>("idle");
   const [defaultsSave, setDefaultsSave] = useState<SaveState>("idle");
+  const [music, setMusic] = useState<MusicConfig | null>(null);
+  const [navUrl, setNavUrl] = useState("");
+  const [navPlaylist, setNavPlaylist] = useState("");
 
   useEffect(() => {
     let cancelled = false;
+    getMusicConfig(connection)
+      .then((cfg) => {
+        if (cancelled) return;
+        setMusic(cfg);
+        setNavUrl(cfg.navidrome.url);
+        setNavPlaylist(cfg.navidrome.playlist);
+      })
+      .catch(() => {});
     Promise.all([getModels(connection), getCampaignSettings(connection, campaignId)])
       .then(([modelsResult, settingsResult]) => {
         if (cancelled) return;
@@ -186,6 +198,22 @@ export function Settings({
       setDefaultsSave("saved");
     } catch {
       setDefaultsSave("error");
+    }
+  }
+
+  /** ADR-0020: persist a music preference and refresh the local config so the
+   * source picker / Navidrome fields reflect it. */
+  async function patchMusic(
+    patch: Partial<{ enabled: boolean; source: MusicSource; navidromeUrl: string; navidromePlaylist: string }>
+  ) {
+    try {
+      await saveMusicSettings(connection, patch);
+      const cfg = await getMusicConfig(connection);
+      setMusic(cfg);
+      setNavUrl(cfg.navidrome.url);
+      setNavPlaylist(cfg.navidrome.playlist);
+    } catch {
+      // best-effort — the toggle just won't reflect until a working save
     }
   }
 
@@ -464,6 +492,84 @@ export function Settings({
               {worldSave === "saved" && "Saved (POST /settings)."}
               {worldSave === "error" && "Couldn't save — try again."}
             </div>
+          </>
+        )}
+
+        {/* THE MUSIC (ADR-0020): background music — your own local files or a
+            Navidrome LAN playlist. Off by default; when on, the mute button
+            appears in Active Play. */}
+        {music && (
+          <>
+            <div style={sectionHeadingStyle}>THE MUSIC</div>
+            <ToggleRow
+              testId="music-enabled"
+              title="Play background music"
+              description="Off by default · when on, a mute button appears during play"
+              checked={music.enabled}
+              onChange={(next) => patchMusic({ enabled: next })}
+              containerStyle={{ margin: "4px 0 0" }}
+            />
+            {music.enabled && (
+              <>
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  {(["local", "navidrome"] as const).map((src) => (
+                    <button
+                      key={src}
+                      data-testid={`music-source-${src}`}
+                      onClick={() => patchMusic({ source: src })}
+                      style={{
+                        flex: 1,
+                        cursor: "pointer",
+                        padding: "9px 10px",
+                        borderRadius: 4,
+                        background: music.source === src ? "rgba(168,81,31,.25)" : "rgba(12,8,5,.5)",
+                        border: `1px solid ${music.source === src ? "var(--ember)" : "rgba(109,90,56,.4)"}`,
+                        color: "var(--ink)",
+                        fontFamily: "var(--font-display)",
+                        fontSize: 12,
+                        letterSpacing: 1,
+                      }}
+                    >
+                      {src === "local" ? "LOCAL FILES" : "NAVIDROME"}
+                    </button>
+                  ))}
+                </div>
+
+                {music.source === "local" && (
+                  <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginTop: 8 }}>
+                    {music.localTrackCount > 0
+                      ? `${music.localTrackCount} track${music.localTrackCount === 1 ? "" : "s"} found in the music/ folder — played in shuffle.`
+                      : "No files yet — drop .mp3/.wav/.ogg/.flac/.m4a into the music/ folder on the host."}
+                  </div>
+                )}
+
+                {music.source === "navidrome" && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 8 }}>
+                      {music.navidrome.configured
+                        ? "Streamed through your home server (credentials stay on the host)."
+                        : "Set NAVIDROME_URL / USER / PASSWORD in the host's .env to enable streaming."}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--ink-dim)", marginBottom: 4 }}>Navidrome URL</div>
+                    <input
+                      value={navUrl}
+                      onChange={(e) => setNavUrl(e.target.value)}
+                      onBlur={() => navUrl !== music.navidrome.url && patchMusic({ navidromeUrl: navUrl })}
+                      placeholder="http://192.168.1.214:4533"
+                      style={textInputStyle}
+                    />
+                    <div style={{ fontSize: 11, color: "var(--ink-dim)", margin: "11px 0 4px" }}>Playlist name</div>
+                    <input
+                      value={navPlaylist}
+                      onChange={(e) => setNavPlaylist(e.target.value)}
+                      onBlur={() => navPlaylist !== music.navidrome.playlist && patchMusic({ navidromePlaylist: navPlaylist })}
+                      placeholder="chronicle"
+                      style={textInputStyle}
+                    />
+                  </div>
+                )}
+              </>
+            )}
           </>
         )}
 
