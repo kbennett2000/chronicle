@@ -21,8 +21,15 @@ function isScratchCampaign(campaignDir: string): boolean {
   return path.basename(campaignDir).startsWith("scratch-");
 }
 
-function registryPathFor(campaignDir?: string): { dir: string; path: string } {
-  if (campaignDir && isScratchCampaign(campaignDir)) {
+/** `localRegistry` forces the per-campaign registry file even for a non-scratch
+ * campaign. The Grok backend sets it: its `--sandbox workspace` confines writes
+ * to campaignDir, and the shared global registry (campaigns/_registry/) is a
+ * SIBLING outside that sandbox, so a global read/write would be blocked. A Grok
+ * campaign therefore dedups against its own history only — see seed-server.ts
+ * and ADR-0018 Slice 5. The Claude in-process path never passes it, so its
+ * cross-campaign global registry is unchanged. */
+function registryPathFor(campaignDir?: string, localRegistry = false): { dir: string; path: string } {
+  if (campaignDir && (localRegistry || isScratchCampaign(campaignDir))) {
     return { dir: campaignDir, path: path.join(campaignDir, "content-registry.md") };
   }
   return { dir: REGISTRY_DIR, path: REGISTRY_PATH };
@@ -135,8 +142,8 @@ instant they're rolled, before use, so a crash mid-turn can't lose the log.
   return header + sections.join("");
 }
 
-function readRegistry(campaignDir?: string): RegistryData {
-  const { dir, path: registryPath } = registryPathFor(campaignDir);
+function readRegistry(campaignDir?: string, localRegistry = false): RegistryData {
+  const { dir, path: registryPath } = registryPathFor(campaignDir, localRegistry);
   fs.mkdirSync(dir, { recursive: true });
   if (!fs.existsSync(registryPath)) {
     fs.writeFileSync(registryPath, serializeRegistry(emptyRegistry()));
@@ -147,10 +154,10 @@ function readRegistry(campaignDir?: string): RegistryData {
 /** Appends `value` to `category`'s section. Synchronous, no `await` between
  * the read and the write, so no other campaign's turn can interleave and
  * lose this update within this process. */
-function logEntry(category: SeedCategory, value: string, campaignDir?: string): void {
-  const registry = readRegistry(campaignDir);
+function logEntry(category: SeedCategory, value: string, campaignDir?: string, localRegistry = false): void {
+  const registry = readRegistry(campaignDir, localRegistry);
   registry[category].push(value);
-  fs.writeFileSync(registryPathFor(campaignDir).path, serializeRegistry(registry));
+  fs.writeFileSync(registryPathFor(campaignDir, localRegistry).path, serializeRegistry(registry));
 }
 
 export function pickUnused(options: string[], used: Set<string>): { value: string; exhausted: boolean } {
@@ -250,14 +257,17 @@ function pickComboWithWildcard(
  * per-campaign toneWhimsy setting reaches the roll without forking any of
  * the table/registry logic itself. `campaignDir`, when given, routes a
  * scratch- campaign to its own isolated registry file instead of the
- * shared global one (see registryPathFor). */
+ * shared global one (see registryPathFor). `localRegistry` forces that same
+ * per-campaign isolation for a non-scratch campaign — the Grok backend sets it
+ * because the global registry is outside its sandbox (ADR-0018 Slice 5). */
 export function rollSeed(
   category: SeedCategory,
   wildcardChance: number = WILDCARD_CHANCE,
-  campaignDir?: string
+  campaignDir?: string,
+  localRegistry = false
 ): SeedResult {
   const tables = loadSeedTables();
-  const registry = readRegistry(campaignDir);
+  const registry = readRegistry(campaignDir, localRegistry);
 
   let picked: { value: string; exhausted: boolean };
   switch (category) {
@@ -303,7 +313,7 @@ export function rollSeed(
       break;
   }
 
-  logEntry(category, picked.value, campaignDir);
+  logEntry(category, picked.value, campaignDir, localRegistry);
   return { category, value: picked.value, exhausted: picked.exhausted };
 }
 
@@ -329,8 +339,8 @@ entry, world-state.md location, or quest-log.md quest thread — not on
 every mention, only the first time that NPC/location/quest is created.
 Elaborate the returned seed in your own words as natural narration and
 state-file prose; never quote or recite its wording verbatim, it's
-inspiration, not dialogue. The seed is drawn from a shared registry across
-all campaigns, so it won't repeat something already used elsewhere.`;
+inspiration, not dialogue. The seed is drawn from a registry of what has
+already been used, so it won't repeat something you've introduced before.`;
 
 export const ROLL_SEED_INPUT_SHAPE = {
   category: z
@@ -342,13 +352,16 @@ export const ROLL_SEED_INPUT_SHAPE = {
 
 /** Provider-neutral tool body. `wildcardChance`/`campaignDir` are supplied by
  * the caller: the in-process server bakes them into a closure per turn; the
- * stdio server reads them from env + the campaign's live settings per call. */
+ * stdio server reads them from env + the campaign's live settings per call.
+ * `localRegistry` is set by the Grok stdio server so its sandboxed turn writes
+ * a per-campaign registry rather than the out-of-sandbox global one. */
 export function runRollSeedTool(
   args: { category: SeedCategory },
   wildcardChance: number = WILDCARD_CHANCE,
-  campaignDir?: string
+  campaignDir?: string,
+  localRegistry = false
 ): { content: { type: "text"; text: string }[] } {
-  const result = rollSeed(args.category, wildcardChance, campaignDir);
+  const result = rollSeed(args.category, wildcardChance, campaignDir, localRegistry);
   const label = CATEGORY_FIELD_LABELS[result.category];
   return {
     content: [

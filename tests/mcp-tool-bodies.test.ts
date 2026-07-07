@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
 import { runRollDiceTool } from "../src/dice.js";
 import { runRollSeedTool } from "../src/seed-selector.js";
 import { runRollTextureTool } from "../src/texture-selector.js";
@@ -29,11 +30,31 @@ test("runRollDiceTool returns a helpful error string for bad notation (never thr
 });
 
 test("runRollSeedTool returns a labeled seed for a real campaign dir", () => {
+  // localRegistry:true keeps this roll inside the temp campaign dir (deleted in
+  // finally) instead of appending to the tracked global registry — the Grok
+  // seed-server path (ADR-0018 Slice 5), and the hygienic default for a test.
   const dir = scaffoldCampaign(uniqueId(), { name: "S", race: "Human", class: "Bard", level: 1 });
   try {
-    const res = runRollSeedTool({ category: "npc" }, undefined, dir);
+    const res = runRollSeedTool({ category: "npc" }, undefined, dir, true);
     assert.equal(res.content[0].type, "text");
     assert.match(res.content[0].text, /^Seed \(/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runRollSeedTool with localRegistry writes the per-campaign registry, not the global one", () => {
+  // ADR-0018 Slice 5: under Grok's --sandbox workspace the global
+  // campaigns/_registry/ is unreachable, so the seed server passes
+  // localRegistry=true to route the registry inside campaignDir.
+  const dir = scaffoldCampaign(uniqueId(), { name: "L", race: "Dwarf", class: "Fighter", level: 1 });
+  try {
+    const res = runRollSeedTool({ category: "location" }, undefined, dir, true);
+    const seedValue = res.content[0].text.replace(/^Seed \([^)]*\): /, "").split("\n")[0];
+
+    const localRegistry = path.join(dir, "content-registry.md");
+    assert.ok(fs.existsSync(localRegistry), "per-campaign registry file should exist inside campaignDir");
+    assert.match(fs.readFileSync(localRegistry, "utf8"), new RegExp(seedValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
