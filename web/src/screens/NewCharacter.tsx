@@ -7,8 +7,10 @@ import {
   type CharacterCreationInput,
   type CampaignCreationSettings,
   type ModelOption,
+  type ProviderOption,
 } from "../lib/campaign";
 import { loadPreferredModel, savePreferredModel } from "../lib/modelPref";
+import { loadPreferredProvider, savePreferredProvider } from "../lib/providerPref";
 import { loadLookPrefs } from "../lib/lookPrefs";
 
 interface NewCharacterProps {
@@ -85,6 +87,10 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
   // start on Sonnet after they set, say, Haiku.
   const [models, setModels] = useState<ModelOption[]>([]);
   const [model, setModel] = useState<string | null>(loadPreferredModel() ?? null);
+  // ADR-0018: pick the DM engine (Claude/Grok) up front, defaulting to the last
+  // one the player used. The model list below is filtered to this provider.
+  const [providers, setProviders] = useState<ProviderOption[]>([]);
+  const [provider, setProvider] = useState<string | null>(loadPreferredProvider() ?? null);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,14 +98,33 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
       .then((result) => {
         if (cancelled) return;
         setModels(result.models);
-        // Fall back to the server default only if nothing was remembered.
-        setModel((prev) => prev ?? result.default);
+        setProviders(result.providers);
+        // Resolve the provider (remembered or server default), then reconcile the
+        // model against it: keep a remembered model only if it belongs to that
+        // provider, else fall back to the provider's default. This keeps the
+        // {provider, model} pair valid, which the server enforces on create.
+        const nextProvider = loadPreferredProvider() ?? result.defaultProvider;
+        setProvider(nextProvider);
+        const p = result.providers.find((x) => x.id === nextProvider);
+        const prefModel = loadPreferredModel();
+        const modelValid = !!prefModel && !!p && p.models.some((m) => m.id === prefModel);
+        setModel(modelValid ? prefModel! : p?.default ?? result.default);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [connection]);
+
+  /** Switch engine: reset the selected model to the new provider's default
+   * unless the current one already belongs to it. */
+  function pickProvider(providerId: string) {
+    setProvider(providerId);
+    const p = providers.find((x) => x.id === providerId);
+    if (p && (!model || !p.models.some((m) => m.id === model))) setModel(p.default);
+  }
+
+  const providerModels = providers.find((p) => p.id === provider)?.models ?? models;
 
   const spent = useMemo(() => ABILITIES.reduce((sum, a) => sum + POINT_COST[scores[a.key]], 0), [scores]);
   const remaining = POINT_BUY_BUDGET - spent;
@@ -138,8 +163,12 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
     if (worldSetting.trim()) settings.worldSetting = worldSetting.trim();
     if (toneWhimsy > 0) settings.toneWhimsy = toneWhimsy;
     if (contentIntensity !== "standard") settings.contentIntensity = contentIntensity;
-    // Issue #57: seed the new campaign with the chosen model and remember it for
-    // next time.
+    // Issue #57 / ADR-0018: seed the new campaign with the chosen engine + model
+    // and remember both for next time. The server validates model∈provider.
+    if (provider) {
+      settings.provider = provider;
+      savePreferredProvider(provider);
+    }
     if (model) {
       settings.model = model;
       savePreferredModel(model);
@@ -260,7 +289,38 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
             <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2, color: "var(--brass)", margin: "26px 0 6px" }}>
               THE ENGINE
             </div>
-            {models.map((option) => {
+            {providers.length > 0 && (
+              <div style={{ display: "flex", gap: 7, marginBottom: 10 }}>
+                {providers.map((p) => {
+                  const active = provider === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      data-testid="newchar-provider-option"
+                      data-selected={active}
+                      title={p.label}
+                      onClick={() => pickProvider(p.id)}
+                      style={{
+                        flex: 1,
+                        cursor: "pointer",
+                        padding: "9px 12px",
+                        borderRadius: 4,
+                        fontFamily: "var(--font-display)",
+                        fontWeight: 600,
+                        fontSize: 13,
+                        color: active ? "var(--ink)" : "var(--ink-faint)",
+                        background: active ? "rgba(124,61,32,.24)" : "rgba(28,20,12,.5)",
+                        border: `1px solid ${active ? "rgba(211,112,60,.55)" : "rgba(109,90,56,.32)"}`,
+                      }}
+                    >
+                      {p.label.split("—")[0].trim()}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {providerModels.map((option) => {
               const selected = model === option.id;
               return (
                 <button

@@ -8,8 +8,10 @@ import {
   updateCampaignSettings,
   type CampaignSettings,
   type ModelOption,
+  type ProviderOption,
 } from "../lib/campaign";
 import { savePreferredModel } from "../lib/modelPref";
+import { savePreferredProvider } from "../lib/providerPref";
 import { saveLookPref, type LookPrefs } from "../lib/lookPrefs";
 
 interface SettingsProps {
@@ -93,6 +95,7 @@ export function Settings({
   const [passphrase, setPassphrase] = useState(connection.passphrase);
 
   const [models, setModels] = useState<ModelOption[]>([]);
+  const [providers, setProviders] = useState<ProviderOption[]>([]);
   const [settings, setSettings] = useState<CampaignSettings | null>(null);
   const [customArtStyle, setCustomArtStyle] = useState("");
   const [whimsyDraft, setWhimsyDraft] = useState(0);
@@ -107,6 +110,7 @@ export function Settings({
       .then(([modelsResult, settingsResult]) => {
         if (cancelled) return;
         setModels(modelsResult.models);
+        setProviders(modelsResult.providers);
         setSettings(settingsResult);
         setWhimsyDraft(settingsResult.toneWhimsy ?? 0);
         if (settingsResult.artStyle && !ART_PRESETS.includes(settingsResult.artStyle)) {
@@ -127,10 +131,33 @@ export function Settings({
   async function pickModel(modelId: string) {
     setModelSave("saving");
     try {
-      await startSession(connection, campaignId, modelId);
-      setSettings((prev) => (prev ? { ...prev, model: modelId } : prev));
+      // Model-only: the clicked model always belongs to the currently-selected
+      // provider (the list is filtered to it), and the server resolves provider
+      // from stored settings, which this screen keeps in sync. Trust the
+      // resolved pair the server returns.
+      const result = await startSession(connection, campaignId, modelId);
+      setSettings((prev) => (prev ? { ...prev, model: result.model, provider: result.provider } : prev));
       // Issue #57: remember the choice so the next new game defaults to it.
-      savePreferredModel(modelId);
+      savePreferredModel(result.model);
+      setModelSave("saved");
+    } catch {
+      setModelSave("error");
+    }
+  }
+
+  /** ADR-0018: switching the DM engine is the same session-resetting
+   * POST /session/start path as a model change. We send only the provider and
+   * let the server pick that provider's default model (or keep the stored one
+   * if it already belongs) — then trust the resolved {provider, model} pair it
+   * returns rather than guessing client-side. */
+  async function pickProvider(providerId: string) {
+    if (settings?.provider === providerId) return;
+    setModelSave("saving");
+    try {
+      const result = await startSession(connection, campaignId, undefined, providerId);
+      setSettings((prev) => (prev ? { ...prev, provider: result.provider, model: result.model } : prev));
+      savePreferredProvider(result.provider);
+      savePreferredModel(result.model);
       setModelSave("saved");
     } catch {
       setModelSave("error");
@@ -192,7 +219,37 @@ export function Settings({
           <div style={{ fontSize: 12, color: "var(--ink-faint)", fontStyle: "italic" }}>Reading campaign settings…</div>
         ) : (
           <>
-            {models.map((option) => {
+            {providers.length > 0 && (
+              <div style={{ display: "flex", gap: 7, marginBottom: 10 }}>
+                {providers.map((p) => {
+                  const active = settings.provider === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      data-testid="provider-option"
+                      data-selected={active}
+                      title={p.label}
+                      onClick={() => pickProvider(p.id)}
+                      style={{
+                        flex: 1,
+                        cursor: "pointer",
+                        padding: "9px 12px",
+                        borderRadius: 4,
+                        fontFamily: "var(--font-display)",
+                        fontWeight: 600,
+                        fontSize: 13,
+                        color: active ? "var(--ink)" : "var(--ink-faint)",
+                        background: active ? "rgba(124,61,32,.24)" : "rgba(28,20,12,.5)",
+                        border: `1px solid ${active ? "rgba(211,112,60,.55)" : "rgba(109,90,56,.32)"}`,
+                      }}
+                    >
+                      {p.label.split("—")[0].trim()}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {(providers.find((p) => p.id === settings.provider)?.models ?? models).map((option) => {
               const selected = settings.model === option.id;
               return (
                 <button
