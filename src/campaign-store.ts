@@ -235,6 +235,42 @@ export function listCampaigns(userId: string): CampaignSummary[] {
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
+const SLIDESHOW_IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+
+export interface CampaignImageRef {
+  campaignId: string;
+  filename: string;
+}
+
+/** Issue #105: every generated image across this user's own campaigns, for the
+ * new-game loading slideshow. One readdir per campaign's images/ dir — cheap,
+ * no full state loads. `exclude` skips a campaign (e.g. the just-created one,
+ * which has no images yet anyway). Only ever reads under the user's own
+ * campaigns root (ADR-0019), so it can't surface another user's art. */
+export function listCampaignImages(userId: string, exclude?: string): CampaignImageRef[] {
+  const root = userCampaignsRoot(userId);
+  if (!fs.existsSync(root)) return [];
+  const out: CampaignImageRef[] = [];
+  for (const campaign of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!campaign.isDirectory() || campaign.name === "_registry") continue;
+    if (!CAMPAIGN_ID_PATTERN.test(campaign.name)) continue;
+    if (exclude && campaign.name === exclude) continue;
+    const imagesDir = path.join(root, campaign.name, "images");
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(imagesDir, { withFileTypes: true });
+    } catch {
+      continue; // no images/ dir for this campaign
+    }
+    for (const file of entries) {
+      if (!file.isFile()) continue;
+      if (!SLIDESHOW_IMAGE_EXTS.has(path.extname(file.name).toLowerCase())) continue;
+      out.push({ campaignId: campaign.name, filename: file.name });
+    }
+  }
+  return out;
+}
+
 /** Per design doc §8: player-facing model choices, each labeled with its
  * fidelity/cost tradeoff rather than just the raw model id. Stored
  * per-campaign, not globally — a long-running campaign shouldn't
