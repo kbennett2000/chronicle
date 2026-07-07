@@ -400,6 +400,34 @@ export function persistCampaignProvider(campaignDir: string, provider: ProviderI
   writeRawSettings(campaignDir, { ...readRawSettings(campaignDir), provider });
 }
 
+/** Issue #114: the engine (provider) and model are set-once — chosen at
+ * game creation and locked once play has begun. A mid-campaign switch left a
+ * stale, provider-agnostic `.session-id` that later got resumed by the wrong
+ * backend (a Grok UUID handed to the Claude SDK's `query({ resume })` → crash;
+ * ADR-0018, #57). Rather than reconcile session identity across engines, we
+ * forbid the change once a session exists.
+ *
+ * Pure predicate so the route stays thin and this is unit-testable. Returns
+ * true only when the caller EXPLICITLY requested a provider/model, the resolved
+ * value DIFFERS from what's stored, AND the game has started. A no-arg
+ * session/start (the entry-flow re-start on continue / new-game create) never
+ * requests a value, so it's always allowed; and before the first session is
+ * persisted nothing is locked, so the new-game form can pick the engine. */
+export function isEngineChangeLocked(args: {
+  started: boolean;
+  requestedProvider: boolean;
+  resolvedProvider: ProviderId;
+  priorProvider: ProviderId;
+  requestedModel: boolean;
+  resolvedModel: ModelId;
+  priorModel: ModelId;
+}): boolean {
+  if (!args.started) return false;
+  const providerChanged = args.requestedProvider && args.resolvedProvider !== args.priorProvider;
+  const modelChanged = args.requestedModel && args.resolvedModel !== args.priorModel;
+  return providerChanged || modelChanged;
+}
+
 /** Per ADR-0004: optional per-campaign narration-layer dials, stored
  * alongside model selection. All absent = standard fantasy defaults,
  * existing WILDCARD_CHANCE, no content bounding — this feature is opt-in. */

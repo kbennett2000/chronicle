@@ -31,6 +31,7 @@ import {
   persistCampaignModel,
   readCampaignProvider,
   persistCampaignProvider,
+  isEngineChangeLocked,
   readCampaignSettings,
   persistCampaignSettings,
   newGameDefaultSettings,
@@ -812,6 +813,33 @@ const ROUTES: Array<{
         // Provider switched and the stored model belongs to the old provider —
         // fall back to the new provider's default rather than run an invalid pair.
         model = defaultModelForProvider(provider);
+      }
+
+      // Issue #114: the engine and model are set-once — locked once the game
+      // has started. Switching provider/model mid-campaign left a stale,
+      // provider-agnostic `.session-id` that later got handed to the wrong
+      // backend's resume (the Claude SDK's `query({ resume })` on a Grok UUID →
+      // 502/500 crash; ADR-0018, #57). Rather than reconcile session identity
+      // across engines, we forbid the change once play has begun. A no-arg
+      // session/start (the entry-flow re-start on Home "continue" / new-game
+      // create) is always allowed — only an EXPLICIT, DIFFERING provider/model
+      // is rejected. Before the opening/first turn (no persisted session yet)
+      // changes flow through freely, so the new-game form can pick the engine.
+      const engineLocked = isEngineChangeLocked({
+        started: readPersistedSessionId(campaignDir) !== undefined,
+        requestedProvider: requestedProvider !== undefined,
+        resolvedProvider: provider,
+        priorProvider,
+        requestedModel: requestedModel !== undefined,
+        resolvedModel: model,
+        priorModel,
+      });
+      if (engineLocked) {
+        sendJson(res, 409, {
+          error:
+            "the engine and model are locked once a game has started — they can only be chosen when creating a new chronicle",
+        });
+        return;
       }
 
       if (model !== priorModel) persistCampaignModel(campaignDir, model);
