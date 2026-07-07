@@ -55,6 +55,32 @@ test("strips seed-tables / deferred-tool planning from opening turns (pete-the-o
   assert.equal(stripMetaChatter(raw), "The midday sun hangs low over Thornhaven.");
 });
 
+test("strips backstage preamble when the model glues the --- onto the last sentence (#103)", () => {
+  // The reported Bob-the-Guy leak: a long block of setup babble that ends
+  // "...gets them into action immediately.---" with the dashes fused to the
+  // sentence (no clean "\n---\n"), then the real opening prose.
+  const raw =
+    "I'll read the campaign state files first to establish what's already been set up for Bob the Guy. Now I'll seed the opening location and scene with the seed-tables tool to ensure it's grounded in the campaign's world: Let me load the seed-tables tool directly: I understand—these tools are available directly. Let me seed the opening location and call for an image of Bob the Guy: Let me correct the image generation call: Perfect. Based on the seed (a mystical well showing death and how to avoid it), I'll craft an opening that grounds Bob the Guy's appearance and gets them into action immediately.---\n\nThe moss squelches under your enormous feet as you descend toward the well.";
+  assert.equal(
+    stripMetaChatter(raw),
+    "The moss squelches under your enormous feet as you descend toward the well."
+  );
+});
+
+test("strips the same opening-setup babble even without any --- divider (#103)", () => {
+  const raw =
+    "I'll read the campaign state files first for Bob the Guy. Now I'll seed the opening location with the seed-tables tool. I understand—these tools are available directly. Let me correct the image generation call. Based on the seed, I'll craft an opening. The moss squelches under your enormous feet.";
+  assert.equal(stripMetaChatter(raw), "The moss squelches under your enormous feet.");
+});
+
+test("keeps a legitimate --- scene break in ordinary prose (no backstage tokens) (#103 guard)", () => {
+  // A real mid-scene divider with no backstage signal in the preamble must
+  // survive — the loosened divider match is gated on BACKSTAGE_SIGNAL.
+  const raw =
+    "The gate crashes shut behind you.\n\n---\n\nHours later, you wake to torchlight and the smell of pitch.";
+  assert.equal(stripMetaChatter(raw), raw);
+});
+
 test("strips directory and tool-access meta without a divider", () => {
   const raw =
     "I'm restricted to the active campaign's own directory. The DM tools are not available through direct tool calls. The corridor is dark ahead.";

@@ -15,7 +15,16 @@
 
 /** Signals that text before a `---` divider is backstage reasoning, not fiction. */
 const BACKSTAGE_SIGNAL =
-  /(?:campaign directory|working directory|character sheet shows|initialize the (?:character|campaign)|dm tools|not available through|restricted to the active campaign|set up .{0,60}character sheet|set up the world-state|dice tool directly|seed-tables tool|roll_seed|listed as deferred|adjudicate the outcome directly)/i;
+  /(?:campaign directory|working directory|campaign state files?|character sheet shows|initialize the (?:character|campaign)|dm tools|not available through|restricted to the active campaign|set up .{0,60}character sheet|set up the world-state|dice tool directly|seed-tables tool|seed the opening|roll_seed|listed as deferred|these tools are available|image generation call|adjudicate the outcome directly)/i;
+
+/** A `---` scene-divider, tolerant of the model gluing the dashes onto the end
+ * of the preceding sentence (issue #103: "...into action immediately.---\n\n")
+ * rather than emitting the clean "\n---\n" the older split assumed. Requires a
+ * newline or end-of-text after the dashes so an inline "word --- word" em-dash
+ * usage never counts. This only ever fires when the preamble also matches
+ * BACKSTAGE_SIGNAL, so a legitimate mid-scene "\n---\n" break in real fiction
+ * (no backstage tokens) is left untouched. */
+const BACKSTAGE_DIVIDER = /(?:^|\n|[ \t.!?…])[ \t]*-{3,}[ \t]*(?:\n|$)/;
 
 const META_PATTERNS: RegExp[] = [
   // "Let me / I'll / I need to — update|record|save|write|log ... state|files|sheet|roster|quest log|inventory ..."
@@ -33,11 +42,23 @@ const META_PATTERNS: RegExp[] = [
   /\bi(?:'m| am) restricted to\b[^.!?\n]*?[.!?:]/gi,
   /\bthe campaign (?:must be initialized|hasn't started yet|has not started yet)\b[^.!?\n]*?[.!?:]/gi,
   /\b(?:let me|i need to|now,? let me)\b[^.!?\n]*?\b(?:set up|initialize)\b[^.!?\n]*?\b(?:character|world[-\s]?state|vex|campaign)\b[^.!?\n]*?[.!?:]/gi,
-  /\b(?:let me|i need to|now,? let me)\b[^.!?\n]*?\b(?:call|invoke|fetch|try calling)\b[^.!?\n]*?\b(?:seed[-\s]?tables?|roll_seed|dice)\b[^.!?\n]*?[.!?:]/gi,
+  /\b(?:let me|i need to|now,?\s*(?:let me|i['’]ll))\b[^.!?\n]*?\b(?:call|invoke|fetch|load|try calling)\b[^.!?\n]*?\b(?:seed[-\s]?tables?|roll_seed|dice)\b[^.!?\n]*?[.!?:]/gi,
   /\b(?:they(?:'re| are)|tools? (?:are|is))\b[^.!?\n]*?\b(?:listed as )?deferred\b[^.!?\n]*?[.!?:]/gi,
-  /\b(?:let me|i['’]ll)\b[^.!?\n]*?\b(?:craft|create)\b[^.!?\n]*?\bopening scene\b[^.!?\n]*?[.!?:]/gi,
+  /\b(?:let me|i['’]ll)\b[^.!?\n]*?\b(?:craft|create)\b[^.!?\n]*?\bopening(?:\s+scene)?\b[^.!?\n]*?[.!?:]/gi,
   /\b(?:the )?dm tools?\b[^.!?\n]*?\bnot available\b[^.!?\n]*?[.!?:]/gi,
   /\blet me narrate the scene and adjudicate\b[^.!?\n]*?[.!?:]/gi,
+  // Issue #103: opening-turn setup babble the model sometimes emits with no
+  // `---` divider — "I'll read the campaign state files first...", "Now I'll
+  // seed the opening location...", "Let me correct the image generation
+  // call:", "these tools are available directly.", "Based on the seed (...)".
+  /\b(?:let me|i['’]ll|i will|i need to|now,?\s*(?:let me|i['’]ll))\b[^.!?\n]*?\bread\b[^.!?\n]*?\bcampaign (?:state )?files?\b[^.!?\n]*?[.!?:]/gi,
+  /\b(?:let me|i['’]ll|i will|i need to|now,?\s*(?:let me|i['’]ll))\b[^.!?\n]*?\bseed\b[^.!?\n]*?\b(?:opening|location|scene)\b[^.!?\n]*?[.!?:]/gi,
+  /\b(?:let me|i['’]ll|i need to)\b[^.!?\n]*?\b(?:correct|fix|retry|redo)\b[^.!?\n]*?\bimage[-\s]?generation\b[^.!?\n]*?[.!?:]/gi,
+  /\b(?:i understand|understood)\b[^.!?\n]*?\btools?\b[^.!?\n]*?\bavailable\b[^.!?\n]*?[.!?:]/gi,
+  // Strip only the "Based on the seed (…)," connective lead-in — never a whole
+  // clause, so it can't run into real prose once a neighbouring pattern removes
+  // the sentence that used to follow it.
+  /\bbased on (?:the )?(?:seed|roll_seed|seed[-\s]?tables?)\b\s*(?:\([^)\n]*\))?\s*[,:]?\s*/gi,
   // Inline rules math the model emits while setting up state.
   /\ba level \d+ [^.!?\n]*?\bshould have hp\b[^.!?\n]*?[.!?:]/gi,
   /\bwith (?:con|dex|str|int|wis|cha) \d+,? that'?s\b[^.!?\n]*?[.!?:]/gi,
@@ -52,11 +73,11 @@ const DICE_META_PATTERN =
   /\b(?:let me|i['’]ll|now i['’]ll)\b[^.!?\n]*?\b(?:roll for|call the|adjudicate)\b[^.!?\n]*?\b(?:stealth|dice|check|contested)\b[^.!?\n]*?[.!?:]/gi;
 
 function stripBackstagePreamble(text: string): string {
-  const divider = text.indexOf("\n---\n");
-  if (divider === -1) return text;
-  const preamble = text.slice(0, divider);
+  const match = BACKSTAGE_DIVIDER.exec(text);
+  if (!match) return text;
+  const preamble = text.slice(0, match.index);
   if (!BACKSTAGE_SIGNAL.test(preamble)) return text;
-  return text.slice(divider + 5).trimStart();
+  return text.slice(match.index + match[0].length).trimStart();
 }
 
 /** Issue #72: the model sometimes declares the session over mid-play — a bold
