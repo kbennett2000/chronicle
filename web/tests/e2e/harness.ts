@@ -105,8 +105,15 @@ async function waitForReady(baseURL: string, timeoutMs = 20000): Promise<void> {
   throw new Error(`chronicle server at ${baseURL} did not become ready in time`);
 }
 
-const campaignDirFor = (campaignId: string): string =>
-  path.join(REPO_ROOT, "campaigns", HARNESS_USER_ID, campaignId);
+// ADR-0019 nested campaigns under the owner user. Specs that reach into a
+// campaign's files on disk must go through this so they resolve the same
+// `campaigns/<userId>/<campaignId>/…` path the server uses — the flat
+// `campaigns/<campaignId>` path several specs used pre-multi-user no longer
+// exists. Exported for those specs (variadic tail joins subpaths).
+export const campaignDir = (campaignId: string, ...parts: string[]): string =>
+  path.join(REPO_ROOT, "campaigns", HARNESS_USER_ID, campaignId, ...parts);
+
+const campaignDirFor = (campaignId: string): string => campaignDir(campaignId);
 
 /** Seeds the scratch campaign with deterministic content so assertions on
  * rendered state check against known values, not the scratch template's

@@ -1,7 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { test, expect } from "./harness";
+import { test, expect, campaignDir } from "./harness";
 import { seedConnection } from "./connection";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -9,7 +9,7 @@ const REPO_ROOT = path.resolve(__dirname, "../../..");
 const PORTRAIT_FIXTURE = path.join(REPO_ROOT, "docs/design/handoff-2026-07/assets/portrait-wren.png");
 
 function campaignPath(campaignId: string, ...parts: string[]): string {
-  return path.join(REPO_ROOT, "campaigns", campaignId, ...parts);
+  return campaignDir(campaignId, ...parts);
 }
 
 function writeCharacterSheet(campaignId: string, patch: Record<string, unknown>): void {

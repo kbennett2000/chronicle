@@ -19,6 +19,7 @@ import { QuestPanel } from "../panels/QuestPanel";
 import { GalleryPanel } from "../panels/GalleryPanel";
 import { loadMuted, saveMuted } from "../lib/mute";
 import { useMusicPlayer } from "../lib/music";
+import { useIsDesktop } from "../lib/useIsDesktop";
 
 interface PlayProps {
   connection: Connection;
@@ -466,6 +467,16 @@ function WeavingIndicator({ label = "The Dungeon Master is weaving what happens 
  * heading(s), then every turn in order," since a session's prose log has
  * exactly one heading for the one transcript it corresponds to. Image
  * reveals and the HP wax-note are out of scope this slice. */
+// Shown when a panel is selected before its data has loaded (e.g. Self/Views
+// before the character sheet arrives). Preserves the prior bottom-sheet copy.
+function PanelPending({ label }: { label: string }) {
+  return (
+    <p style={{ fontStyle: "italic", color: "var(--ink-dim)", fontSize: 15, textAlign: "center", marginTop: 40 }}>
+      {label} panel — coming soon
+    </p>
+  );
+}
+
 export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
   const [chapters, setChapters] = useState<string[]>([]);
@@ -753,12 +764,163 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
     }
   }
 
+  // ADR-0021: on desktop the Self/Folk/Quest/Views panels dock into a persistent
+  // side column instead of the mobile slide-up bottom sheet, so a panel is always
+  // shown (defaulting to Self). On mobile, openTab stays null until a tab is
+  // tapped. renderPanel() is shared by both containers so the panel bodies never
+  // diverge between layouts.
+  const isDesktop = useIsDesktop();
+  const activeTab: Tab = openTab ?? "Self";
+
+  function renderPanel(tab: Tab) {
+    if (tab === "Self") {
+      return characterSheet ? (
+        <SelfPanel connection={connection} campaignId={campaignId} sheet={characterSheet} onUpdated={refreshPanels} />
+      ) : (
+        <PanelPending label="Self" />
+      );
+    }
+    if (tab === "Folk") {
+      return <FolkPanel connection={connection} campaignId={campaignId} npcRoster={npcRoster} />;
+    }
+    if (tab === "Quest") {
+      return <QuestPanel questLog={questLog} />;
+    }
+    if (tab === "Views") {
+      return characterSheet ? (
+        <GalleryPanel
+          connection={connection}
+          campaignId={campaignId}
+          characterSheet={characterSheet}
+          npcRoster={npcRoster}
+          worldState={worldState}
+          onIllustrated={refreshPanels}
+        />
+      ) : (
+        <PanelPending label="Views" />
+      );
+    }
+    return <PanelPending label={tab} />;
+  }
+
+  // The scrolling story surface and the "what do you do?" input bar are the same
+  // in both layouts; only their container differs (a vertical stack on mobile, a
+  // centered left column beside the docked panel on desktop). Defined once here
+  // so the two branches can't drift.
+  const storyArea = (
+    <div className="parchment" style={{ flex: 1, margin: "0 12px", minHeight: 0 }}>
+      <div className="parchment-fill" />
+      <div className="cx-scroll parchment-content" style={{ height: "100%", overflowY: "auto", padding: "22px 22px 16px" }}>
+        {load.status === "loading" && (
+          <p style={{ fontStyle: "italic", color: "var(--ink-dim)", fontSize: 15, textAlign: "center" }}>
+            Reading the chronicle…
+          </p>
+        )}
+        {load.status === "error" && (
+          <p style={{ fontStyle: "italic", color: "var(--ember)", fontSize: 14, textAlign: "center" }}>
+            Couldn't read this campaign: {load.message}
+          </p>
+        )}
+        {load.status === "ready" && chapters.map((text, i) => <ChapterHeading key={i} text={text} />)}
+        {/* ADR-0013: a zero-turn campaign is either having its opening scene
+            woven now, or the opening failed and the player begins manually. */}
+        {load.status === "ready" && turns.length === 0 && !openingError && <OpeningSceneLoader />}
+        {load.status === "ready" && turns.length === 0 && openingError && (
+          <p
+            data-testid="opening-error"
+            style={{ fontStyle: "italic", color: "var(--ink-dim)", fontSize: 15, textAlign: "center" }}
+          >
+            The scene wouldn't take shape just now — describe your first action to begin the tale.
+          </p>
+        )}
+        {load.status === "ready" &&
+          turns.map((turn, i) => (
+            <TurnView
+              key={i}
+              turn={turn}
+              connection={connection}
+              campaignId={campaignId}
+              onIllustrate={(description) => handleIllustrateMoment(i, description)}
+              drawing={illustratingTurn === i}
+              drawError={illustrateErrors[i] ?? null}
+              imageNonce={imageNonces[i]}
+              onEdit={(newMessage) => handleEditTurn(i, newMessage)}
+              canEdit={!sending && !openingScene && editingTurn === null && turn.narration !== null}
+              editing={editingTurn === i}
+              editError={editError?.index === i ? editError.message : null}
+              discardCount={turns.length - 1 - i}
+            />
+          ))}
+        {(sending || editingTurn !== null) && <WeavingIndicator />}
+        <div ref={logEndRef} />
+      </div>
+    </div>
+  );
+
+  const inputBar = (
+    <div style={{ flexShrink: 0, padding: "12px 14px 8px" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 9,
+          background: "linear-gradient(180deg,var(--leather-hi),var(--leather))",
+          border: "1px solid var(--brass-dim)",
+          borderRadius: 24,
+          padding: "6px 6px 6px 16px",
+        }}
+      >
+        <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--arcane)" }} />
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              handleSend();
+            }
+          }}
+          disabled={sending || openingScene || load.status !== "ready"}
+          placeholder="What do you do?"
+          data-testid="turn-input"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            background: "none",
+            border: "none",
+            outline: "none",
+            color: "var(--ink)",
+            fontFamily: "var(--font-body)",
+            fontStyle: "italic",
+            fontSize: 15,
+            padding: "6px 0",
+          }}
+        />
+        <button
+          onClick={handleSend}
+          disabled={sending || openingScene || load.status !== "ready" || !input.trim()}
+          data-testid="send-button"
+          style={{
+            width: 38,
+            height: 38,
+            flexShrink: 0,
+            border: "none",
+            borderRadius: "50%",
+            background: "radial-gradient(circle at 38% 34%, #e08247, #a8511f 70%)",
+            cursor: sending ? "default" : "pointer",
+            opacity: sending ? 0.7 : 1,
+          }}
+        />
+      </div>
+    </div>
+  );
+
   return (
     <div className="screen leather-ground">
       {/* ADR-0020: music is played by useMusicPlayer (its own Audio element +
           shuffled playlist from local files or a Navidrome playlist). The mute
           button only appears when the user has music enabled in Settings. */}
-      <div style={{ flexShrink: 0, padding: "54px 16px 10px", display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ flexShrink: 0, padding: isDesktop ? "20px 16px 10px" : "54px 16px 10px", display: "flex", alignItems: "center", gap: 10 }}>
         <button className="icon-button" onClick={onGoHome}>
           <span className="back-chevron" />
         </button>
@@ -789,155 +951,92 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
         )}
       </div>
 
-      <div className="parchment" style={{ flex: 1, margin: "0 12px", minHeight: 0 }}>
-        <div className="parchment-fill" />
-        <div className="cx-scroll parchment-content" style={{ height: "100%", overflowY: "auto", padding: "22px 22px 16px" }}>
-          {load.status === "loading" && (
-            <p style={{ fontStyle: "italic", color: "var(--ink-dim)", fontSize: 15, textAlign: "center" }}>
-              Reading the chronicle…
-            </p>
-          )}
-          {load.status === "error" && (
-            <p style={{ fontStyle: "italic", color: "var(--ember)", fontSize: 14, textAlign: "center" }}>
-              Couldn't read this campaign: {load.message}
-            </p>
-          )}
-          {load.status === "ready" && chapters.map((text, i) => <ChapterHeading key={i} text={text} />)}
-          {/* ADR-0013: a zero-turn campaign is either having its opening scene
-              woven now, or the opening failed and the player begins manually. */}
-          {load.status === "ready" && turns.length === 0 && !openingError && <OpeningSceneLoader />}
-          {load.status === "ready" && turns.length === 0 && openingError && (
-            <p
-              data-testid="opening-error"
-              style={{ fontStyle: "italic", color: "var(--ink-dim)", fontSize: 15, textAlign: "center" }}
-            >
-              The scene wouldn't take shape just now — describe your first action to begin the tale.
-            </p>
-          )}
-          {load.status === "ready" &&
-            turns.map((turn, i) => (
-              <TurnView
-                key={i}
-                turn={turn}
-                connection={connection}
-                campaignId={campaignId}
-                onIllustrate={(description) => handleIllustrateMoment(i, description)}
-                drawing={illustratingTurn === i}
-                drawError={illustrateErrors[i] ?? null}
-                imageNonce={imageNonces[i]}
-                onEdit={(newMessage) => handleEditTurn(i, newMessage)}
-                canEdit={!sending && !openingScene && editingTurn === null && turn.narration !== null}
-                editing={editingTurn === i}
-                editError={editError?.index === i ? editError.message : null}
-                discardCount={turns.length - 1 - i}
-              />
-            ))}
-          {(sending || editingTurn !== null) && <WeavingIndicator />}
-          <div ref={logEndRef} />
-        </div>
-      </div>
-
-      <div style={{ flexShrink: 0, padding: "12px 14px 8px" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 9,
-            background: "linear-gradient(180deg,var(--leather-hi),var(--leather))",
-            border: "1px solid var(--brass-dim)",
-            borderRadius: 24,
-            padding: "6px 6px 6px 16px",
-          }}
-        >
-          <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--arcane)" }} />
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            disabled={sending || openingScene || load.status !== "ready"}
-            placeholder="What do you do?"
-            data-testid="turn-input"
+      {isDesktop ? (
+        // ADR-0021 desktop: story+input as a centered left column, panels docked
+        // in a persistent right column (no bottom sheet).
+        <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+          <div style={{ flex: 1, minWidth: 0, maxWidth: 860, margin: "0 auto", display: "flex", flexDirection: "column", minHeight: 0 }}>
+            {storyArea}
+            {inputBar}
+          </div>
+          <aside
+            data-testid="desktop-sidebar"
             style={{
-              flex: 1,
-              minWidth: 0,
-              background: "none",
-              border: "none",
-              outline: "none",
-              color: "var(--ink)",
-              fontFamily: "var(--font-body)",
-              fontStyle: "italic",
-              fontSize: 15,
-              padding: "6px 0",
-            }}
-          />
-          <button
-            onClick={handleSend}
-            disabled={sending || openingScene || load.status !== "ready" || !input.trim()}
-            data-testid="send-button"
-            style={{
-              width: 38,
-              height: 38,
+              width: activeTab === "Self" || activeTab === "Views" ? 500 : 400,
               flexShrink: 0,
-              border: "none",
-              borderRadius: "50%",
-              background: "radial-gradient(circle at 38% 34%, #e08247, #a8511f 70%)",
-              cursor: sending ? "default" : "pointer",
-              opacity: sending ? 0.7 : 1,
-            }}
-          />
-        </div>
-      </div>
-
-      <div style={{ flexShrink: 0, display: "flex", gap: 3, padding: "0 10px 26px" }}>
-        {TABS.map((label) => (
-          <button
-            key={label}
-            onClick={() => setOpenTab(label)}
-            data-testid={`tab-${label.toLowerCase()}`}
-            style={{
-              flex: 1,
-              cursor: "pointer",
-              border: "none",
-              background: "linear-gradient(180deg,var(--leather-hi),#120c07)",
-              borderRadius: "9px 9px 0 0",
-              padding: "11px 3px 9px",
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 0,
+              borderLeft: "1px solid rgba(109,90,56,.3)",
+              background: "rgba(0,0,0,.16)",
             }}
           >
-            <div style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 11, letterSpacing: 1, color: "var(--ink-dim)" }}>
-              {label}
+            <div style={{ flexShrink: 0, display: "flex", gap: 3, padding: "12px 12px 0" }}>
+              {TABS.map((label) => {
+                const selected = label === activeTab;
+                return (
+                  <button
+                    key={label}
+                    onClick={() => setOpenTab(label)}
+                    data-testid={`tab-${label.toLowerCase()}`}
+                    aria-pressed={selected}
+                    style={{
+                      flex: 1,
+                      cursor: "pointer",
+                      border: "none",
+                      borderBottom: selected ? "2px solid var(--ember)" : "2px solid transparent",
+                      background: selected ? "linear-gradient(180deg,var(--leather-hi),#120c07)" : "transparent",
+                      borderRadius: "7px 7px 0 0",
+                      padding: "10px 3px 9px",
+                    }}
+                  >
+                    <div style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 11, letterSpacing: 1, color: selected ? "var(--ink)" : "var(--ink-faint)" }}>
+                      {label}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
-          </button>
-        ))}
-      </div>
+            <div style={{ flexShrink: 0, padding: "8px 16px 0", fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic" }}>
+              {TAB_SUBTITLES[activeTab]}
+            </div>
+            <div className="cx-scroll" data-testid="desktop-panel" style={{ flex: 1, overflowY: "auto", padding: "14px 16px 26px", minHeight: 0 }}>
+              {renderPanel(activeTab)}
+            </div>
+          </aside>
+        </div>
+      ) : (
+        <>
+          {storyArea}
+          {inputBar}
+          <div style={{ flexShrink: 0, display: "flex", gap: 3, padding: "0 10px 26px" }}>
+            {TABS.map((label) => (
+              <button
+                key={label}
+                onClick={() => setOpenTab(label)}
+                data-testid={`tab-${label.toLowerCase()}`}
+                style={{
+                  flex: 1,
+                  cursor: "pointer",
+                  border: "none",
+                  background: "linear-gradient(180deg,var(--leather-hi),#120c07)",
+                  borderRadius: "9px 9px 0 0",
+                  padding: "11px 3px 9px",
+                }}
+              >
+                <div style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 11, letterSpacing: 1, color: "var(--ink-dim)" }}>
+                  {label}
+                </div>
+              </button>
+            ))}
+          </div>
 
-      {openTab && (
-        <BottomSheet title={openTab.toUpperCase()} subtitle={TAB_SUBTITLES[openTab]} onClose={() => setOpenTab(null)}>
-          {openTab === "Self" && characterSheet ? (
-            <SelfPanel connection={connection} campaignId={campaignId} sheet={characterSheet} onUpdated={refreshPanels} />
-          ) : openTab === "Folk" ? (
-            <FolkPanel connection={connection} campaignId={campaignId} npcRoster={npcRoster} />
-          ) : openTab === "Quest" ? (
-            <QuestPanel questLog={questLog} />
-          ) : openTab === "Views" && characterSheet ? (
-            <GalleryPanel
-              connection={connection}
-              campaignId={campaignId}
-              characterSheet={characterSheet}
-              npcRoster={npcRoster}
-              worldState={worldState}
-              onIllustrated={refreshPanels}
-            />
-          ) : (
-            <p style={{ fontStyle: "italic", color: "var(--ink-dim)", fontSize: 15, textAlign: "center", marginTop: 40 }}>
-              {openTab} panel — coming soon
-            </p>
+          {openTab && (
+            <BottomSheet title={openTab.toUpperCase()} subtitle={TAB_SUBTITLES[openTab]} onClose={() => setOpenTab(null)}>
+              {renderPanel(openTab)}
+            </BottomSheet>
           )}
-        </BottomSheet>
+        </>
       )}
     </div>
   );
