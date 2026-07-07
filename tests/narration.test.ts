@@ -127,6 +127,53 @@ test("keeps NPC dialogue with a planning-shaped verb but no authoring object bef
   assert.equal(stripMetaChatter(raw), raw);
 });
 
+test("strips trailing backstage chatter appended after a complete opening (#103 4th reopen — Danny the Horse)", () => {
+  // The reported leak: a CORRECT opening ending in "What do you do?", then a
+  // `---`, then a second turn's worth of thinking-out-loud below the divider
+  // ("Now I'll append an entry to the session log."), more narration, and a
+  // duplicate THIRD-person hand-back. Every prior fix only stripped a preamble
+  // ABOVE the divider; here the text above it is real fiction. The turn must end
+  // at the first player hand-back.
+  const raw =
+    "It slows, then stops—its engine ticking and cooling just fifty feet from where you stand.\n\nThe driver's side door opens.\n\nWhat do you do?\n\n---\n\nNow I'll append an entry to the session log. The driver's door swings wider. The interior light clicks on, illuminating a figure—\n\nWhat does Danny the Horse do now?";
+  assert.equal(
+    stripMetaChatter(raw),
+    "It slows, then stops—its engine ticking and cooling just fifty feet from where you stand.\n\nThe driver's side door opens.\n\nWhat do you do?"
+  );
+});
+
+test("a normal turn that simply ends on the hand-back is left unchanged (#103 4th reopen guard)", () => {
+  const raw =
+    "The corridor forks left and right, torchlight flickering on wet stone.\n\nWhat do you do?";
+  assert.equal(stripMetaChatter(raw), raw);
+});
+
+test("an embedded 'what do you do for a living' is not a hand-back and does not truncate (#103 4th reopen guard)", () => {
+  // Only a STANDALONE hand-back line ends the turn — this one is mid-sentence, so
+  // the prose that follows it must survive.
+  const raw =
+    "She studies you. What do you do for a living, stranger? The question hangs in the air.\n\nShe waits.";
+  assert.equal(stripMetaChatter(raw), raw);
+});
+
+test("keeps a --- scene break whose next scene opens without second person and has no backstage signal (#103 4th reopen guard)", () => {
+  // The trailing-tail cut only fires when the block AFTER the divider OPENS with
+  // backstage language. A real scene break into new fiction — even one that
+  // doesn't start with "you" — must be preserved.
+  const raw =
+    "The blade sinks home and the ogre topples.\n\n---\n\nMorning breaks grey over the moor. Mist clings to the heather.";
+  assert.equal(stripMetaChatter(raw), raw);
+});
+
+test("strips a standalone third-person hand-back but keeps one that addresses the player (#103 4th reopen)", () => {
+  const stripped =
+    "The figure steps into the light, blade drawn.\n\nWhat does Grok the Barbarian do now?";
+  assert.equal(stripMetaChatter(stripped), "The figure steps into the light, blade drawn.");
+  const kept =
+    "The figure steps into the light, blade drawn.\n\nWhat does your companion do now?";
+  assert.equal(stripMetaChatter(kept), kept);
+});
+
 test("strips directory and tool-access meta without a divider", () => {
   const raw =
     "I'm restricted to the active campaign's own directory. The DM tools are not available through direct tool calls. The corridor is dark ahead.";
