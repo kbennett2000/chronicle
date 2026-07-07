@@ -18,6 +18,7 @@ import { FolkPanel } from "../panels/FolkPanel";
 import { QuestPanel } from "../panels/QuestPanel";
 import { GalleryPanel } from "../panels/GalleryPanel";
 import { loadMuted, saveMuted } from "../lib/mute";
+import { useMusicPlayer } from "../lib/music";
 
 interface PlayProps {
   connection: Connection;
@@ -502,7 +503,10 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   const [worldState, setWorldState] = useState<string>("");
   const [muted, setMuted] = useState(() => loadMuted());
   const logEndRef = useRef<HTMLDivElement>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
+  // ADR-0020: background music (local files or a Navidrome LAN playlist). The
+  // hook owns its own Audio element + shuffled playlist; the mute button below
+  // only shows when the user has music enabled.
+  const music = useMusicPlayer(connection, muted);
 
   // Self/Folk/Quest/Views all read these four fields as props — refreshed
   // after every turn (see handleSend) as well as on mount. A full played
@@ -614,49 +618,6 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ block: "end" });
   }, [turns, sending, openingScene]);
-
-  // Issue #43: the mute button now controls a real ambient bed. Browsers block
-  // autoplay until a user gesture, so we try immediately (entering Play was
-  // itself a tap, which often counts) and, if that's rejected, arm a one-shot
-  // listener to start on the first interaction. Muting pauses; unmuting (always
-  // a click, so never blocked) resumes.
-  useEffect(() => {
-    const el = audioRef.current;
-    if (!el) return;
-    el.volume = 0.32;
-    let armed = false;
-    const start = () => {
-      if (muted || !audioRef.current) return;
-      audioRef.current.play().catch(() => {});
-    };
-    const onGesture = () => {
-      start();
-      disarm();
-    };
-    const disarm = () => {
-      if (!armed) return;
-      armed = false;
-      window.removeEventListener("pointerdown", onGesture);
-      window.removeEventListener("keydown", onGesture);
-    };
-    if (!muted) {
-      el.play().catch(() => {
-        armed = true;
-        window.addEventListener("pointerdown", onGesture);
-        window.addEventListener("keydown", onGesture);
-      });
-    }
-    return disarm;
-    // Mount once; mute changes are handled by the effect below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const el = audioRef.current;
-    if (!el) return;
-    if (muted) el.pause();
-    else el.play().catch(() => {});
-  }, [muted]);
 
   function toggleMute() {
     setMuted((prev) => {
@@ -794,16 +755,9 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
 
   return (
     <div className="screen leather-ground">
-      {/* Issue #43: the ambient bed the mute button controls. Loops seamlessly
-          (see web/public/audio/README.md); .ogg primary, .mp3 fallback. */}
-      {/* Issue #53: `?v=` cache-busts the fixed filename. The URL never changes
-          on its own, and the server sends no content-hash, so without this bump
-          a browser keeps playing the previously-cached bed after a re-record.
-          Bump the number whenever ambient.ogg/.mp3 are regenerated. */}
-      <audio ref={audioRef} loop preload="auto" data-testid="ambient-audio">
-        <source src="/audio/ambient.ogg?v=3" type="audio/ogg" />
-        <source src="/audio/ambient.mp3?v=3" type="audio/mpeg" />
-      </audio>
+      {/* ADR-0020: music is played by useMusicPlayer (its own Audio element +
+          shuffled playlist from local files or a Navidrome playlist). The mute
+          button only appears when the user has music enabled in Settings. */}
       <div style={{ flexShrink: 0, padding: "54px 16px 10px", display: "flex", alignItems: "center", gap: 10 }}>
         <button className="icon-button" onClick={onGoHome}>
           <span className="back-chevron" />
@@ -813,24 +767,26 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
             ACTIVE PLAY
           </div>
         </div>
-        <button
-          className="icon-button"
-          onClick={toggleMute}
-          aria-pressed={muted}
-          aria-label={muted ? "Unmute" : "Mute"}
-          data-testid="mute-toggle"
-          style={{ gap: 2, position: "relative" }}
-        >
-          <div style={{ width: 2.5, height: 6, background: "var(--brass)", borderRadius: 1, opacity: muted ? 0.3 : 1, transition: "opacity 0.2s" }} />
-          <div style={{ width: 2.5, height: 11, background: "var(--brass)", borderRadius: 1, opacity: muted ? 0.3 : 1, transition: "opacity 0.2s" }} />
-          <div style={{ width: 2.5, height: 8, background: "var(--brass)", borderRadius: 1, opacity: muted ? 0.3 : 1, transition: "opacity 0.2s" }} />
-          {muted && (
-            <div
-              data-testid="mute-slash"
-              style={{ position: "absolute", width: 22, height: 1.5, background: "var(--ember)", transform: "rotate(-32deg)" }}
-            />
-          )}
-        </button>
+        {music.enabled && (
+          <button
+            className="icon-button"
+            onClick={toggleMute}
+            aria-pressed={muted}
+            aria-label={muted ? "Unmute" : "Mute"}
+            data-testid="mute-toggle"
+            style={{ gap: 2, position: "relative" }}
+          >
+            <div style={{ width: 2.5, height: 6, background: "var(--brass)", borderRadius: 1, opacity: muted ? 0.3 : 1, transition: "opacity 0.2s" }} />
+            <div style={{ width: 2.5, height: 11, background: "var(--brass)", borderRadius: 1, opacity: muted ? 0.3 : 1, transition: "opacity 0.2s" }} />
+            <div style={{ width: 2.5, height: 8, background: "var(--brass)", borderRadius: 1, opacity: muted ? 0.3 : 1, transition: "opacity 0.2s" }} />
+            {muted && (
+              <div
+                data-testid="mute-slash"
+                style={{ position: "absolute", width: 22, height: 1.5, background: "var(--ember)", transform: "rotate(-32deg)" }}
+              />
+            )}
+          </button>
+        )}
       </div>
 
       <div className="parchment" style={{ flex: 1, margin: "0 12px", minHeight: 0 }}>

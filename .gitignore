@@ -22,6 +22,9 @@ blob-report/
 # default settings live here — never enters git.
 users/
 
+# Music (ADR-0020): the player's own local media — never enters git.
+music/
+
 # Agent SDK session pointers (local runtime state, not source)
 **/.session-id
 

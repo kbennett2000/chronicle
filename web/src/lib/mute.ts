@@ -1,20 +1,19 @@
-// The player's persisted mute preference. As of issue #43 this drives a real
-// ambient audio bed in Play (web/public/audio/ambient.*); before that it was a
-// designed-in-advance preference nothing audible read. Same client-side-only
-// storage pattern as lib/connection.ts's passphrase.
+// The player's persisted mute preference for background music (ADR-0020).
+// Client-side only, same storage pattern as lib/connection.ts.
 //
-// Issue #53: ambient music is now OFF by default — nothing plays unless the
-// player turns it on with the mute button. The storage key is bumped to ".v2"
-// so any prior "unmuted" preference is ignored and everyone starts muted; the
-// absence of a stored value means muted (true), not unmuted.
-const MUTE_KEY = "chronicle.muted.v2";
+// Music is opt-in via a separate "enable music" account setting; the mute button
+// only appears once music is enabled. So the sensible default here is UNMUTED —
+// enabling music should actually play it, and the mute button silences it. The
+// key is bumped to .v3 so anyone carrying the old default-muted (.v2) value
+// starts fresh: with music now explicitly enabled, they expect it to play.
+const MUTE_KEY = "chronicle.muted.v3";
 
 export function loadMuted(): boolean {
   try {
-    // Default (no stored value) = muted. Only an explicit "false" unmutes.
-    return localStorage.getItem(MUTE_KEY) !== "false";
+    // Default (no stored value) = unmuted. Only an explicit "true" mutes.
+    return localStorage.getItem(MUTE_KEY) === "true";
   } catch {
-    return true;
+    return false;
   }
 }
 

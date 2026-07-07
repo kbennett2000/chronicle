@@ -77,6 +77,18 @@ import {
   UsernameTakenError,
   InvalidCredentialsError,
 } from "./user-store.js";
+import { Readable } from "node:stream";
+import {
+  listLocalTracks,
+  resolveLocalTrack,
+  resolveMusicConfig,
+  navidromeCreds,
+  navidromePlaylistTracks,
+  navidromeStreamUrl,
+  MUSIC_CONTENT_TYPES,
+  type UserMusic,
+  type MusicSource,
+} from "./music-store.js";
 
 const dotenvResult = loadDotenv();
 if (dotenvResult.error) {
@@ -263,7 +275,65 @@ function parseDefaultSettings(
       out[key] = body[key];
     }
   }
+  // ADR-0020: music is a per-user preference stored under a `music` key. The
+  // Navidrome credentials are deliberately NOT accepted here — they stay
+  // server-side in .env; a user may only override the URL/playlist.
+  if (body.music !== undefined) {
+    if (typeof body.music !== "object" || body.music === null) return { error: "music must be an object" };
+    const m = body.music as Record<string, unknown>;
+    const music: UserMusic = {};
+    if (m.enabled !== undefined) {
+      if (typeof m.enabled !== "boolean") return { error: "music.enabled must be a boolean" };
+      music.enabled = m.enabled;
+    }
+    if (m.source !== undefined) {
+      if (m.source !== "local" && m.source !== "navidrome") return { error: "music.source must be 'local' or 'navidrome'" };
+      music.source = m.source as MusicSource;
+    }
+    if (m.navidromeUrl !== undefined) {
+      if (typeof m.navidromeUrl !== "string") return { error: "music.navidromeUrl must be a string" };
+      music.navidromeUrl = m.navidromeUrl;
+    }
+    if (m.navidromePlaylist !== undefined) {
+      if (typeof m.navidromePlaylist !== "string") return { error: "music.navidromePlaylist must be a string" };
+      music.navidromePlaylist = m.navidromePlaylist;
+    }
+    out.music = music;
+  }
   return { value: out };
+}
+
+/** Read a user's stored music override off their account settings. */
+function userMusic(userId: string): UserMusic {
+  const m = readUserSettings(userId).music;
+  return m && typeof m === "object" ? (m as UserMusic) : {};
+}
+
+/** Stream a local file with HTTP Range support (seeking). Mirrors the campaign
+ * image route's content-type discipline, plus 206/Content-Range for audio. */
+function streamLocalFile(req: IncomingMessage, res: ServerResponse, absPath: string): void {
+  const stat = fs.statSync(absPath);
+  const type = MUSIC_CONTENT_TYPES[path.extname(absPath).toLowerCase()] ?? "application/octet-stream";
+  const range = req.headers.range;
+  if (range) {
+    const m = /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (m) {
+      const start = m[1] ? parseInt(m[1], 10) : 0;
+      const end = m[2] ? parseInt(m[2], 10) : stat.size - 1;
+      if (start <= end && end < stat.size) {
+        res.writeHead(206, {
+          "Content-Type": type,
+          "Content-Range": `bytes ${start}-${end}/${stat.size}`,
+          "Accept-Ranges": "bytes",
+          "Content-Length": end - start + 1,
+        });
+        fs.createReadStream(absPath, { start, end }).pipe(res);
+        return;
+      }
+    }
+  }
+  res.writeHead(200, { "Content-Type": type, "Content-Length": stat.size, "Accept-Ranges": "bytes" });
+  fs.createReadStream(absPath).pipe(res);
 }
 
 const ROUTES: Array<{
@@ -362,6 +432,89 @@ const ROUTES: Array<{
         return;
       }
       sendJson(res, 200, writeUserSettings(userId, parsed.value));
+    },
+  },
+  // ── ADR-0020: music ─────────────────────────────────────────────────────
+  {
+    // The user's effective music config (no credentials) + whether local files
+    // are present, so the client knows what it can play.
+    method: "GET",
+    pattern: /^\/music\/config$/,
+    async handler(_req, res, _params, userId) {
+      const config = resolveMusicConfig(userMusic(userId));
+      sendJson(res, 200, { ...config, localTrackCount: listLocalTracks().length });
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/music\/local\/tracks$/,
+    async handler(_req, res) {
+      sendJson(res, 200, { tracks: listLocalTracks() });
+    },
+  },
+  {
+    // Streams one local file (auth via ?token= so an <audio> tag can load it).
+    method: "GET",
+    pattern: /^\/music\/local\/track$/,
+    async handler(req, res) {
+      const rel = new URL(req.url ?? "", `http://localhost:${PORT}`).searchParams.get("path") ?? "";
+      const abs = resolveLocalTrack(rel);
+      if (!abs) {
+        sendJson(res, 404, { error: "track not found" });
+        return;
+      }
+      streamLocalFile(req, res, abs);
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/music\/navidrome\/playlist$/,
+    async handler(_req, res, _params, userId) {
+      const creds = navidromeCreds(resolveMusicConfig(userMusic(userId)));
+      if (!creds) {
+        sendJson(res, 400, { error: "Navidrome is not configured — set NAVIDROME_URL/USER/PASSWORD in .env" });
+        return;
+      }
+      try {
+        sendJson(res, 200, { tracks: await navidromePlaylistTracks(creds) });
+      } catch (err) {
+        sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  },
+  {
+    // Proxies one Navidrome track stream (auth via ?token=). Creds never reach
+    // the browser; the Range header is forwarded so seeking works.
+    method: "GET",
+    pattern: /^\/music\/navidrome\/stream$/,
+    async handler(req, res, _params, userId) {
+      const songId = new URL(req.url ?? "", `http://localhost:${PORT}`).searchParams.get("id") ?? "";
+      const creds = navidromeCreds(resolveMusicConfig(userMusic(userId)));
+      if (!creds || !songId) {
+        sendJson(res, 400, { error: "Navidrome not configured, or missing track id" });
+        return;
+      }
+      try {
+        const upstream = await fetch(navidromeStreamUrl(creds, songId), {
+          headers: req.headers.range ? { Range: req.headers.range } : {},
+        });
+        if (!upstream.ok || !upstream.body) {
+          sendJson(res, 502, { error: `Navidrome stream failed (${upstream.status})` });
+          return;
+        }
+        const headers: Record<string, string> = {
+          "Content-Type": upstream.headers.get("content-type") ?? "audio/mpeg",
+          "Accept-Ranges": "bytes",
+        };
+        for (const h of ["content-length", "content-range"]) {
+          const v = upstream.headers.get(h);
+          if (v) headers[h] = v;
+        }
+        res.writeHead(upstream.status, headers);
+        Readable.fromWeb(upstream.body as any).pipe(res);
+      } catch (err) {
+        sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) });
+      }
     },
   },
   {
@@ -1264,7 +1417,11 @@ const server = createServer(async (req, res) => {
       await route.handler(req, res, params, "");
       return;
     }
-    const userId = resolveSession(req.headers[AUTH_HEADER] as string | undefined);
+    // ADR-0020: an <audio> element can't attach the X-Chronicle-Token header, so
+    // the music stream routes pass the session token as ?token= instead. Accept
+    // either — same session token, same auth, just a different carrier.
+    const headerToken = req.headers[AUTH_HEADER] as string | undefined;
+    const userId = resolveSession(headerToken ?? url.searchParams.get("token") ?? undefined);
     if (!userId) {
       sendJson(res, 401, { error: "missing or invalid auth token" });
       return;
