@@ -21,6 +21,7 @@ import { GalleryPanel } from "../panels/GalleryPanel";
 import { LoadingSlideshow } from "../components/LoadingSlideshow";
 import { loadMuted, saveMuted } from "../lib/mute";
 import { useMusicPlayer } from "../lib/music";
+import { GameMusicPopover } from "../components/GameMusicPopover";
 import { useIsDesktop } from "../lib/useIsDesktop";
 
 interface PlayProps {
@@ -536,7 +537,7 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
   // ADR-0020: background music (local files or a Navidrome LAN playlist). The
   // hook owns its own Audio element + shuffled playlist; the mute button below
   // only shows when the user has music enabled.
-  const music = useMusicPlayer(connection, muted);
+  const music = useMusicPlayer(connection, muted, campaignId);
 
   // Self/Folk/Quest/Views all read these four fields as props — refreshed
   // after every turn (see handleSend) as well as on mount. A full played
@@ -1019,6 +1020,10 @@ export function Play({ connection, campaignId, onGoHome }: PlayProps) {
             )}
           </button>
         )}
+        {/* #109: per-game music override — always available (even when music is
+            off), so a player can give this game its own music mid-session. A
+            change reloads playback via useMusicPlayer.reload. */}
+        <GameMusicPopover connection={connection} campaignId={campaignId} onChanged={music.reload} />
       </div>
 
       {isDesktop ? (

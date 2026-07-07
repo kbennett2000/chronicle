@@ -13,8 +13,17 @@ import {
   type ResponseLength,
 } from "../lib/campaign";
 import { ToggleRow, ArtStylePicker } from "../components/LookControls";
+import { MusicOverrideEditor } from "../components/MusicOverrideEditor";
 import { useIsDesktop } from "../lib/useIsDesktop";
-import { getMusicConfig, saveMusicSettings, type MusicConfig, type MusicSource } from "../lib/music";
+import {
+  getMusicConfig,
+  saveMusicSettings,
+  saveCampaignMusicSettings,
+  resetCampaignMusicSettings,
+  type MusicConfig,
+  type MusicOverride,
+  type MusicSource,
+} from "../lib/music";
 
 interface SettingsProps {
   onBack: () => void;
@@ -119,6 +128,10 @@ export function Settings({
   const [music, setMusic] = useState<MusicConfig | null>(null);
   const [navUrl, setNavUrl] = useState("");
   const [navPlaylist, setNavPlaylist] = useState("");
+  // #109: the campaign-resolved effective config (campaign → user → .env) for the
+  // per-game override editor. Distinct from `music` above, which is the account
+  // default (no campaignId). Null until an active campaign's config loads.
+  const [gameMusic, setGameMusic] = useState<MusicConfig | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -152,6 +165,10 @@ export function Settings({
       };
     }
     setSettingsStatus("loading");
+    // #109: the campaign-resolved effective config, for the per-game override editor.
+    getMusicConfig(connection, campaignId)
+      .then((cfg) => !cancelled && setGameMusic(cfg))
+      .catch(() => {});
     getCampaignSettings(connection, campaignId)
       .then((settingsResult) => {
         if (cancelled) return;
@@ -247,6 +264,39 @@ export function Settings({
       setNavPlaylist(cfg.navidrome.playlist);
     } catch {
       // best-effort — the toggle just won't reflect until a working save
+    }
+  }
+
+  /** #109: persist a per-game music override and refresh both the effective
+   * config (drives the editor) and the stored settings.music (drives the
+   * override-present state). */
+  async function patchGameMusic(patch: MusicOverride) {
+    if (!campaignId) return;
+    try {
+      await saveCampaignMusicSettings(connection, campaignId, patch);
+      const [cfg, s] = await Promise.all([
+        getMusicConfig(connection, campaignId),
+        getCampaignSettings(connection, campaignId),
+      ]);
+      setGameMusic(cfg);
+      setSettings(s);
+    } catch {
+      // best-effort — the control just won't reflect until a working save
+    }
+  }
+
+  async function resetGameMusic() {
+    if (!campaignId) return;
+    try {
+      await resetCampaignMusicSettings(connection, campaignId);
+      const [cfg, s] = await Promise.all([
+        getMusicConfig(connection, campaignId),
+        getCampaignSettings(connection, campaignId),
+      ]);
+      setGameMusic(cfg);
+      setSettings(s);
+    } catch {
+      // best-effort
     }
   }
 
@@ -545,12 +595,35 @@ export function Settings({
           </>
         )}
 
-        {/* THE MUSIC (ADR-0020): background music — your own local files or a
+        {/* MUSIC FOR THIS GAME (#109 / ADR-0020 amended): a per-game override of
+            the account music default below. Only shown with an active campaign;
+            its editor resolves campaign → account → .env. */}
+        {settings && gameMusic && (
+          <>
+            <div style={sectionHeadingStyle}>MUSIC FOR THIS GAME</div>
+            <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 8 }}>
+              Give this chronicle its own music, or leave it following your account
+              default below. You can change it any time — even mid-game.
+            </div>
+            <MusicOverrideEditor
+              override={settings.music}
+              effective={gameMusic}
+              onPatch={patchGameMusic}
+              onReset={resetGameMusic}
+            />
+          </>
+        )}
+
+        {/* THE MUSIC — ACCOUNT DEFAULT (ADR-0020): background music for every
+            game that hasn't set its own override above. Your own local files or a
             Navidrome LAN playlist. Off by default; when on, the mute button
             appears in Active Play. */}
         {music && (
           <>
-            <div style={sectionHeadingStyle}>THE MUSIC</div>
+            <div style={sectionHeadingStyle}>MUSIC — ACCOUNT DEFAULT</div>
+            <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 8 }}>
+              The music every game uses unless it overrides it above.
+            </div>
             <ToggleRow
               testId="music-enabled"
               title="Play background music"

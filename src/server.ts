@@ -84,12 +84,12 @@ import {
   listLocalTracks,
   resolveLocalTrack,
   resolveMusicConfig,
+  parseMusicBlock,
   navidromeCreds,
   navidromePlaylistTracks,
   navidromeStreamUrl,
   MUSIC_CONTENT_TYPES,
   type UserMusic,
-  type MusicSource,
 } from "./music-store.js";
 
 const dotenvResult = loadDotenv();
@@ -277,30 +277,14 @@ function parseDefaultSettings(
       out[key] = body[key];
     }
   }
-  // ADR-0020: music is a per-user preference stored under a `music` key. The
-  // Navidrome credentials are deliberately NOT accepted here — they stay
-  // server-side in .env; a user may only override the URL/playlist.
+  // ADR-0020: music is stored under a `music` key. The Navidrome credentials are
+  // deliberately NOT accepted here — they stay server-side in .env; a user may
+  // only override enabled/source/URL/playlist (validated by parseMusicBlock,
+  // shared with the per-campaign settings route, #109).
   if (body.music !== undefined) {
-    if (typeof body.music !== "object" || body.music === null) return { error: "music must be an object" };
-    const m = body.music as Record<string, unknown>;
-    const music: UserMusic = {};
-    if (m.enabled !== undefined) {
-      if (typeof m.enabled !== "boolean") return { error: "music.enabled must be a boolean" };
-      music.enabled = m.enabled;
-    }
-    if (m.source !== undefined) {
-      if (m.source !== "local" && m.source !== "navidrome") return { error: "music.source must be 'local' or 'navidrome'" };
-      music.source = m.source as MusicSource;
-    }
-    if (m.navidromeUrl !== undefined) {
-      if (typeof m.navidromeUrl !== "string") return { error: "music.navidromeUrl must be a string" };
-      music.navidromeUrl = m.navidromeUrl;
-    }
-    if (m.navidromePlaylist !== undefined) {
-      if (typeof m.navidromePlaylist !== "string") return { error: "music.navidromePlaylist must be a string" };
-      music.navidromePlaylist = m.navidromePlaylist;
-    }
-    out.music = music;
+    const parsed = parseMusicBlock(body.music);
+    if ("error" in parsed) return { error: parsed.error };
+    out.music = parsed.value;
   }
   return { value: out };
 }
@@ -309,6 +293,23 @@ function parseDefaultSettings(
 function userMusic(userId: string): UserMusic {
   const m = readUserSettings(userId).music;
   return m && typeof m === "object" ? (m as UserMusic) : {};
+}
+
+/** #109: read a campaign's per-game music override, or {} when there's no
+ * campaign in scope / it's invalid / it has none — so music routes degrade to
+ * the user-level config rather than erroring. */
+function campaignMusic(userId: string, campaignId: string | null): UserMusic {
+  if (!campaignId) return {};
+  try {
+    return readCampaignSettings(resolveCampaignDir(userId, campaignId)).music ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/** The `campaignId` query param on the music routes (null when absent). */
+function musicCampaignId(req: IncomingMessage): string | null {
+  return new URL(req.url ?? "", `http://localhost:${PORT}`).searchParams.get("campaignId");
 }
 
 /** Stream a local file with HTTP Range support (seeking). Mirrors the campaign
@@ -442,8 +443,8 @@ const ROUTES: Array<{
     // are present, so the client knows what it can play.
     method: "GET",
     pattern: /^\/music\/config$/,
-    async handler(_req, res, _params, userId) {
-      const config = resolveMusicConfig(userMusic(userId));
+    async handler(req, res, _params, userId) {
+      const config = resolveMusicConfig(userMusic(userId), campaignMusic(userId, musicCampaignId(req)));
       sendJson(res, 200, { ...config, localTrackCount: listLocalTracks().length });
     },
   },
@@ -471,8 +472,10 @@ const ROUTES: Array<{
   {
     method: "GET",
     pattern: /^\/music\/navidrome\/playlist$/,
-    async handler(_req, res, _params, userId) {
-      const creds = navidromeCreds(resolveMusicConfig(userMusic(userId)));
+    async handler(req, res, _params, userId) {
+      const creds = navidromeCreds(
+        resolveMusicConfig(userMusic(userId), campaignMusic(userId, musicCampaignId(req)))
+      );
       if (!creds) {
         sendJson(res, 400, { error: "Navidrome is not configured — set NAVIDROME_URL/USER/PASSWORD in .env" });
         return;
@@ -491,7 +494,9 @@ const ROUTES: Array<{
     pattern: /^\/music\/navidrome\/stream$/,
     async handler(req, res, _params, userId) {
       const songId = new URL(req.url ?? "", `http://localhost:${PORT}`).searchParams.get("id") ?? "";
-      const creds = navidromeCreds(resolveMusicConfig(userMusic(userId)));
+      const creds = navidromeCreds(
+        resolveMusicConfig(userMusic(userId), campaignMusic(userId, musicCampaignId(req)))
+      );
       if (!creds || !songId) {
         sendJson(res, 400, { error: "Navidrome not configured, or missing track id" });
         return;
@@ -697,10 +702,15 @@ const ROUTES: Array<{
       // let the explicit create-form settings (below) override. The client's
       // form is itself pre-filled from those defaults, so this is the robust
       // floor even if the form omits a field.
+      // #109: deliberately EXCLUDE `music` from the seed — a new game stores no
+      // music override and so tracks the user's *live* account default until the
+      // player explicitly overrides it for that game (ADR-0020 amended). This
+      // diverges from the copy-on-create the other settings use, by design.
+      const { music: _seedMusic, ...userDefaults } = readUserSettings(userId);
       const dir = scaffoldCampaign(userId, campaignId, sheet, {
         model: DEFAULT_MODEL,
         autoRollDice: true,
-        ...readUserSettings(userId),
+        ...userDefaults,
       });
       // Model and provider are persisted via their own merge-writes (both are
       // excluded from the POST /settings update type); the world fields go
@@ -1122,6 +1132,7 @@ const ROUTES: Array<{
         generateImages?: boolean;
         autoRollDice?: boolean;
         autoIllustrateTurns?: boolean;
+        music?: UserMusic | null;
       } = {};
 
       if (body.artStyle !== undefined) {
@@ -1189,6 +1200,19 @@ const ROUTES: Array<{
           return;
         }
         updates.autoIllustrateTurns = body.autoIllustrateTurns;
+      }
+      // #109: an optional per-game music override (same shape/validation as the
+      // user default). Empty subfields clear that field back to the user default;
+      // an explicit `null` drops the whole override (reset to account default).
+      if (body.music === null) {
+        updates.music = null;
+      } else if (body.music !== undefined) {
+        const parsed = parseMusicBlock(body.music);
+        if ("error" in parsed) {
+          sendJson(res, 400, { error: parsed.error });
+          return;
+        }
+        updates.music = parsed.value;
       }
 
       sendJson(res, 200, persistCampaignSettings(campaignDir, updates));

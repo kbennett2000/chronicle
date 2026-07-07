@@ -36,6 +36,7 @@ a server on the LAN — chosen in the (now per-user, ADR-0019) settings screen.
    override `enabled`, `source`, and the Navidrome **URL/playlist** (but not the
    credentials, which stay server-side) via their account settings (`music` key
    in `/me/settings`, ADR-0019). Effective config = user override → `.env`.
+   **Amended by #109 — see the amendment below.**
 
 5. **Audio auth via query-param token:** an `<audio>` element can't attach the
    `X-Chronicle-Token` header, and fetching whole tracks as blobs would defeat
@@ -51,3 +52,44 @@ a server on the LAN — chosen in the (now per-user, ADR-0019) settings screen.
 - Query-param tokens can appear in server access logs; on a trusted LAN this is
   an accepted trade for native audio streaming. Not an internet-facing posture
   (ADR-0003 still governs exposure).
+
+## Amendment — per-game music override (issue #109)
+
+Music was originally a per-user preference only (decision 4). #109 asks for the
+same "account default, overridable per game, changeable mid-game" model the other
+settings already use (engine/look/world, ADR-0019).
+
+1. **Three-level, field-by-field precedence:** effective config is now resolved
+   per field as **campaign override → user default → `.env`**. A per-game override
+   wins only where a field is set; each unset field falls through to the account
+   default, then to `.env`. `resolveMusicConfig(userMusic, campaignMusic)`
+   implements this with nullish-coalescing (not `||`) so a deliberate
+   `enabled: false` at the game level is honored, not lost.
+
+2. **Storage:** the override lives under a `music` key in the campaign's
+   `settings.json` (`CampaignSettings.music`), the exact same client-safe shape as
+   the user default (`enabled/source/navidromeUrl/navidromePlaylist` — **never**
+   the Navidrome credentials, which remain server-side in `.env`). Validation is a
+   single shared `parseMusicBlock()` used by the user-defaults route, the
+   per-campaign settings route, and `readCampaignSettings`, so all three agree on
+   the shape.
+
+3. **Nested, non-destructive writes:** `persistCampaignSettings` merges the `music`
+   block one level deep (mirroring the #95 user-settings fix), so patching a single
+   field (e.g. just the playlist) doesn't wipe its siblings. An empty-string
+   subfield clears that field back to the fallback chain; an override with no
+   fields left is dropped entirely (→ the game resumes tracking the user default).
+
+4. **New games do NOT copy the music default:** unlike engine/look/play settings,
+   which are copied into a new campaign at create time (ADR-0019), a new game
+   stores **no** `music` override and so tracks the user's *live* account default
+   until the player explicitly overrides it for that game. This means changing your
+   account music preference retroactively affects every game that hasn't set its
+   own — the intended behavior for a cross-cutting ambient preference.
+
+5. **Client plumbing:** the music routes (`/music/config`,
+   `/music/navidrome/playlist`, `/music/navidrome/stream`) accept an optional
+   `?campaignId=`; the web client passes the active campaign so both the Settings
+   editors and in-game playback resolve the per-game config. The override is
+   editable both in the campaign-scoped section of Settings and inline beside the
+   Active-Play transport controls (so it can be changed mid-session, per #109).

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseMusicBlock, type UserMusic } from "./music-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const CAMPAIGNS_ROOT = path.resolve(__dirname, "../campaigns");
@@ -442,6 +443,11 @@ export interface CampaignSettings {
    * false (absent) and is only meaningful when `generateImages` is on — it
    * needs Grok Build configured just the same. */
   autoIllustrateTurns?: boolean;
+  /** Issue #109 / ADR-0020: an optional per-game music override. Absent means the
+   * game tracks the user's account default (which itself falls back to `.env`);
+   * present fields win over the user default via resolveMusicConfig. Credentials
+   * are never stored here — only enabled/source/URL/playlist. */
+  music?: UserMusic;
 }
 
 export function readCampaignSettings(campaignDir: string): CampaignSettings {
@@ -480,6 +486,14 @@ export function readCampaignSettings(campaignDir: string): CampaignSettings {
   if (typeof raw.autoIllustrateTurns === "boolean") {
     settings.autoIllustrateTurns = raw.autoIllustrateTurns;
   }
+  // #109: only attach a music override when the stored block has at least one
+  // valid field — an absent/empty override falls back to user default → .env.
+  if (raw.music !== undefined) {
+    const parsed = parseMusicBlock(raw.music);
+    if ("value" in parsed && Object.keys(parsed.value).length > 0) {
+      settings.music = parsed.value;
+    }
+  }
   return settings;
 }
 
@@ -488,12 +502,31 @@ export function readCampaignSettings(campaignDir: string): CampaignSettings {
  * rather than being stored as a literal empty string. */
 export function persistCampaignSettings(
   campaignDir: string,
-  updates: Partial<Omit<CampaignSettings, "model" | "provider">>
+  // #109: `music: null` is an explicit "reset to account default" — it drops the
+  // whole per-game override (the only way to clear a stored boolean `enabled`,
+  // which can't be cleared via the empty-string path below).
+  updates: Partial<Omit<CampaignSettings, "model" | "provider" | "music">> & { music?: UserMusic | null }
 ): CampaignSettings {
   const raw = readRawSettings(campaignDir);
   const merged: Record<string, unknown> = { ...raw, ...updates };
   if (merged.artStyle === "") delete merged.artStyle;
   if (merged.worldSetting === "") delete merged.worldSetting;
+  // #109: music is a nested object — one-level-deep merge (mirrors the #95 fix in
+  // writeUserSettings) so patching one field (e.g. just the playlist) doesn't
+  // wipe the siblings. Empty-string subfields clear that override back to absent
+  // (→ user default → .env); an override with no fields left is dropped entirely.
+  // `null` drops the whole override outright (reset to account default).
+  if (updates.music === null) {
+    delete merged.music;
+  } else if (updates.music !== undefined) {
+    const prev = raw.music && typeof raw.music === "object" ? (raw.music as Record<string, unknown>) : {};
+    const mergedMusic: Record<string, unknown> = { ...prev, ...updates.music };
+    for (const key of Object.keys(mergedMusic)) {
+      if (mergedMusic[key] === "") delete mergedMusic[key];
+    }
+    if (Object.keys(mergedMusic).length > 0) merged.music = mergedMusic;
+    else delete merged.music;
+  }
   writeRawSettings(campaignDir, merged);
   return readCampaignSettings(campaignDir);
 }

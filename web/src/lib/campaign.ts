@@ -1,5 +1,6 @@
 import { ApiError, apiFetch, apiFetchRaw } from "./api";
 import type { Connection } from "./connection";
+import type { MusicOverride } from "./music";
 
 /** The active campaign id from a ?campaign= query param (kept for shareable
  * links and the e2e harness), or `null` when absent. Issue #97: this used to
@@ -122,6 +123,10 @@ export interface CampaignSettings {
   /** Issue #56: absent === off. When on, the app illustrates every DM response
    * automatically. Only meaningful when generateImages is on. */
   autoIllustrateTurns?: boolean;
+  /** Issue #109: a per-game music override. Absent === this game tracks the
+   * user's account default (which itself falls back to `.env`). Only the
+   * client-safe fields are stored — never Navidrome credentials. */
+  music?: MusicOverride;
 }
 
 export type CampaignSettingsPatch = Partial<Omit<CampaignSettings, "model" | "provider">>;

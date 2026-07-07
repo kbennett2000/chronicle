@@ -21,15 +21,49 @@ export interface Track {
   name: string;
 }
 
-export async function getMusicConfig(connection: Connection): Promise<MusicConfig> {
-  return (await apiFetch(connection, "/music/config")) as MusicConfig;
+export type MusicOverride = Partial<{
+  enabled: boolean;
+  source: MusicSource;
+  navidromeUrl: string;
+  navidromePlaylist: string;
+}>;
+
+/** #109: append `?campaignId=` when a game is in scope, so the server resolves the
+ * effective config field-by-field (campaign override → user default → .env). */
+function campaignQuery(campaignId?: string | null): string {
+  return campaignId ? `?campaignId=${encodeURIComponent(campaignId)}` : "";
 }
 
-export async function saveMusicSettings(
-  connection: Connection,
-  music: Partial<{ enabled: boolean; source: MusicSource; navidromeUrl: string; navidromePlaylist: string }>
-): Promise<void> {
+export async function getMusicConfig(connection: Connection, campaignId?: string | null): Promise<MusicConfig> {
+  return (await apiFetch(connection, `/music/config${campaignQuery(campaignId)}`)) as MusicConfig;
+}
+
+export async function saveMusicSettings(connection: Connection, music: MusicOverride): Promise<void> {
   await apiFetch(connection, "/me/settings", { method: "POST", body: JSON.stringify({ music }) });
+}
+
+/** #109: persist a per-game music override on the campaign's settings. Same shape
+ * as the account default; empty-string subfields clear that field back to the
+ * user/.env fallback. */
+export async function saveCampaignMusicSettings(
+  connection: Connection,
+  campaignId: string,
+  music: MusicOverride
+): Promise<void> {
+  await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/settings`, {
+    method: "POST",
+    body: JSON.stringify({ music }),
+  });
+}
+
+/** #109: drop a game's music override entirely, so it resumes tracking the
+ * user's account default. `null` is the reset signal (the only way to clear a
+ * stored boolean `enabled`, which the empty-string path can't touch). */
+export async function resetCampaignMusicSettings(connection: Connection, campaignId: string): Promise<void> {
+  await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/settings`, {
+    method: "POST",
+    body: JSON.stringify({ music: null }),
+  });
 }
 
 async function getLocalTracks(connection: Connection): Promise<Track[]> {
@@ -39,21 +73,25 @@ async function getLocalTracks(connection: Connection): Promise<Track[]> {
   return tracks.map((t) => ({ id: t.path, name: t.name }));
 }
 
-async function getNavidromeTracks(connection: Connection): Promise<Track[]> {
-  const { tracks } = (await apiFetch(connection, "/music/navidrome/playlist")) as {
+async function getNavidromeTracks(connection: Connection, campaignId?: string | null): Promise<Track[]> {
+  const { tracks } = (await apiFetch(connection, `/music/navidrome/playlist${campaignQuery(campaignId)}`)) as {
     tracks: { id: string; title: string; artist: string }[];
   };
   return tracks.map((t) => ({ id: t.id, name: t.artist ? `${t.artist} — ${t.title}` : t.title }));
 }
 
 /** Stream URL for the current source, with the session token as a query param so
- * the bare <audio> request authenticates (ADR-0020). */
-function trackUrl(connection: Connection, source: MusicSource, id: string): string {
+ * the bare <audio> request authenticates (ADR-0020). For Navidrome the active
+ * campaign is passed too, so the per-game override resolves the same URL the
+ * playlist was fetched from (#109). */
+function trackUrl(connection: Connection, source: MusicSource, id: string, campaignId?: string | null): string {
   const base = serverOrigin(connection);
   const token = encodeURIComponent(connection.token);
-  return source === "local"
-    ? `${base}/music/local/track?path=${encodeURIComponent(id)}&token=${token}`
-    : `${base}/music/navidrome/stream?id=${encodeURIComponent(id)}&token=${token}`;
+  if (source === "local") {
+    return `${base}/music/local/track?path=${encodeURIComponent(id)}&token=${token}`;
+  }
+  const camp = campaignId ? `&campaignId=${encodeURIComponent(campaignId)}` : "";
+  return `${base}/music/navidrome/stream?id=${encodeURIComponent(id)}&token=${token}${camp}`;
 }
 
 function shuffle<T>(arr: T[]): T[] {
@@ -82,6 +120,8 @@ export interface MusicPlayerState {
   next: () => void;
   /** Skip to the previous track (clears a manual pause). */
   prev: () => void;
+  /** Re-fetch config + playlist (e.g. after a per-game override changes mid-game, #109). */
+  reload: () => void;
 }
 
 /** Owns an Audio element and a shuffled playlist. Loads the user's music config,
@@ -90,11 +130,13 @@ export interface MusicPlayerState {
  * pause so the transport controls don't fight the mute button), plus browser
  * autoplay blocking (arms a one-shot gesture listener). Nothing plays unless
  * music is enabled AND unmuted AND not manually paused. */
-export function useMusicPlayer(connection: Connection, muted: boolean): MusicPlayerState {
+export function useMusicPlayer(connection: Connection, muted: boolean, campaignId?: string | null): MusicPlayerState {
   const [enabled, setEnabled] = useState(false);
   const [currentName, setCurrentName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
+  // #109: bump to force a config/playlist re-fetch (a per-game override changed).
+  const [reloadNonce, setReloadNonce] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playlistRef = useRef<Track[]>([]);
   const indexRef = useRef(0);
@@ -118,7 +160,7 @@ export function useMusicPlayer(connection: Connection, muted: boolean): MusicPla
       const list = playlistRef.current;
       if (!list.length) return;
       const track = list[indexRef.current % list.length];
-      audio.src = trackUrl(connection, sourceRef.current, track.id);
+      audio.src = trackUrl(connection, sourceRef.current, track.id, campaignId);
       setCurrentName(track.name);
       if (!mutedRef.current && !pausedRef.current) audio.play().catch(() => armGesture());
     };
@@ -160,13 +202,16 @@ export function useMusicPlayer(connection: Connection, muted: boolean): MusicPla
 
     (async () => {
       try {
-        const config = await getMusicConfig(connection);
+        setError(null);
+        const config = await getMusicConfig(connection, campaignId);
         if (cancelled) return;
         setEnabled(config.enabled);
         if (!config.enabled) return;
         sourceRef.current = config.source;
         const tracks =
-          config.source === "navidrome" ? await getNavidromeTracks(connection) : await getLocalTracks(connection);
+          config.source === "navidrome"
+            ? await getNavidromeTracks(connection, campaignId)
+            : await getLocalTracks(connection);
         if (cancelled) return;
         if (!tracks.length) {
           setError(
@@ -193,7 +238,7 @@ export function useMusicPlayer(connection: Connection, muted: boolean): MusicPla
       audioRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection.serverAddress, connection.token]);
+  }, [connection.serverAddress, connection.token, campaignId, reloadNonce]);
 
   // React to mute OR manual-pause changes. Playback resumes only when BOTH are
   // clear, so muting and manually pausing stay independent (issue #108: unmuting
@@ -218,6 +263,7 @@ export function useMusicPlayer(connection: Connection, muted: boolean): MusicPla
     pausedRef.current = false;
     setPaused(false);
   }).current;
+  const reload = useRef(() => setReloadNonce((n) => n + 1)).current;
 
-  return { enabled, currentName, error, isPaused: paused, pause, resume, next, prev };
+  return { enabled, currentName, error, isPaused: paused, pause, resume, next, prev, reload };
 }
