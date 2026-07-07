@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Connection } from "../lib/connection";
-import type { ConnectionStatus } from "../lib/api";
+import { ApiError, type ConnectionStatus } from "../lib/api";
 import {
   getCampaignSettings,
   getModels,
@@ -105,6 +105,10 @@ export function Settings({
   const [models, setModels] = useState<ModelOption[]>([]);
   const [providers, setProviders] = useState<ProviderOption[]>([]);
   const [settings, setSettings] = useState<CampaignSettings | null>(null);
+  // #96: distinguish "still loading" from "loaded, but this user has no such
+  // campaign" so the campaign-scoped sections show a real empty state instead of
+  // spinning "Reading campaign settings…" forever.
+  const [settingsStatus, setSettingsStatus] = useState<"loading" | "ready" | "no-campaign" | "error">("loading");
   const [whimsyDraft, setWhimsyDraft] = useState(0);
 
   const [modelSave, setModelSave] = useState<SaveState>("idle");
@@ -125,19 +129,34 @@ export function Settings({
         setNavPlaylist(cfg.navidrome.playlist);
       })
       .catch(() => {});
-    Promise.all([getModels(connection), getCampaignSettings(connection, campaignId)])
-      .then(([modelsResult, settingsResult]) => {
+    // #96: fetch models and campaign settings independently. They were coupled in
+    // one Promise.all with an empty .catch(), so a settings 404 (a brand-new user
+    // with no campaign — campaignId falls back to the "test-campaign" fixture that
+    // doesn't exist under their account) rejected the whole chain and left
+    // `settings` null forever, showing the infinite "Reading campaign settings…".
+    getModels(connection)
+      .then((modelsResult) => {
         if (cancelled) return;
         setModels(modelsResult.models);
         setProviders(modelsResult.providers);
+      })
+      .catch(() => {});
+    setSettingsStatus("loading");
+    getCampaignSettings(connection, campaignId)
+      .then((settingsResult) => {
+        if (cancelled) return;
         setSettings(settingsResult);
         setWhimsyDraft(settingsResult.toneWhimsy ?? 0);
+        setSettingsStatus("ready");
       })
-      .catch(() => {
-        // Settings are best-effort display — a failed fetch here just
-        // leaves the sections showing their loading state, not an error
-        // screen; Connection (below) is what actually surfaces
-        // reachability problems.
+      .catch((err) => {
+        if (cancelled) return;
+        setSettings(null);
+        // A 404 means the campaign doesn't exist for this user (no game yet) —
+        // show an empty state. Any other failure (server unreachable) is also
+        // surfaced by the Connection tester below, but either way we must stop
+        // spinning rather than hang on the loading text.
+        setSettingsStatus(err instanceof ApiError && err.status === 404 ? "no-campaign" : "error");
       });
     return () => {
       cancelled = true;
@@ -251,8 +270,17 @@ export function Settings({
         <div style={columnStyle}>
         {/* THE ENGINE */}
         <div style={{ ...sectionHeadingStyle, margin: "2px 0 4px" }}>THE ENGINE</div>
-        {!settings ? (
+        {settingsStatus === "loading" ? (
           <div style={{ fontSize: 12, color: "var(--ink-faint)", fontStyle: "italic" }}>Reading campaign settings…</div>
+        ) : !settings ? (
+          <div
+            data-testid="settings-no-campaign"
+            style={{ fontSize: 12, color: "var(--ink-faint)", fontStyle: "italic", lineHeight: 1.55 }}
+          >
+            {settingsStatus === "no-campaign"
+              ? "No game yet — start or open a campaign to set its engine, look, and world. Music and account settings below still work."
+              : "Couldn't load campaign settings. Check the connection below, then reopen Settings."}
+          </div>
         ) : (
           <>
             {providers.length > 0 && (
@@ -335,10 +363,10 @@ export function Settings({
           </>
         )}
 
-        {/* THE LOOK */}
-        <div style={sectionHeadingStyle}>THE LOOK</div>
+        {/* THE LOOK — campaign-scoped; hidden until a campaign loads (#96) */}
         {settings && (
           <>
+            <div style={sectionHeadingStyle}>THE LOOK</div>
             <ToggleRow
               testId="images-toggle"
               title="Generate scene art"
@@ -372,10 +400,10 @@ export function Settings({
           </>
         )}
 
-        {/* THE WORLD */}
-        <div style={sectionHeadingStyle}>THE WORLD</div>
+        {/* THE WORLD — campaign-scoped; hidden until a campaign loads (#96) */}
         {settings && (
           <>
+            <div style={sectionHeadingStyle}>THE WORLD</div>
             <div style={{ fontSize: 12, color: "var(--ink-dim)", marginBottom: 6 }}>
               Setting <span style={{ color: "var(--ink-faint)" }}>— empty keeps standard fantasy</span>
             </div>

@@ -23,7 +23,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { CAMPAIGNS_ROOT, userCampaignsRoot } from "../src/campaign-store.js";
-import { createUser, userExists, userIdForUsername } from "../src/user-store.js";
+import { ensureBootstrapUser, userIdForUsername } from "../src/user-store.js";
 
 const TEST_FIXTURE = "test-campaign";
 
@@ -56,7 +56,6 @@ function gitStatusPorcelain(relPath: string): string {
 
 function main(): void {
   const username = process.env.BOOTSTRAP_USERNAME ?? "kris";
-  const password = process.env.BOOTSTRAP_PASSWORD;
   const userId = userIdForUsername(username);
 
   const flat = findFlatCampaigns();
@@ -77,21 +76,22 @@ function main(): void {
     }
   }
 
-  // 1. Bootstrap user.
-  if (!userExists(userId)) {
-    if (!password || password.length < 6) {
-      console.error(
-        `BOOTSTRAP_PASSWORD is not set (or too short) in .env — needed to create the ` +
-          `bootstrap user "${username}" that will own the existing campaigns. ` +
-          `Set it and re-run.`
-      );
-      process.exit(1);
-    }
-    createUser(username, password);
-    console.log(`Created bootstrap user "${username}" (id: ${userId}).`);
-  } else {
-    console.log(`Bootstrap user "${username}" (id: ${userId}) already exists.`);
+  // 1. Bootstrap user (shared with the server's startup ensure — issue #94). The
+  // migration NEEDS the user to exist to own the campaigns it's about to move, so
+  // a skip here (missing/short password) is a hard failure, unlike on the server.
+  const bootstrap = ensureBootstrapUser();
+  if (bootstrap.status === "skipped") {
+    console.error(
+      `Cannot create the bootstrap user "${username}" that will own the existing ` +
+        `campaigns: ${bootstrap.reason}. Fix it in .env and re-run.`
+    );
+    process.exit(1);
   }
+  console.log(
+    bootstrap.status === "created"
+      ? `Created bootstrap user "${username}" (id: ${userId}).`
+      : `Bootstrap user "${username}" (id: ${userId}) already exists.`
+  );
 
   const targetRoot = userCampaignsRoot(userId);
   fs.mkdirSync(targetRoot, { recursive: true });

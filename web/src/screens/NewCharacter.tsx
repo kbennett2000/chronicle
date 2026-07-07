@@ -239,6 +239,22 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
   const passivePerception = 10 + modifier(scores.wisdom) + (perceptionProficient ? 2 : 0);
   const canCreate = name.trim().length > 0 && remaining >= 0 && skillsComplete && expertiseComplete && !creating;
 
+  // Issue #97: the blocking fields (name, skills, expertise) sit near the top of a
+  // long scrolling form, but the button is at the very bottom — a user who filled
+  // the visible lower fields saw a dead button with no reason. Spell out what's
+  // still missing right at the button, using the same predicates that gate it.
+  const missing: string[] = [];
+  if (name.trim().length === 0) missing.push("a name");
+  if (remaining < 0) missing.push("fewer ability points spent (over budget)");
+  if (!skillsComplete) {
+    const need = skillChoice.choose - skillProficiencies.length;
+    missing.push(`${need} more skill${need === 1 ? "" : "s"}`);
+  }
+  if (expertiseCount > 0 && !expertiseComplete) {
+    const need = expertiseCount - expertise.length;
+    missing.push(`${need} more expertise pick${need === 1 ? "" : "s"}`);
+  }
+
   async function submit() {
     if (!canCreate) return;
     setCreating(true);
@@ -741,6 +757,14 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
         >
           {creating ? "BEGINNING…" : "BEGIN THE TALE"}
         </button>
+        {!creating && missing.length > 0 && (
+          <div
+            data-testid="newchar-missing"
+            style={{ marginTop: 10, fontSize: 12, color: "var(--ember)", textAlign: "center", lineHeight: 1.4 }}
+          >
+            Still needed: {missing.join(" · ")}
+          </div>
+        )}
         {error && (
           <div data-testid="newchar-error" style={{ marginTop: 10, fontSize: 12, color: "var(--ember)", textAlign: "center" }}>
             {error}

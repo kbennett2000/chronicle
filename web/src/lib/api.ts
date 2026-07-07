@@ -6,7 +6,15 @@ export class AuthError extends Error {
   }
 }
 
-export class ApiError extends Error {}
+export class ApiError extends Error {
+  /** HTTP status of the failed response, when known — lets callers tell e.g. a
+   * 404 (resource absent) apart from a 500 without string-matching (#96). */
+  status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.status = status;
+  }
+}
 
 /** Issue #55: a rejected `fetch()` surfaces as the browser's raw
  * `TypeError: Failed to fetch` (or "Load failed" on Safari / "NetworkError" on
@@ -79,14 +87,14 @@ export async function fetchImageBlob(connection: Connection, path: string): Prom
     throw connectionError(err);
   }
   if (res.status === 401) throw new AuthError();
-  if (!res.ok) throw new ApiError(`request failed (${res.status})`);
+  if (!res.ok) throw new ApiError(`request failed (${res.status})`, res.status);
   return res.blob();
 }
 
 export async function apiFetch(connection: Connection, path: string, options?: RequestInit): Promise<unknown> {
   const { status, body } = await apiFetchRaw(connection, path, options);
   if (status < 200 || status >= 300) {
-    throw new ApiError((body as { error?: string }).error ?? `request failed (${status})`);
+    throw new ApiError((body as { error?: string }).error ?? `request failed (${status})`, status);
   }
   return body;
 }

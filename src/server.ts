@@ -66,6 +66,7 @@ import {
 } from "./character-gen.js";
 import {
   createUser,
+  ensureBootstrapUser,
   verifyLogin,
   createSession,
   resolveSession,
@@ -1444,6 +1445,17 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
+  // Issue #94: guarantee the `.env` bootstrap account exists so `admin`/`password`
+  // works on a fresh install without a separate `npm run migrate:multi-user` step
+  // (the migration is only needed to move pre-existing flat campaigns). Idempotent
+  // and never overwrites an existing account; seeds the same DEFAULT_* settings a
+  // registered user gets.
+  const bootstrap = ensureBootstrapUser(newUserDefaultSettings());
+  if (bootstrap.status === "created") {
+    console.log(`Bootstrap user "${bootstrap.username}" created from .env — you can log in with it now.`);
+  } else if (bootstrap.status === "skipped") {
+    console.log(`Bootstrap user not created: ${bootstrap.reason}. Register in the app, or set BOOTSTRAP_* in .env and restart.`);
+  }
   console.log(`Chronicle DM engine HTTP API listening on http://${HOST}:${PORT}`);
 });
 
