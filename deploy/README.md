@@ -1,14 +1,15 @@
 # Running Chronicle as a service (Ubuntu host)
 
 For the always-on home-LAN host, run the DM engine under **systemd** so it
-starts on boot and restarts if it crashes — instead of leaving `npm run serve`
+starts on boot and restarts if it crashes — instead of leaving `npm start`
 running in a terminal. This is only for the machine that *hosts* Chronicle;
 phones and other devices just point a browser at it (see [`../SETUP.md`](../SETUP.md)).
 
 Prerequisites: you've completed the one-time setup in `SETUP.md` (Node 22
-installed, `npm run setup` run, `.env` filled in with `CHRONICLE_SHARED_SECRET`
-and `HOST`, and — for a Claude subscription — a completed `claude` login, plus
-optionally a `grok` login for images).
+installed, `npm run setup` run, `.env` filled in with `HOST` and the
+`BOOTSTRAP_*` account, and — for a Claude subscription — a completed `claude`
+login, plus optionally a `grok` login for images). Users register their own
+accounts in the app; there is no shared secret (ADR-0019).
 
 ## Install
 

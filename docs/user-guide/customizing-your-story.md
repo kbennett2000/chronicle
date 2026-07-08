@@ -8,7 +8,10 @@ All of these live in the **Settings** tab on your phone.
 
 ## The Look (Art Style)
 
-This controls how illustrations appear when you turn on picture generation.
+This controls how illustrations appear when you turn on picture generation. The
+*same* scene can look completely different depending on the style you pick:
+
+![The same scene in watercolor, comic-book, and noir styles](../assets/art-styles.png)
 
 You can choose from beautiful presets:
 - Comic book
@@ -22,7 +25,8 @@ You can choose from beautiful presets:
 
 Or type your own description (for example: “dark fairy tale illustration” or “1970s fantasy paperback cover”).
 
-**Tip:** You can change this anytime. New pictures will use the new style.
+**Tip:** You can change this anytime. New pictures will use the new style, so
+it’s fun to try a few and see which one makes your world feel right.
 
 ---
 

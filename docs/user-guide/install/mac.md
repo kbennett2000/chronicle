@@ -24,7 +24,7 @@ Chronicle needs a free helper called the **Storyteller Engine**.
 1. Open Safari or any browser and go to:  
    **https://nodejs.org**
 
-2. Click the big green **LTS** button on the left (Long Term Support).
+2. Click the big green **LTS** button on the left (Long Term Support). *(Chronicle needs version 22 or newer — the LTS button gives you that.)*
 
 3. Double-click the downloaded `.pkg` file and follow the installer:
    - Click **Continue**
@@ -36,34 +36,51 @@ Chronicle needs a free helper called the **Storyteller Engine**.
 Open Terminal and run:
 
 ```bash
-brew install node
+brew install node@22
 ```
 
 **What you should see:** Node.js is now installed. You can close the installer.
 
 ---
 
-## Step 3: Get Your Private Magic Key
+## Step 3: Give the Storyteller Its Brain (Sign in to Claude)
 
-The storyteller needs a “brain.” We get this from a free service called Anthropic.
+The storyteller thinks and remembers using **Claude**. You give it permission by
+signing in once with your own Claude account. Most people use a **Claude Pro or
+Max subscription** — the same login you’d use at claude.ai.
 
-1. Go to **https://console.anthropic.com** in your browser.
+1. Open the **Terminal** app (press `Command + Space`, type “Terminal”, press Return).
 
-2. Sign up or log in (free account is fine).
+2. Install the Claude sign-in helper by typing this and pressing Return:
 
-3. In the left menu, click **API Keys**.
+   ```bash
+   npm install -g @anthropic-ai/claude-code
+   ```
 
-4. Click **Create Key**.
+   (This uses the Node.js you just installed. It takes a minute.)
 
-5. Name it something like `Chronicle` and click **Create Key**.
+3. Now type this and press Return:
 
-6. Copy the long key that starts with `sk-ant-`.  
-   Paste it somewhere safe (Notes app is fine) for the next step.  
-   Keep this page open for now.
+   ```bash
+   claude
+   ```
+
+4. Follow the on-screen prompt to **log in with your Claude account** in the
+   browser window it opens. When it’s done, your sign-in is saved safely on this
+   Mac — you won’t have to do it again.
+
+5. That’s the brain sorted. 🧠
+
+**Good to know:** You do **not** need to paste any keys or codes. Chronicle uses
+the Claude subscription you just signed in with. (The `.env` file in the next
+step has an `ANTHROPIC_API_KEY` line — leave it **blank**.)
 
 ---
 
-## Step 4: Tell Chronicle Your Secret Handshake Code and Magic Key
+## Step 4: Create Your Settings File
+
+Chronicle keeps a tiny settings file called `.env`. For now we only need to tell
+it your Mac’s address on your home network — we’ll fill that in a moment.
 
 1. Open your `chronicle` folder in Finder.
 
@@ -75,31 +92,19 @@ The storyteller needs a “brain.” We get this from a free service called Anth
 
    **To see hidden files:** Press `Command + Shift + .` (period) in Finder. The `.env` file should now be visible. Press the same keys again to hide them later if you want.
 
-5. Right-click the new `.env` file → **Open With** → **TextEdit** (or any text editor).
+5. Right-click the new `.env` file → **Open With** → **TextEdit**.
 
-6. You’ll see text that looks like this:
+6. Find the line that says:
 
-```
-CHRONICLE_SHARED_SECRET=my-secret
-HOST=127.0.0.1
-PORT=4317
-ANTHROPIC_API_KEY=
-```
+   ```
+   HOST=127.0.0.1
+   ```
 
-7. Edit it to look like this (use your own memorable phrase):
+   Leave it for now — we’ll change it to your real address in the next step.
+   Everything else in the file can stay exactly as it is. (There’s no secret
+   code or key to add.)
 
-```
-CHRONICLE_SHARED_SECRET=my-favorite-dragon-is-red-and-gold
-HOST=192.168.1.42          ← We’ll update this next
-PORT=4317
-ANTHROPIC_API_KEY=sk-ant-api03-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-```
-
-   - Change the secret code to something **you** will remember.
-   - Paste your magic key from Step 3 on the last line.
-   - We’ll fill in the correct `HOST` address in the next step.
-
-8. Save the file (`Command + S`) and close TextEdit.
+7. Save the file (`Command + S`) and keep TextEdit handy — we’ll come right back.
 
 ---
 
@@ -107,7 +112,7 @@ ANTHROPIC_API_KEY=sk-ant-api03-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 Your phone needs to know where to find the storyteller.
 
-1. Click the Apple menu () → **System Settings** → **Network**.
+1. Click the Apple menu () → **System Settings** → **Network**.
 
 2. Select your active connection (Wi-Fi or Ethernet).
 
@@ -132,20 +137,21 @@ Your phone needs to know where to find the storyteller.
 
 1. Open your `chronicle` folder in Finder.
 
-2. Right-click the folder (or use the toolbar) and choose **Services** → **New Terminal at Folder**.  
+2. Right-click the folder and choose **Services** → **New Terminal at Folder**.  
    A Terminal window should open already inside the `chronicle` folder.
 
-   (Alternative: Open Terminal, type `cd `, then drag your `chronicle` folder into the Terminal window and press Enter.)
+   (Alternative: Open Terminal, type `cd `, then drag your `chronicle` folder into the Terminal window and press Return.)
 
 3. In Terminal, type exactly this and press Return:
 
 ```bash
-npm install
+npm run setup
 ```
 
-This may take 1–2 minutes the first time. Lots of text will scroll by — that’s completely normal.
+This installs everything Chronicle needs and builds the app. It may take a
+couple of minutes the first time. Lots of text will scroll by — that’s completely normal.
 
-**What success looks like:** You’ll see a line that says something like “added X packages” and the prompt returns.
+**What success looks like:** the scrolling stops and the prompt returns.
 
 ---
 
@@ -154,7 +160,7 @@ This may take 1–2 minutes the first time. Lots of text will scroll by — that
 In the same Terminal window, type:
 
 ```bash
-npm run serve
+npm start
 ```
 
 Then press Return.
@@ -167,7 +173,7 @@ Chronicle DM engine HTTP API listening on http://192.168.1.42:4317
 
 **Write down or photograph the full address** (`http://192.168.1.42:4317` — use your real number). You’ll need it on your phone.
 
-Your storyteller is now running! You can leave this Terminal window open (or minimize it). Closing it stops the storyteller until you run the command again.
+Your storyteller is now running! You can leave this Terminal window open (or minimize it). Closing it stops the storyteller until you run `npm start` again.
 
 ---
 
@@ -190,9 +196,9 @@ Your personal Dungeon Master is now ready on your Mac.
 **Next step:**  
 On your **phone or iPad**, open Safari (or any browser) and type the address you noted earlier.
 
-Enter your **secret handshake code** (the phrase you chose for `CHRONICLE_SHARED_SECRET`).
-
-The beautiful leather journal interface will appear and your storyteller will greet you.
+The very first time, you’ll **create your own account** — just pick a username
+and password right there in the app. No secret codes. After that you simply log
+in, and the beautiful leather journal interface appears, ready to greet you.
 
 Continue to: **[Starting Your First Adventure](../first-adventure.md)**
 
@@ -203,6 +209,7 @@ The most common hiccups are:
 - Wrong IP address in the `HOST` line of `.env`
 - Forgetting to save `.env` after editing
 - Closing the Terminal window too early
+- Skipping the `claude` sign-in in Step 3
 
 Go back to the step that felt uncertain — you’re very close.  
-If you’re still stuck, a quick screenshot of any message will let us help you right away.
+If you’re still stuck, a quick screenshot of any message will let us help you right away. See also **[Help & Troubleshooting](../help-and-troubleshooting.md)**.
