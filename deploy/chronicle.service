@@ -9,8 +9,9 @@
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now chronicle
 #
-# Config (port/host/secret) is read from the repo's .env via EnvironmentFile —
-# do NOT put secrets in this unit file (it may be world-readable under /etc).
+# Config (host/port/bootstrap account, optional Navidrome creds) is read from the
+# repo's .env via EnvironmentFile — do NOT put secrets in this unit file (it may
+# be world-readable under /etc).
 
 [Unit]
 Description=Chronicle solo D&D DM engine
@@ -28,10 +29,10 @@ User=<YOUR_UNIX_USER>
 # Absolute path to the repo checkout.
 WorkingDirectory=<ABSOLUTE_PATH_TO>/chronicle
 
-# All runtime config lives here (CHRONICLE_SHARED_SECRET, HOST, PORT). The
-# server refuses to start without CHRONICLE_SHARED_SECRET. For LAN access set
-# HOST=0.0.0.0 (or the host's LAN IP) in this file — the default 127.0.0.1 is
-# reachable only from the host itself.
+# All runtime config lives here (HOST, PORT, BOOTSTRAP_USERNAME/PASSWORD, and
+# any optional DEFAULT_* / NAVIDROME_* values). For LAN access set HOST=0.0.0.0
+# (or the host's LAN IP) in this file — the default 127.0.0.1 is reachable only
+# from the host itself.
 EnvironmentFile=<ABSOLUTE_PATH_TO>/chronicle/.env
 
 # Absolute path to npm. systemd does NOT use your login shell's PATH, so a

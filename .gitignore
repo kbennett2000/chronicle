@@ -25,6 +25,11 @@ users/
 # Music (ADR-0020): the player's own local media — never enters git.
 music/
 
+# Documentation media capture cache (scripts/capture-docs-media.ts): local Grok
+# output reused across runs so re-captures are cheap. The published assets live
+# in docs/assets/ (tracked); this cache never enters git.
+.docs-media-cache/
+
 # Agent SDK session pointers (local runtime state, not source)
 **/.session-id
 

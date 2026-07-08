@@ -21,9 +21,26 @@ You’re not doing anything wrong. We’ll get it sorted together.
    - Mac: System Settings → Network → Details
    - Linux: `hostname -I`
 
-4. Update the `HOST=` line in your `.env` file with the correct address, save it, then restart the storyteller (`Ctrl + C` then `npm run serve` again).
+4. Update the `HOST=` line in your `.env` file with the correct address, save it, then restart the storyteller (`Ctrl + C` then `npm start` again).
 
 5. Still no luck? Try temporarily setting `HOST=0.0.0.0` in `.env` (this makes it listen on all interfaces). Remember to change it back to your specific IP later for better security.
+
+---
+
+## I can’t log in / it won’t accept my account
+
+Chronicle uses a simple username and password that **you** create — there’s no
+secret code or key to type.
+
+- **First time on a device?** Tap **Create account** and pick a username and
+  password. After that, use **Log in** with the same details.
+- **“Username already taken”?** That account already exists — tap **Log in**
+  instead of Create account.
+- **Wrong password?** Double-check for stray capital letters or spaces. Each
+  person’s chronicles are tied to their own account, so make sure you’re logging
+  into the right one.
+- Your login is remembered on each device until you log out
+  (**Settings → The Hearth → Log out**).
 
 ---
 
@@ -35,7 +52,7 @@ This is very common.
 
 1. Open your `chronicle` folder again.
 2. Open Terminal / Command Prompt / PowerShell **inside** that folder.
-3. Run `npm run serve` again.
+3. Run `npm start` again.
 
 The storyteller will start right back up. You can minimize the window while you play.
 

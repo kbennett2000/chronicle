@@ -21,7 +21,7 @@ That’s it. Your computer does the heavy thinking. Your phone is just the windo
 - A Windows, Mac, or Linux computer
 - A phone or tablet on the **same home Wi-Fi network**
 - 20–30 minutes the first time you set it up
-- A free magic key from the AI service that powers the storyteller (we’ll help you get it — takes about 2 minutes)
+- A **Claude account** — a Claude Pro or Max subscription powers the storyteller (we’ll help you sign in; it only takes a moment)
 
 ## Let’s Get You Set Up
 

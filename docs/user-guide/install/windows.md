@@ -25,7 +25,7 @@ Chronicle needs a free helper program called the **Storyteller Engine** so it ca
 
 2. You will see two big green buttons.  
    Click the one on the **left** that says **LTS** (Long Term Support).  
-   This is the stable, recommended version.
+   This is the stable, recommended version. *(Chronicle needs version 22 or newer — the LTS button gives you that.)*
 
 3. The download should start automatically. When it finishes, double-click the downloaded file (it will be named something like `node-v22.x.x-x64.msi`).
 
@@ -39,73 +39,66 @@ Chronicle needs a free helper program called the **Storyteller Engine** so it ca
 
 ---
 
-## Step 3: Get Your Private Magic Key
+## Step 3: Give the Storyteller Its Brain (Sign in to Claude)
 
-The storyteller needs a “brain” to think and remember your campaign. This comes from a free service called Anthropic.
+The storyteller thinks and remembers using **Claude**. You give it permission by
+signing in once with your own Claude account. Most people use a **Claude Pro or
+Max subscription** — the same login you’d use at claude.ai.
 
-1. Open your browser and go to:  
-   **https://console.anthropic.com**
+1. Press the Windows key, type **PowerShell**, and open it.
 
-2. Sign up for a free account (or log in if you already have one).  
-   You only need an email address.
+2. Install the Claude sign-in helper by typing this and pressing Enter:
 
-3. Once you’re logged in, look in the left menu for **API Keys** and click it.
+   ```
+   npm install -g @anthropic-ai/claude-code
+   ```
 
-4. Click the big button **Create Key**.
+   (This uses the Node.js you just installed. It takes a minute.)
 
-5. Give it a name like `Chronicle` so you remember what it’s for, then click **Create Key**.
+3. Now type this and press Enter:
 
-6. **Important:** A long key starting with `sk-ant-` will appear.  
-   Click the **copy** icon next to it.  
-   Paste it somewhere safe for a minute (Notepad is fine).  
-   **Do not close this page yet** — we’ll use the key in the next step.
+   ```
+   claude
+   ```
 
-You now have your private magic key. Keep it secret like a powerful spell component.
+4. Follow the on-screen prompt to **log in with your Claude account** in the
+   browser window it opens. When it’s done, your sign-in is saved safely on this
+   computer — you won’t have to do it again.
+
+5. You can close this window. That’s the brain sorted. 🧠
+
+**Good to know:** You do **not** need to paste any keys or codes. Chronicle uses
+the Claude subscription you just signed in with. (The `.env` file in the next
+step has an `ANTHROPIC_API_KEY` line — leave it **blank**.)
 
 ---
 
-## Step 4: Tell Chronicle Your Secret Handshake Code and Magic Key
+## Step 4: Create Your Settings File
 
-We need to give Chronicle two pieces of information:
-
-- A **secret handshake code** (so only you and your devices can talk to the storyteller)
-- Your **private magic key** (the brain we just created)
+Chronicle keeps a tiny settings file called `.env`. For now we only need to tell
+it your computer’s address on your home network — we’ll fill that in a moment.
 
 1. Inside your `chronicle` folder, find the file named `.env.example`.
 
-2. Right-click it and choose **Copy**.
+2. Right-click it and choose **Copy**, then right-click in the same folder and
+   choose **Paste**. You now have `.env.example - Copy`.
 
-3. Right-click in the same folder and choose **Paste**.  
-   You now have a new file called `.env.example - Copy`.
+3. Rename the copy to exactly `.env` (remove the “- Copy” part).  
+   *If you don’t see the `.env` file after renaming, that’s okay — Windows sometimes hides files that start with a dot. We’ll open it directly next.*
 
-4. Rename the copy to exactly `.env` (remove the “- Copy” part).  
-   *If you don’t see the `.env` file after renaming, that’s okay — Windows sometimes hides files that start with a dot. We’ll open it directly in the next step.*
+4. Right-click the new `.env` file and choose **Open with** → **Notepad**.
 
-5. Right-click the new `.env` file and choose **Open with** → **Notepad** (or any text editor you like).
+5. Find the line that says:
 
-6. You will see lines that look like this:
+   ```
+   HOST=127.0.0.1
+   ```
 
-```
-CHRONICLE_SHARED_SECRET=my-secret
-HOST=127.0.0.1
-PORT=4317
-ANTHROPIC_API_KEY=
-```
+   Leave it for now — we’ll change it to your real address in the next step.
+   Everything else in the file can stay exactly as it is. (There’s no secret
+   code or key to add.)
 
-7. Change them to look like this (use your own words for the secret code):
-
-```
-CHRONICLE_SHARED_SECRET=my-favorite-dragon-is-red-and-gold
-HOST=192.168.1.42          ← We’ll fill this in the next step
-PORT=4317
-ANTHROPIC_API_KEY=sk-ant-api03-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-```
-
-   - Replace `my-favorite-dragon-is-red-and-gold` with something **you** will remember (longer is better and more secure).
-   - Replace the `sk-ant-...` line with the magic key you copied in Step 3.
-   - We’ll fill in the `HOST` line in the next step.
-
-8. Save the file (File → Save) and close Notepad.
+6. Save the file (File → Save) and keep Notepad handy — we’ll come right back.
 
 ---
 
@@ -113,13 +106,13 @@ ANTHROPIC_API_KEY=sk-ant-api03-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 Your phone needs to know where to find the storyteller on your Wi-Fi.
 
-1. Press the Windows key on your keyboard and type **Command Prompt**, then open it.
+1. Press the Windows key and type **Command Prompt**, then open it.
 
 2. In the black window that appears, type exactly this and press Enter:
 
-```
-ipconfig
-```
+   ```
+   ipconfig
+   ```
 
 3. Look for the section that says **Wireless LAN adapter Wi-Fi** (or **Ethernet adapter** if you’re plugged in with a cable).
 
@@ -131,7 +124,7 @@ ipconfig
    IPv4 Address. . . . . . . . . . . : 192.168.1.42
    ```
 
-5. Go back to your `.env` file (open it again with Notepad) and replace the `HOST=127.0.0.1` line with your actual address:
+5. Go back to your `.env` file in Notepad and change the `HOST` line to your actual address:
 
    ```
    HOST=192.168.1.42
@@ -149,17 +142,18 @@ ipconfig
 
 2. In the address bar at the top, click once so the path is highlighted, then type `cmd` and press Enter.  
    A black Command Prompt window should open *inside* your chronicle folder.  
-   (You can also Shift + Right-click inside the folder and choose “Open PowerShell window here” or “Open in Terminal”.)
+   (You can also Shift + Right-click inside the folder and choose “Open in Terminal”.)
 
 3. In the black window, type exactly this and press Enter:
 
-```
-npm install
-```
+   ```
+   npm run setup
+   ```
 
-This may take a minute or two the first time. You’ll see lots of text scrolling by — that’s normal.
+This installs everything Chronicle needs and builds the app. It may take a
+couple of minutes the first time. You’ll see lots of text scrolling by — that’s normal.
 
-**What you should see when it finishes:** A message that says something like “added X packages” and the command prompt returns (a new line with a `>` or folder name).
+**What you should see when it finishes:** the scrolling stops and the command prompt returns (a new line with a `>` or folder name).
 
 If you see any red error messages, take a screenshot and we’ll help you fix it.
 
@@ -170,7 +164,7 @@ If you see any red error messages, take a screenshot and we’ll help you fix it
 In the same black window that’s still open in your `chronicle` folder, type:
 
 ```
-npm run serve
+npm start
 ```
 
 Then press Enter.
@@ -185,7 +179,7 @@ Chronicle DM engine HTTP API listening on http://192.168.1.42:4317
 
 Your storyteller is now running!
 
-You can leave this black window open while you play (or minimize it). If you close it, the storyteller stops until you run the command again.
+You can leave this black window open while you play (or minimize it). If you close it, the storyteller stops until you run `npm start` again.
 
 ---
 
@@ -194,9 +188,9 @@ You can leave this black window open while you play (or minimize it). If you clo
 Windows may pop up a window asking:
 
 > “Windows Defender Firewall has blocked some features of this app.  
-> Do you want to allow Chronicle to communicate on these networks?”
+> Do you want to allow it to communicate on these networks?”
 
-Check the boxes for **Private networks** (and Public if you want, though it’s not necessary) and click **Allow access**.
+Check the box for **Private networks** and click **Allow access**.
 
 This is completely normal and safe — it’s only letting your own phone on your home Wi-Fi talk to the storyteller.
 
@@ -209,9 +203,9 @@ Your personal Dungeon Master is now alive on your computer.
 **Next step:**  
 Open the browser on your **phone or tablet** (Chrome, Safari, Firefox — any modern browser works) and type the address you wrote down earlier (`http://192.168.1.42:4317` — use **your** number).
 
-You’ll be asked for your **secret handshake code** (the phrase you put in `CHRONICLE_SHARED_SECRET`).
-
-Once you enter it, the beautiful leather journal interface will appear and your storyteller will be ready to begin your first adventure.
+The very first time, you’ll **create your own account** — just pick a username
+and password right there in the app. No secret codes. After that you simply log
+in, and the beautiful leather journal interface appears, ready for your first adventure.
 
 Head to the next guide: **[Starting Your First Adventure](../first-adventure.md)**
 
@@ -219,10 +213,11 @@ Head to the next guide: **[Starting Your First Adventure](../first-adventure.md)
 
 **Having trouble?**  
 The most common issues at this stage are:
-- Wrong IP address in the `HOST` line
+- Wrong IP address in the `HOST` line of `.env`
 - Forgot to save the `.env` file after editing
 - The black window was closed
+- Skipped the `claude` sign-in in Step 3
 
 Just go back to the step that felt uncertain and double-check. You’re very close.
 
-If you’re still stuck, take a clear screenshot of any error message and reach out — we’ll walk through it together.
+If you’re still stuck, take a clear screenshot of any error message and reach out — we’ll walk through it together. See also **[Help & Troubleshooting](../help-and-troubleshooting.md)**.

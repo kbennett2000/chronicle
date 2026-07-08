@@ -20,11 +20,10 @@ Pictures are generated using Grok’s image system and appear in a beautiful sty
 
 ## Requirements
 
-To use pictures you need:
+To use pictures you need, on the **computer running Chronicle** (not your phone):
 
-1. A free Grok account (from xAI)
-2. The `grok` command-line tool installed on the computer running Chronicle
-3. Your Grok API key (or you can log in interactively)
+1. A Grok account with image access (from xAI)
+2. The `grok` command-line tool installed and logged in on that computer
 
 If any of this feels like too much, just leave pictures turned off. The storytelling experience is still excellent.
 
@@ -32,39 +31,30 @@ If any of this feels like too much, just leave pictures turned off. The storytel
 
 ## Step-by-Step Setup
 
-### 1. Create a free Grok account
+### 1. Create a Grok account
 
-Go to **https://grok.x.ai** or **https://x.ai** and sign up (you can use your X/Twitter account or email).
+Go to **https://x.ai** and sign up for an account with Grok / image access.
 
 ### 2. Install the `grok` command line tool
 
-On your computer (the one running Chronicle), open a terminal and run the official install command from xAI (check their current instructions at grok.x.ai or x.ai for the latest one-liner).
+On your computer (the one running Chronicle), install the `grok` CLI following
+xAI’s current instructions at **https://x.ai**, so that typing `grok` in a
+terminal works.
 
-### 3. Log in / authenticate
+### 3. Log in
 
-After installing, run:
-
-```bash
-grok auth
-```
-
-or follow the instructions the tool gives you. You can either log in interactively or set an `XAI_API_KEY` environment variable.
+Log in to `grok` on that computer (an interactive login is easiest — it saves
+your sign-in safely under your home folder, so no keys need to go into
+Chronicle). If you prefer key-based auth instead, you can set an `XAI_API_KEY` in
+Chronicle’s `.env` file — see **Part C** of the main
+[SETUP guide](../../SETUP.md) for details.
 
 ### 4. Turn pictures on in Chronicle
 
 On your phone, go to **Settings → The Look** and toggle **Generate scene art** to **On**.
 
-You can also choose your preferred art style here.
-
-### 5. (Optional but recommended) Add your key to `.env`
-
-If you prefer not to use interactive login, you can add your key to the `.env` file:
-
-```
-XAI_API_KEY=your-key-here
-```
-
-Then restart the storyteller.
+You can also choose your preferred art style here (see
+**[Customizing Your Story](customizing-your-story.md)** for the full list).
 
 ---
 
@@ -74,6 +64,8 @@ Then restart the storyteller.
 - You’ll see a small “✎ Draw this” button on tiles that don’t have art yet.
 - Under DM narration you may also see a “⟢ Illustrate this moment” option.
 - Once generated, the image stays with that character or place forever.
+
+![Tapping “Draw this” and watching an illustration appear](../assets/gif-draw-this.gif)
 
 Generation can take a few seconds to a minute the first time — the storyteller will let you know it’s thinking/drawing.
 
