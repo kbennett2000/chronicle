@@ -61,6 +61,7 @@ import {
   type ProviderId,
   type ModelId,
 } from "./campaign-store.js";
+import { extractSceneCaption, resolveMomentDescription } from "./narration.js";
 import { generateImage } from "./image-generator.js";
 import {
   IMAGE_PROVIDERS,
@@ -1021,13 +1022,20 @@ const ROUTES: Array<{
           );
         }
 
+        // ADR-0030: pull the DM-emitted [SCENE: ...] caption off the turn text
+        // and strip it from the player-facing narration. Error turns keep their
+        // raw un-stripped text (no scene to caption).
+        const { narration, sceneCaption } = result.isError
+          ? { narration: result.text, sceneCaption: undefined }
+          : extractSceneCaption(result.text);
+
         // Per ADR-0007: the deterministic speaker-attribution record, written
         // here (not inferred from prose afterward) at the one point both
         // strings are already in hand — for every turn, error or not.
-        appendTurnTranscript(campaignDir, active.sessionLogPath, message, result.text);
+        appendTurnTranscript(campaignDir, active.sessionLogPath, message, narration, sceneCaption);
 
         sendJson(res, result.isError ? 502 : 200, {
-          narration: result.text,
+          narration,
           sessionId: result.sessionId ?? null,
           model: result.model,
           isError: result.isError,
@@ -1106,15 +1114,22 @@ const ROUTES: Array<{
           persistSessionId(campaignDir, result.sessionId);
         }
 
+        // ADR-0030: strip the DM-emitted [SCENE: ...] caption off the opening
+        // narration and cache it. Error openings keep their raw text and aren't
+        // persisted.
+        const { narration, sceneCaption } = result.isError
+          ? { narration: result.text, sceneCaption: undefined }
+          : extractSceneCaption(result.text);
+
         // Turn-zero: empty playerMessage marks a DM-initiated turn (ADR-0013).
         // On an engine error, don't persist a broken opening — leave the
         // campaign at zero turns so the next enter-Play retries it cleanly.
         if (!result.isError) {
-          appendTurnTranscript(campaignDir, active.sessionLogPath, "", result.text);
+          appendTurnTranscript(campaignDir, active.sessionLogPath, "", narration, sceneCaption);
         }
 
         sendJson(res, result.isError ? 502 : 200, {
-          narration: result.text,
+          narration,
           sessionId: result.sessionId ?? null,
           model: result.model,
           isError: result.isError,
@@ -1206,15 +1221,27 @@ const ROUTES: Array<{
           persistSessionId(campaignDir, result.sessionId);
         }
 
+        // ADR-0030: strip and cache the DM-emitted [SCENE: ...] caption; error
+        // turns keep their raw text.
+        const { narration, sceneCaption } = result.isError
+          ? { narration: result.text, sceneCaption: undefined }
+          : extractSceneCaption(result.text);
+
         // Persist the re-run record at index `turnIndex` (transcript was
         // truncated to that length). Match /opening: don't persist a broken
         // opening; a broken normal turn is still recorded (as /turns does).
         if (!result.isError || !isOpening) {
-          appendTurnTranscript(campaignDir, active.sessionLogPath, isOpening ? "" : (message as string), result.text);
+          appendTurnTranscript(
+            campaignDir,
+            active.sessionLogPath,
+            isOpening ? "" : (message as string),
+            narration,
+            sceneCaption
+          );
         }
 
         sendJson(res, result.isError ? 502 : 200, {
-          narration: result.text,
+          narration,
           sessionId: result.sessionId ?? null,
           model: result.model,
           isError: result.isError,
@@ -1466,11 +1493,13 @@ const ROUTES: Array<{
           sendJson(res, 404, { error: `no turn ${body.turnIndex} in the active session` });
           return;
         }
-        // The narration is the scene description by default; keep the /imagine
-        // prompt sane. Issue #66: a regenerate can pass an explicit `description`
-        // to refine the prompt (e.g. "the same scene, but at night").
+        // ADR-0030: the DM-emitted [SCENE: ...] caption for this turn is the
+        // scene description — a concentrated visual of the moment, not the prose
+        // slab. Falls back to narration when a turn has no caption. Issue #66: a
+        // regenerate can pass an explicit `description` to refine the prompt
+        // (e.g. "the same scene, but at night"), which takes precedence.
         const override = typeof body.description === "string" && body.description.trim() ? body.description.trim() : "";
-        const description = (override || record.narration.trim()).slice(0, 500) || "a scene from the story";
+        const description = resolveMomentDescription(override, record).trim().slice(0, 500) || "a scene from the story";
         const sessionBase = path.basename(active.sessionLogPath).replace(/\.md$/, "");
         const name = `${sessionBase}-turn-${body.turnIndex}`;
 
@@ -1553,8 +1582,11 @@ const ROUTES: Array<{
           sendJson(res, 404, { error: `no turn ${body.turnIndex} in the active session` });
           return;
         }
+        // ADR-0030: same caption-first description source as /illustrate, so the
+        // moment's still and its animation share one caption (both read
+        // record.sceneCaption); explicit override still wins.
         const override = typeof body.description === "string" && body.description.trim() ? body.description.trim() : "";
-        const description = (override || record.narration.trim()).slice(0, 500) || "a scene from the story";
+        const description = resolveMomentDescription(override, record).trim().slice(0, 500) || "a scene from the story";
         const sessionBase = path.basename(active.sessionLogPath).replace(/\.md$/, "");
         const name = `${sessionBase}-turn-${body.turnIndex}`;
         // Animate the moment's own still if it has one (recorded via /illustrate).

@@ -368,6 +368,16 @@ ${lengthRule}
     momentous the moment just was, there is always a next moment: keep the
     world live and end every reply on an in-progress beat that invites the
     player's next action, exactly as rule 18 requires.
+20. After your narration is complete, output exactly one final line, and
+    nothing after it, of the form [SCENE: ...] — where the text inside is a
+    single short third-person, present-tense description of what is visually
+    happening in this moment: the main subject(s), the setting, the action,
+    the lighting and mood, and any notable objects. No second person, no
+    dialogue, no inner thoughts, no passage of time, no art-style or medium
+    words. This one line is the sole exception to rule 17: it is stripped out
+    before the player ever sees it and is used only to illustrate the scene,
+    so never reference it in your prose, and do NOT include it in the
+    session-log entry you append (rule 8).
 
 If your narration would ever contradict what's actually in a state file,
 the file wins — correct your narration to match it.`;
@@ -476,7 +486,10 @@ Narrate an immersive, present-tense opening that:
 
 Before or after narrating, update world-state.md's "## Current Situation"
 section so it reflects this opening. Write only the in-world scene as your
-reply — no preamble, no bookkeeping notes, no meta commentary.`;
+reply — no preamble, no bookkeeping notes, no meta commentary — then end with
+the single [SCENE: ...] visual-caption line required every turn (its sole
+exception), a short third-person, present-tense description of this opening
+moment for illustration.`;
 }
 
 export interface TurnResult {

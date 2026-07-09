@@ -810,6 +810,13 @@ export interface TurnTranscriptRecord {
    * this moment" records the generated clip's relative path here. Absent means
    * "no video," identical to the image field's absent semantics. */
   video?: string;
+  /** ADR-0030 (Issue #128, additive): the DM-emitted `[SCENE: ...]` visual
+   * caption for this turn, parsed off the narration and used to illustrate/
+   * animate the moment instead of the raw prose. Absent on every record
+   * predating the feature and on any turn where the model omitted the line —
+   * the moment seams fall back to `narration` when it's missing. Never
+   * player-facing. */
+  sceneCaption?: string;
 }
 
 /** session-log/session-<ts>.md -> session-log/session-<ts>.transcript.jsonl */
@@ -835,7 +842,8 @@ export function appendTurnTranscript(
   campaignDir: string,
   sessionLogRelPath: string,
   playerMessage: string,
-  narration: string
+  narration: string,
+  sceneCaption?: string
 ): TurnTranscriptRecord {
   const abs = path.join(campaignDir, transcriptPathFor(sessionLogRelPath));
   const turnIndex = readTurnTranscript(campaignDir, sessionLogRelPath).length;
@@ -845,6 +853,11 @@ export function appendTurnTranscript(
     playerMessage,
     narration,
   };
+  // ADR-0030: known at append time (parsed off result.text at the server), so
+  // it's set on the record directly — no separate read-modify-rewrite setter
+  // like image/video, which are attached after the fact. Omit the key entirely
+  // when absent to keep parity with the image/video absent-means-unset shape.
+  if (sceneCaption && sceneCaption.trim()) record.sceneCaption = sceneCaption.trim();
   fs.appendFileSync(abs, JSON.stringify(record) + "\n");
   return record;
 }
