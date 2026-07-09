@@ -3,7 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import type { CampaignSettings } from "./campaign-store.js";
-import { readCharacterIdentity } from "./campaign-store.js";
+import { readCharacterIdentity, readNpcAppearance } from "./campaign-store.js";
 import { buildImagePrompt, type PromptStyleOpts } from "./image-prompt.js";
 import { stripMetaChatter } from "./narration.js";
 import type { ImageEntityType, ImageGenResult } from "./image-backends/types.js";
@@ -174,6 +174,74 @@ export function mergeCharacterAppearance(campaignDir: string, description: strin
   if (!desc) return appearance;
   if (desc.toLowerCase().includes(appearance.toLowerCase())) return desc;
   return `${appearance} ${desc}`;
+}
+
+/** Issue #134: at most this many entities are grounded into one scene, focal
+ * subject first — enough to anchor the people that matter without letting a
+ * crowded [PRESENT:] list crowd the actual scene description out past the cap. */
+const MAX_GROUND_ENTITIES = 3;
+
+/** ADR-0031: the scene/moment analog of mergeCharacterAppearance, multi-entity.
+ * Scene images render KNOWN entities in frame as generic stand-ins because the
+ * DM's [SCENE:] caption free-writes them. Given the canonical names the DM
+ * flagged as visibly present (the [PRESENT:] tag, stored on the turn record),
+ * look up each one's ESTABLISHED appearance — the player character from
+ * character-sheet.json, named NPCs from npc-roster.md's Description bullet — and
+ * prepend a budgeted appearance snippet to the scene description, so the picture
+ * matches the portrait instead of a stranger. This canonical lookup, not the
+ * DM's free-write, is what guarantees consistency.
+ *
+ * Budget: at most MAX_GROUND_ENTITIES, focal subject first; appearance tags are
+ * prepended (so they survive the downstream 500-char cap) but never push the
+ * scene description itself out — an entity whose tag would breach the cap, and
+ * every entity after it, is dropped BEFORE the cap truncates the moment. Skips
+ * an entity whose look the description (or an already-added tag) already states,
+ * to avoid duplication. Enhancement only: an empty list, unknown names, or
+ * missing appearance fields leave the description untouched. Never throws. */
+export function groundSceneDescription(
+  campaignDir: string,
+  description: string,
+  presentEntities: string[] | undefined
+): string {
+  if (!presentEntities || presentEntities.length === 0) return description;
+  const desc = description.trim();
+
+  const identity = readCharacterIdentity(campaignDir);
+  const pcName = identity.name?.trim().toLowerCase();
+
+  // Resolve each flagged entity's canonical appearance, focal subject first.
+  const tags: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of presentEntities) {
+    if (tags.length >= MAX_GROUND_ENTITIES) break;
+    const name = raw.trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const appearance = pcName && key === pcName ? identity.appearance : readNpcAppearance(campaignDir, name);
+    const tag = appearance?.trim();
+    if (!tag) continue;
+    if (desc.toLowerCase().includes(tag.toLowerCase())) continue;
+    if (tags.some((t) => t.toLowerCase().includes(tag.toLowerCase()))) continue;
+    tags.push(tag);
+  }
+
+  if (tags.length === 0) return description;
+  if (!desc) return tags.join(" ");
+
+  // Prepend as many tags as fit ahead of the full description (focal first),
+  // dropping any tag — and all after it — that would breach the cap. `used`
+  // tracks the exact assembled length: desc + each accepted tag + its space.
+  const accepted: string[] = [];
+  let used = desc.length;
+  for (const tag of tags) {
+    if (used + tag.length + 1 > MAX_IMAGE_PROMPT_CHARS) break;
+    accepted.push(tag);
+    used += tag.length + 1;
+  }
+  if (accepted.length === 0) return description;
+  return `${accepted.join(" ")} ${desc}`;
 }
 
 /** Provider-neutral tool body. `campaignDir`/`settings` come from the caller:

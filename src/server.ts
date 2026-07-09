@@ -63,12 +63,12 @@ import {
   type ModelId,
 } from "./campaign-store.js";
 import {
-  extractSceneCaption,
+  extractMomentTags,
   resolveMomentDescription,
   retrySceneCaption,
   SCENE_CAPTION_RETRY_PROMPT,
 } from "./narration.js";
-import { generateImage } from "./image-generator.js";
+import { generateImage, groundSceneDescription } from "./image-generator.js";
 import {
   IMAGE_PROVIDERS,
   isValidImageProvider,
@@ -1075,17 +1075,24 @@ const ROUTES: Array<{
           );
         }
 
-        // ADR-0030: pull the DM-emitted [SCENE: ...] caption off the turn text
-        // and strip it from the player-facing narration. Error turns keep their
-        // raw un-stripped text (no scene to caption).
-        const { narration, sceneCaption } = result.isError
-          ? { narration: result.text, sceneCaption: undefined }
-          : extractSceneCaption(result.text);
+        // ADR-0030/0031: pull the DM-emitted [SCENE: ...] caption and optional
+        // [PRESENT: ...] entity list off the turn text, stripping both from the
+        // player-facing narration. Error turns keep their raw un-stripped text.
+        const { narration, sceneCaption, presentEntities } = result.isError
+          ? { narration: result.text, sceneCaption: undefined, presentEntities: [] as string[] }
+          : extractMomentTags(result.text);
 
         // Per ADR-0007: the deterministic speaker-attribution record, written
         // here (not inferred from prose afterward) at the one point both
         // strings are already in hand — for every turn, error or not.
-        const record = appendTurnTranscript(campaignDir, active.sessionLogPath, message, narration, sceneCaption);
+        const record = appendTurnTranscript(
+          campaignDir,
+          active.sessionLogPath,
+          message,
+          narration,
+          sceneCaption,
+          presentEntities
+        );
 
         sendJson(res, result.isError ? 502 : 200, {
           narration,
@@ -1181,19 +1188,19 @@ const ROUTES: Array<{
           persistSessionId(campaignDir, result.sessionId);
         }
 
-        // ADR-0030: strip the DM-emitted [SCENE: ...] caption off the opening
-        // narration and cache it. Error openings keep their raw text and aren't
-        // persisted.
-        const { narration, sceneCaption } = result.isError
-          ? { narration: result.text, sceneCaption: undefined }
-          : extractSceneCaption(result.text);
+        // ADR-0030/0031: strip the DM-emitted [SCENE: ...] caption and optional
+        // [PRESENT: ...] list off the opening narration and cache them. Error
+        // openings keep their raw text and aren't persisted.
+        const { narration, sceneCaption, presentEntities } = result.isError
+          ? { narration: result.text, sceneCaption: undefined, presentEntities: [] as string[] }
+          : extractMomentTags(result.text);
 
         // Turn-zero: empty playerMessage marks a DM-initiated turn (ADR-0013).
         // On an engine error, don't persist a broken opening — leave the
         // campaign at zero turns so the next enter-Play retries it cleanly.
         const record = result.isError
           ? undefined
-          : appendTurnTranscript(campaignDir, active.sessionLogPath, "", narration, sceneCaption);
+          : appendTurnTranscript(campaignDir, active.sessionLogPath, "", narration, sceneCaption, presentEntities);
 
         sendJson(res, result.isError ? 502 : 200, {
           narration,
@@ -1295,11 +1302,11 @@ const ROUTES: Array<{
           persistSessionId(campaignDir, result.sessionId);
         }
 
-        // ADR-0030: strip and cache the DM-emitted [SCENE: ...] caption; error
-        // turns keep their raw text.
-        const { narration, sceneCaption } = result.isError
-          ? { narration: result.text, sceneCaption: undefined }
-          : extractSceneCaption(result.text);
+        // ADR-0030/0031: strip and cache the DM-emitted [SCENE: ...] caption and
+        // optional [PRESENT: ...] list; error turns keep their raw text.
+        const { narration, sceneCaption, presentEntities } = result.isError
+          ? { narration: result.text, sceneCaption: undefined, presentEntities: [] as string[] }
+          : extractMomentTags(result.text);
 
         // Persist the re-run record at index `turnIndex` (transcript was
         // truncated to that length). Match /opening: don't persist a broken
@@ -1311,7 +1318,8 @@ const ROUTES: Array<{
                 active.sessionLogPath,
                 isOpening ? "" : (message as string),
                 narration,
-                sceneCaption
+                sceneCaption,
+                presentEntities
               )
             : undefined;
 
@@ -1580,8 +1588,11 @@ const ROUTES: Array<{
         // slab. Falls back to narration when a turn has no caption. Issue #66: a
         // regenerate can pass an explicit `description` to refine the prompt
         // (e.g. "the same scene, but at night"), which takes precedence.
+        // ADR-0031: ground KNOWN entities the DM flagged present ([PRESENT:]) in
+        // their canonical appearance before the cap, so they render on-model.
         const override = typeof body.description === "string" && body.description.trim() ? body.description.trim() : "";
-        const description = resolveMomentDescription(override, record).trim().slice(0, 500) || "a scene from the story";
+        const base = groundSceneDescription(campaignDir, resolveMomentDescription(override, record), record.presentEntities);
+        const description = base.trim().slice(0, 500) || "a scene from the story";
         const sessionBase = path.basename(active.sessionLogPath).replace(/\.md$/, "");
         const name = `${sessionBase}-turn-${body.turnIndex}`;
 
@@ -1666,9 +1677,11 @@ const ROUTES: Array<{
         }
         // ADR-0030: same caption-first description source as /illustrate, so the
         // moment's still and its animation share one caption (both read
-        // record.sceneCaption); explicit override still wins.
+        // record.sceneCaption); explicit override still wins. ADR-0031: same
+        // entity grounding as /illustrate, so the clip renders entities on-model.
         const override = typeof body.description === "string" && body.description.trim() ? body.description.trim() : "";
-        const description = resolveMomentDescription(override, record).trim().slice(0, 500) || "a scene from the story";
+        const base = groundSceneDescription(campaignDir, resolveMomentDescription(override, record), record.presentEntities);
+        const description = base.trim().slice(0, 500) || "a scene from the story";
         const sessionBase = path.basename(active.sessionLogPath).replace(/\.md$/, "");
         const name = `${sessionBase}-turn-${body.turnIndex}`;
         // Animate the moment's own still if it has one (recorded via /illustrate).

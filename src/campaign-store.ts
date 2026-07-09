@@ -817,6 +817,12 @@ export interface TurnTranscriptRecord {
    * the moment seams fall back to `narration` when it's missing. Never
    * player-facing. */
   sceneCaption?: string;
+  /** Issue #134 (additive): the DM-emitted [PRESENT: ...] list of KNOWN entities
+   * visibly in frame this turn (canonical names, focal subject first). Used to
+   * ground scene images in each entity's established appearance. Absent on every
+   * record predating the feature and on turns the DM emitted no tag for — the
+   * moment seams simply skip grounding when it's missing. Never player-facing. */
+  presentEntities?: string[];
 }
 
 /** session-log/session-<ts>.md -> session-log/session-<ts>.transcript.jsonl */
@@ -843,7 +849,8 @@ export function appendTurnTranscript(
   sessionLogRelPath: string,
   playerMessage: string,
   narration: string,
-  sceneCaption?: string
+  sceneCaption?: string,
+  presentEntities?: string[]
 ): TurnTranscriptRecord {
   const abs = path.join(campaignDir, transcriptPathFor(sessionLogRelPath));
   const turnIndex = readTurnTranscript(campaignDir, sessionLogRelPath).length;
@@ -858,6 +865,8 @@ export function appendTurnTranscript(
   // like image/video, which are attached after the fact. Omit the key entirely
   // when absent to keep parity with the image/video absent-means-unset shape.
   if (sceneCaption && sceneCaption.trim()) record.sceneCaption = sceneCaption.trim();
+  // Issue #134: same append-time, omit-when-absent contract as sceneCaption.
+  if (presentEntities && presentEntities.length) record.presentEntities = presentEntities;
   fs.appendFileSync(abs, JSON.stringify(record) + "\n");
   return record;
 }
@@ -1119,6 +1128,52 @@ function withNpcField(rosterMd: string, npcName: string, field: string, relPath:
   }
   lines.splice(headingIdx + 1, 0, bullet);
   return lines.join("\n");
+}
+
+/** Issue #134: read the `- **Description:** ...` bullet value from the given
+ * NPC's `## <name>` section in npc-roster.md — the server-side counterpart to
+ * the web `parseNpcRoster`'s Description field, reusing the same level-2
+ * HEADING_LINE_RE section scan as withNpcField. NPC entries carry no dedicated
+ * appearance field; appearance is folded into the freeform Description bullet,
+ * so that bullet is what grounds a scene image in the NPC's established look.
+ * Returns undefined when the campaign has no roster, no such NPC section, or the
+ * section carries no (non-empty) Description bullet. Never throws. */
+export function readNpcAppearance(campaignDir: string, npcName: string): string | undefined {
+  let rosterMd: string;
+  try {
+    rosterMd = fs.readFileSync(path.join(campaignDir, "npc-roster.md"), "utf8");
+  } catch {
+    return undefined;
+  }
+  const lines = rosterMd.split(/\r?\n/);
+  const target = npcName.trim().toLowerCase();
+
+  let headingIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const m = HEADING_LINE_RE.exec(lines[i]);
+    if (m && m[1].length === 2 && m[2].trim().toLowerCase() === target) {
+      headingIdx = i;
+      break;
+    }
+  }
+  if (headingIdx === -1) return undefined;
+
+  let sectionEnd = lines.length;
+  for (let i = headingIdx + 1; i < lines.length; i++) {
+    if (HEADING_LINE_RE.test(lines[i])) {
+      sectionEnd = i;
+      break;
+    }
+  }
+  const descRe = /^-\s*\*\*Description:\*\*\s*(.*)$/i;
+  for (let i = headingIdx + 1; i < sectionEnd; i++) {
+    const m = descRe.exec(lines[i].trim());
+    if (m) {
+      const val = m[1].trim();
+      return val || undefined;
+    }
+  }
+  return undefined;
 }
 
 /** Insert or replace an indented `- Image: <relPath>` line under the named
