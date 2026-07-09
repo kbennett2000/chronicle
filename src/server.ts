@@ -150,6 +150,11 @@ function newUserDefaultSettings(): Record<string, unknown> {
   if (autoRoll !== undefined) out.autoRollDice = autoRoll;
   const autoIllustrate = boolEnv(process.env.DEFAULT_AUTO_ILLUSTRATE);
   if (autoIllustrate !== undefined) out.autoIllustrateTurns = autoIllustrate;
+  // #118: generateVideos is a copy-on-create boolean like generateImages. The
+  // video *params* (duration/resolution/aspect) are not seeded here — like
+  // music, they resolve from DEFAULT_VIDEO_* env at read time (resolveVideoConfig).
+  const genVideos = boolEnv(process.env.DEFAULT_GENERATE_VIDEOS);
+  if (genVideos !== undefined) out.generateVideos = genVideos;
   return out;
 }
 
@@ -729,7 +734,10 @@ const ROUTES: Array<{
       // music override and so tracks the user's *live* account default until the
       // player explicitly overrides it for that game (ADR-0020 amended). This
       // diverges from the copy-on-create the other settings use, by design.
-      const { music: _seedMusic, ...userDefaults } = readUserSettings(userId);
+      // #118: `video` (the params override) follows the same live-tracking model
+      // as `music`, so exclude it here too. `generateVideos` is NOT excluded — it
+      // is a copy-on-create boolean like generateImages.
+      const { music: _seedMusic, video: _seedVideo, ...userDefaults } = readUserSettings(userId);
       const dir = scaffoldCampaign(userId, campaignId, sheet, {
         model: DEFAULT_MODEL,
         autoRollDice: true,
