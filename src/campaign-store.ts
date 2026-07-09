@@ -3,7 +3,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseMusicBlock, type UserMusic } from "./music-store.js";
 import { parseVideoBlock, type UserVideo } from "./video-store.js";
-import { isValidImageProvider, type ImageProvider } from "./image-backends/types.js";
+import {
+  isValidImageProvider,
+  isValidImageQuality,
+  type ImageProvider,
+  type ImageQuality,
+} from "./image-backends/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const CAMPAIGNS_ROOT = path.resolve(__dirname, "../campaigns");
@@ -485,6 +490,13 @@ export interface CampaignSettings {
    * (the DM engine), this is freely switchable mid-campaign — there's no session
    * state to reset; it only changes who draws the NEXT image. */
   imageProvider?: ImageProvider;
+  /** ADR-0029: the local backend's quality tier ("fast" | "standard" | "high") —
+   * time-for-quality at a fixed resolution. Absent means the game tracks the user's
+   * account default (which falls back to `.env` DEFAULT_IMAGE_QUALITY, then
+   * "standard"), resolved live via resolveImageQuality. Like `imageProvider`, freely
+   * switchable mid-campaign — it only affects the NEXT image. Local-only; grok
+   * ignores it. */
+  imageQuality?: ImageQuality;
   /** Issue #44: when on (the default — treat absent as ON), the engine rolls
    * dice itself via the roll_dice tool and narrates the result. When
    * explicitly false, it reverts to asking the player to supply the value. */
@@ -546,6 +558,11 @@ export function readCampaignSettings(campaignDir: string): CampaignSettings {
   if (isValidImageProvider(raw.imageProvider)) {
     settings.imageProvider = raw.imageProvider;
   }
+  // ADR-0029: same rule for the quality tier — a bad/absent value falls through to
+  // the user default → .env → "standard" at resolve time.
+  if (isValidImageQuality(raw.imageQuality)) {
+    settings.imageQuality = raw.imageQuality;
+  }
   if (typeof raw.autoRollDice === "boolean") {
     settings.autoRollDice = raw.autoRollDice;
   }
@@ -582,7 +599,9 @@ export function persistCampaignSettings(
   // #109: `music: null` is an explicit "reset to account default" — it drops the
   // whole per-game override (the only way to clear a stored boolean `enabled`,
   // which can't be cleared via the empty-string path below).
-  updates: Partial<Omit<CampaignSettings, "model" | "provider" | "music" | "video" | "imageProvider">> & {
+  updates: Partial<
+    Omit<CampaignSettings, "model" | "provider" | "music" | "video" | "imageProvider" | "imageQuality">
+  > & {
     music?: UserMusic | null;
     // #118: `video: null` is an explicit "reset to account default" — it drops
     // the whole per-game params override (mirrors `music`).
@@ -590,6 +609,9 @@ export function persistCampaignSettings(
     // ADR-0027: `imageProvider: null` resets the game to the account default (the
     // only way to un-pin a stored provider — a flat enum has no empty-string path).
     imageProvider?: ImageProvider | null;
+    // ADR-0029: `imageQuality: null` resets the tier to the account default, mirroring
+    // imageProvider (a flat enum has no empty-string path).
+    imageQuality?: ImageQuality | null;
   }
 ): CampaignSettings {
   const raw = readRawSettings(campaignDir);
@@ -599,6 +621,9 @@ export function persistCampaignSettings(
   // ADR-0027: `imageProvider: null` drops the per-game override so the game
   // tracks the account default again; a valid value pins it.
   if (updates.imageProvider === null) delete merged.imageProvider;
+  // ADR-0029: `imageQuality: null` drops the per-game override so the game tracks the
+  // account default again; a valid value pins it.
+  if (updates.imageQuality === null) delete merged.imageQuality;
   // #109: music is a nested object — one-level-deep merge (mirrors the #95 fix in
   // writeUserSettings) so patching one field (e.g. just the playlist) doesn't
   // wipe the siblings. Empty-string subfields clear that override back to absent

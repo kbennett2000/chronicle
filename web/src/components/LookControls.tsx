@@ -131,6 +131,59 @@ export function ImageProviderPicker({ value, onChange }: ImageProviderPickerProp
   );
 }
 
+interface ImageQualityPickerProps {
+  /** The effective quality tier — falls back to "standard" (the code default) when
+   * this account/game hasn't set one. */
+  value: "fast" | "standard" | "high";
+  onChange: (quality: "fast" | "standard" | "high") => void;
+}
+
+/** ADR-0029: pick the LOCAL engine's quality tier — time-for-quality at a fixed
+ * resolution. "standard" is today's output; "high" adds an SDXL refiner pass. Same
+ * three-button toggle styling as the engine picker. Only meaningful for the local
+ * engine (grok ignores it), but shown whenever scene art is on — harmless if grok. */
+export function ImageQualityPicker({ value, onChange }: ImageQualityPickerProps) {
+  const options: { id: "fast" | "standard" | "high"; label: string; hint: string }[] = [
+    { id: "fast", label: "Fast", hint: "quicker · fewer steps" },
+    { id: "standard", label: "Standard", hint: "the usual balance" },
+    { id: "high", label: "High", hint: "slower · refiner pass" },
+  ];
+  return (
+    <>
+      <div style={{ fontSize: 12, color: "var(--ink-dim)", margin: "12px 0 7px" }}>
+        Image quality <span style={{ color: "var(--ink-faint)" }}>— local engine · trades time for detail</span>
+      </div>
+      <div style={{ display: "flex", gap: 7 }}>
+        {options.map((o) => {
+          const active = value === o.id;
+          return (
+            <button
+              key={o.id}
+              data-testid="image-quality-option"
+              data-quality={o.id}
+              data-selected={active}
+              onClick={() => onChange(o.id)}
+              style={{
+                flex: 1,
+                cursor: "pointer",
+                padding: "9px 12px",
+                borderRadius: 4,
+                textAlign: "left",
+                color: active ? "var(--ink)" : "var(--ink-faint)",
+                background: active ? "rgba(124,61,32,.24)" : "rgba(28,20,12,.5)",
+                border: `1px solid ${active ? "rgba(211,112,60,.55)" : "rgba(109,90,56,.32)"}`,
+              }}
+            >
+              <div style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 13 }}>{o.label}</div>
+              <div style={{ fontSize: 10, color: "var(--ink-faint)", marginTop: 2 }}>{o.hint}</div>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 interface ArtStylePickerProps {
   /** The effective art style (a preset name, a custom string, or ""). */
   artStyle: string;

@@ -12,6 +12,17 @@ export function isValidImageProvider(v: unknown): v is ImageProvider {
   return v === "grok" || v === "local";
 }
 
+/** ADR-0029: a local-backend quality tier that trades generation TIME for QUALITY
+ * at a FIXED resolution. `fast` uses fewer sampling steps; `standard` is today's
+ * exact 25-step base pass (the no-op default); `high` adds steps AND an SDXL refiner
+ * second pass. Grok has no such knobs, so this is a local-only concept — the grok
+ * backend ignores it. */
+export type ImageQuality = "fast" | "standard" | "high";
+export const IMAGE_QUALITIES: ImageQuality[] = ["fast", "standard", "high"];
+export function isValidImageQuality(v: unknown): v is ImageQuality {
+  return v === "fast" || v === "standard" || v === "high";
+}
+
 /** The kinds of entity an image can portray. `scene` is used only by the
  * /illustrate "moment" branch; the MCP tool shape offers the other five. */
 export type ImageEntityType = "character" | "npc" | "location" | "item" | "boss" | "scene";
@@ -32,6 +43,10 @@ export interface ImageBackendArgs {
   name: string;
   description: string;
   settings: CampaignSettings;
+  /** ADR-0029: the resolved quality tier for this generation. Set by the dispatcher
+   * (`generateImage`) via resolveImageQualityForCampaign. Local-only — the grok
+   * backend never reads it. Absent is treated as "standard" (today's output). */
+  imageQuality?: ImageQuality;
 }
 
 /** One image engine. `generate` NEVER throws — every failure mode is caught and

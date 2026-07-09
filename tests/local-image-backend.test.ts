@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { generateLocalImage, deriveCampaignSeed } from "../src/image-backends/local.js";
+import { generateLocalImage, deriveCampaignSeed, resolveTier, TIER_CONFIG } from "../src/image-backends/local.js";
 import type { CampaignSettings } from "../src/campaign-store.js";
 
 // ADR-0027: the local ComfyUI backend talks to ComfyUI's HTTP API (POST /prompt,
@@ -149,6 +149,77 @@ test("deriveCampaignSeed: stable per (campaign, entity), varies by campaign, dis
   assert.ok(circ < 1024, `seeds should share the campaign band, got ${circ}`);
   // A valid uint32.
   assert.ok(Number.isInteger(s1) && s1 >= 0 && s1 <= 0xffffffff);
+});
+
+// --- ADR-0029: per-tier image quality (fast / standard / high) ---
+
+const LEGO = { model: "claude-sonnet-5", provider: "claude", artStyle: "Lego-style" } as unknown as CampaignSettings;
+
+test("resolveTier / TIER_CONFIG: high → refiner template + raised timeout; standard is today's exact params (ADR-0029)", () => {
+  assert.equal(resolveTier("standard").workflow, "sdxl-txt2img.json");
+  assert.equal(resolveTier("standard").steps, 25);
+  assert.equal(resolveTier("standard").timeoutMs, 120_000);
+  assert.equal(resolveTier("fast").workflow, "sdxl-txt2img.json");
+  assert.equal(resolveTier("fast").steps, 15);
+  assert.equal(resolveTier("high").workflow, "sdxl-refiner.json");
+  assert.equal(resolveTier("high").steps, undefined); // refiner bakes its own schedule
+  assert.ok(resolveTier("high").timeoutMs > resolveTier("standard").timeoutMs);
+  // Absent/unknown tier defaults to standard so a stale value still gets a graph.
+  assert.equal(resolveTier(undefined).workflow, TIER_CONFIG.standard.workflow);
+  assert.equal(resolveTier(undefined).steps, 25);
+});
+
+test("generateLocalImage: unset quality submits today's base graph — steps 25, no refiner nodes (ADR-0029)", async () => {
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
+    await generateLocalImage(
+      { campaignDir: dir, entityType: "npc", name: "X", description: "y", settings: SETTINGS },
+      capturingFetch(cap)
+    );
+    const g = cap.submitted.prompt;
+    assert.equal(g["3"].class_type, "KSampler");
+    assert.equal(g["3"].inputs.steps, 25);
+    assert.equal(g["4"].inputs.ckpt_name, "sd_xl_base_1.0.safetensors");
+    // The base template has no refiner checkpoint or second sampler.
+    assert.equal(g["11"], undefined);
+    assert.equal(g["14"], undefined);
+  });
+});
+
+test("generateLocalImage: fast quality lowers the base step count to 15 (ADR-0029)", async () => {
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
+    await generateLocalImage(
+      { campaignDir: dir, entityType: "npc", name: "X", description: "y", settings: SETTINGS, imageQuality: "fast" },
+      capturingFetch(cap)
+    );
+    const g = cap.submitted.prompt;
+    assert.equal(g["3"].inputs.steps, 15);
+    assert.equal(g["11"], undefined); // still the base template
+  });
+});
+
+test("generateLocalImage: high quality submits the refiner ensemble with prompt+seed on BOTH passes (ADR-0029)", async () => {
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
+    await generateLocalImage(
+      { campaignDir: dir, entityType: "location", name: "The Hall", description: "a vast hall", settings: LEGO, imageQuality: "high" },
+      capturingFetch(cap)
+    );
+    const g = cap.submitted.prompt;
+    // The refiner checkpoint is present (proves the refiner template was selected).
+    assert.equal(g["11"].inputs.ckpt_name, "sd_xl_refiner_1.0.safetensors");
+    // ADR-0028 style clause is injected into BOTH the base and refiner encode nodes.
+    assert.equal(g["6"].inputs.text, "(Lego-style:1.3). a vast hall");
+    assert.equal(g["12"].inputs.text, "(Lego-style:1.3). a vast hall");
+    // ADR-0028 anti-drift negatives are appended to BOTH negative encodes.
+    assert.match(g["7"].inputs.text, /graphite/);
+    assert.match(g["13"].inputs.text, /graphite/);
+    // ADR-0028 per-campaign seed lands on BOTH KSamplerAdvanced passes (noise_seed).
+    const seed = deriveCampaignSeed(dir, "The Hall");
+    assert.equal(g["3"].inputs.noise_seed, seed);
+    assert.equal(g["14"].inputs.noise_seed, seed);
+  });
 });
 
 test("generateLocalImage: a non-200 from /prompt returns { ok: false } and never throws", async () => {
