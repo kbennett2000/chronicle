@@ -8,10 +8,33 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { sanitizeImagePrompt, saveGeneratedImage } from "../image-generator.js";
+import { sanitizeImagePrompt, saveGeneratedImage, slugify, sceneStyleNegatives } from "../image-generator.js";
 import type { ImageBackend, ImageBackendArgs, ImageGenResult } from "./types.js";
 
 export type FetchFn = typeof fetch;
+
+/** FNV-1a, 32-bit — a tiny dependency-free string hash. Used to derive a stable
+ * per-campaign seed (below), NOT for anything security-sensitive. */
+function fnv1a(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/** A deterministic SDXL seed for (campaign, entity), replacing a fully random roll
+ * (ADR-0028). Every image in a campaign lands in a 1024-wide seed band anchored to
+ * the campaign id, so their low-level noise is correlated — the images read as one
+ * illustrated world — while each entity still gets a distinct seed. Deterministic, so
+ * re-illustrating the same entity reproduces its image. Exported for tests. */
+export function deriveCampaignSeed(campaignDir: string, name: string): number {
+  const campaignId = path.basename(campaignDir.replace(/[\\/]+$/, ""));
+  const base = fnv1a(campaignId);
+  const offset = fnv1a(slugify(name)) % 1024;
+  return (base + offset) >>> 0;
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** The checked-in SDXL txt2img graph; loaded fresh per call and injected with
@@ -53,13 +76,20 @@ export async function generateLocalImage(
 ): Promise<ImageGenResult> {
   const { campaignDir, entityType, name, description, settings } = args;
   const base = comfyBase();
-  const prompt = sanitizeImagePrompt(description, settings);
+  // ADR-0028: pass the entity type so scene/location prompts get the weighted style
+  // clause; character-class prompts are built exactly as before.
+  const prompt = sanitizeImagePrompt(description, settings, { entityType });
 
   try {
     // Build the graph from the checked-in template (fresh clone per call).
     const graph = JSON.parse(fs.readFileSync(WORKFLOW_PATH, "utf8")) as Record<string, any>;
     graph["6"].inputs.text = prompt;
-    graph["3"].inputs.seed = Math.floor(Math.random() * 0xffffffff);
+    // ADR-0028: steer scenes away from SDXL's default graphite/monochrome drift by
+    // appending style-aware negatives to the template's base negative prompt.
+    const extraNeg = sceneStyleNegatives(settings, entityType);
+    if (extraNeg) graph["7"].inputs.text = `${graph["7"].inputs.text}, ${extraNeg}`;
+    // ADR-0028: deterministic per-campaign seed lineage instead of a random roll.
+    graph["3"].inputs.seed = deriveCampaignSeed(campaignDir, name);
 
     const clientId = `chronicle-${entityType}-${Date.now()}`;
     const res = await fetchFn(`${base}/prompt`, {

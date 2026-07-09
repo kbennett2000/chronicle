@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { sanitizeImagePrompt, mergeCharacterAppearance } from "../src/image-generator.js";
+import { sanitizeImagePrompt, mergeCharacterAppearance, sceneStyleNegatives } from "../src/image-generator.js";
 import type { CampaignSettings } from "../src/campaign-store.js";
 
 function campaignWithSheet(sheet: Record<string, unknown>): string {
@@ -77,4 +77,62 @@ test("hard-caps prompt length so a leaked context blob can't balloon the call (#
   const out = sanitizeImagePrompt(huge, plain);
   // 500-char cap on the description; the (style-less) prompt is just the cap.
   assert.ok(out.length <= 500, `expected <=500 chars, got ${out.length}`);
+});
+
+// --- ADR-0028: scene/location style adherence (local backend only) ---
+
+const lego: CampaignSettings = { generateImages: true, artStyle: "Lego-style" } as CampaignSettings;
+
+test("scene-class prompts weight the leading style clause (ADR-0028)", () => {
+  // A location/scene is a loose composition, so the style is emphasized with SDXL
+  // prompt weighting to survive the model's default-aesthetic drift.
+  assert.equal(
+    sanitizeImagePrompt("a vast throne room, shafts of light", lego, { entityType: "location" }),
+    "(Lego-style:1.3). a vast throne room, shafts of light"
+  );
+  assert.equal(
+    sanitizeImagePrompt("a storm-lashed harbor at dusk", lego, { entityType: "scene" }),
+    "(Lego-style:1.3). a storm-lashed harbor at dusk"
+  );
+});
+
+test("character-class prompts keep the unweighted leading style — the path that already works (ADR-0028)", () => {
+  // Tight subjects hold the style already; they must be byte-identical to pre-0028.
+  for (const entityType of ["character", "npc", "item", "boss"] as const) {
+    assert.equal(
+      sanitizeImagePrompt("a weathered dwarf blacksmith", lego, { entityType }),
+      "Lego-style. a weathered dwarf blacksmith"
+    );
+  }
+});
+
+test("no opts (grok/video callers) is byte-identical to the pre-0028 output", () => {
+  assert.equal(
+    sanitizeImagePrompt("a vast throne room", lego),
+    "Lego-style. a vast throne room"
+  );
+});
+
+test("sceneStyleNegatives pushes color-forward scenes off the graphite default (ADR-0028)", () => {
+  const neg = sceneStyleNegatives(lego, "location");
+  assert.match(neg, /monochrome/);
+  assert.match(neg, /graphite/);
+  assert.match(neg, /desaturated/);
+});
+
+test("sceneStyleNegatives is empty for character-class entities (ADR-0028)", () => {
+  assert.equal(sceneStyleNegatives(lego, "character"), "");
+  assert.equal(sceneStyleNegatives(lego, "npc"), "");
+});
+
+test("sceneStyleNegatives never fights an intentionally monochrome style (ADR-0028)", () => {
+  // The player asked for these looks — don't steer away from them.
+  for (const artStyle of ["ink wash", "pencil sketch", "noir", "charcoal", "black and white"]) {
+    const settings = { generateImages: true, artStyle } as CampaignSettings;
+    assert.equal(sceneStyleNegatives(settings, "location"), "", `should opt out for "${artStyle}"`);
+  }
+});
+
+test("sceneStyleNegatives is empty when no style is configured (ADR-0028)", () => {
+  assert.equal(sceneStyleNegatives(plain, "location"), "");
 });
