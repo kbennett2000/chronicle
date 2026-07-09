@@ -3,13 +3,35 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { sanitizeImagePrompt, mergeCharacterAppearance, sceneStyleNegatives } from "../src/image-generator.js";
+import {
+  sanitizeImagePrompt,
+  mergeCharacterAppearance,
+  groundSceneDescription,
+  sceneStyleNegatives,
+} from "../src/image-generator.js";
 import type { CampaignSettings } from "../src/campaign-store.js";
 
 function campaignWithSheet(sheet: Record<string, unknown>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chronicle-appearance-"));
   fs.writeFileSync(path.join(dir, "character-sheet.json"), JSON.stringify(sheet));
   return dir;
+}
+
+// ADR-0031 grounding fixtures: a campaign dir with an optional character sheet
+// and/or npc-roster.md. NPC appearance lives in the freeform Description bullet.
+function campaignWith(opts: { sheet?: Record<string, unknown>; roster?: string }): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chronicle-ground-"));
+  if (opts.sheet) fs.writeFileSync(path.join(dir, "character-sheet.json"), JSON.stringify(opts.sheet));
+  if (opts.roster) fs.writeFileSync(path.join(dir, "npc-roster.md"), opts.roster);
+  return dir;
+}
+
+function rosterWith(name: string, description?: string): string {
+  return (
+    `# NPC Roster\n\n## ${name}\n` +
+    (description ? `- **Description:** ${description}\n` : "") +
+    `- **Disposition:** wary\n- **Knows:** the way through\n`
+  );
 }
 
 const styled: CampaignSettings = { generateImages: true, artStyle: "ink wash" } as CampaignSettings;
@@ -70,6 +92,84 @@ test("anchors a character portrait with the stored appearance (#104)", () => {
 test("leaves the description untouched when the sheet has no appearance (#104)", () => {
   const dir = campaignWithSheet({ name: "Bob the Guy" });
   assert.equal(mergeCharacterAppearance(dir, "stands by the well"), "stands by the well");
+});
+
+// --- ADR-0031: scene entity grounding (#134) ---
+
+test("groundSceneDescription prepends canonical appearance for the PC and a named NPC, focal subject first (#134)", () => {
+  const dir = campaignWith({
+    sheet: { name: "Kael", appearance: "a lean half-elf ranger in a green hooded cloak" },
+    roster: rosterWith("Marta", "a scarred woman in a leather apron, iron-grey braid"),
+  });
+  // [PRESENT: Marta, Kael] — Marta is focal (listed first), so her tag leads.
+  const out = groundSceneDescription(
+    dir,
+    "torchlight flares as two figures meet in the ruined gatehouse",
+    ["Marta", "Kael"]
+  );
+  assert.equal(
+    out,
+    "a scarred woman in a leather apron, iron-grey braid a lean half-elf ranger in a green hooded cloak torchlight flares as two figures meet in the ruined gatehouse"
+  );
+});
+
+test("groundSceneDescription drops extra entities before the 500-char cap bites, preserving the whole description (#134)", () => {
+  const long = (label: string) => `${label} `.repeat(30).trim(); // ~200+ chars each
+  const dir = campaignWith({
+    sheet: { name: "Kael", appearance: long("appearanceA") },
+    roster:
+      rosterWith("Marta", long("appearanceB")) + `\n## Bram\n- **Description:** ${long("appearanceC")}\n`,
+  });
+  const desc = "a tense standoff in a cramped, smoke-filled cellar";
+  const out = groundSceneDescription(dir, desc, ["Kael", "Marta", "Bram"]);
+  // Assembled prompt never exceeds the downstream cap...
+  assert.ok(out.length <= 500, `expected <=500 chars, got ${out.length}`);
+  // ...the scene description itself is fully preserved (never truncated)...
+  assert.ok(out.endsWith(desc), "description must survive intact at the tail");
+  // ...the focal entity (first in the list) is grounded...
+  assert.ok(out.startsWith(long("appearanceA")), "focal entity's appearance leads");
+  // ...and the ones that wouldn't fit are dropped, not squeezed in mangled.
+  assert.ok(!out.includes(long("appearanceC")), "the third entity is dropped before the cap");
+});
+
+test("groundSceneDescription caps at three entities even when all fit (#134)", () => {
+  const dir = campaignWith({
+    sheet: { name: "Kael", appearance: "cloaked ranger" },
+    roster:
+      rosterWith("Marta", "aproned smith") +
+      `\n## Bram\n- **Description:** bearded sailor\n` +
+      `\n## Odd\n- **Description:** masked figure\n`,
+  });
+  const out = groundSceneDescription(dir, "a crowded dockside brawl", ["Marta", "Bram", "Odd", "Kael"]);
+  assert.ok(out.includes("aproned smith") && out.includes("bearded sailor") && out.includes("masked figure"));
+  assert.ok(!out.includes("cloaked ranger"), "the 4th present entity is beyond the 3-entity budget");
+});
+
+test("groundSceneDescription skips an entity whose look the description already states (#134)", () => {
+  const dir = campaignWith({ sheet: { name: "Kael", appearance: "a lean half-elf ranger" } });
+  const desc = "A lean half-elf ranger nocks an arrow at the cave mouth";
+  assert.equal(groundSceneDescription(dir, desc, ["Kael"]), desc);
+});
+
+test("groundSceneDescription leaves the description untouched when a present name matches no known entity (#134)", () => {
+  const dir = campaignWith({ sheet: { name: "Kael", appearance: "a cloaked ranger" } });
+  assert.equal(
+    groundSceneDescription(dir, "a hooded stranger waits by the gate", ["Nobody"]),
+    "a hooded stranger waits by the gate"
+  );
+});
+
+test("groundSceneDescription leaves the description untouched when the matched entity has no appearance (#134)", () => {
+  // PC sheet has no appearance; NPC has no Description bullet → nothing to ground.
+  const dir = campaignWith({ sheet: { name: "Kael" }, roster: rosterWith("Marta") });
+  const desc = "two figures square off in the rain";
+  assert.equal(groundSceneDescription(dir, desc, ["Kael", "Marta"]), desc);
+});
+
+test("groundSceneDescription is a no-op for an empty or absent present list (#134)", () => {
+  const dir = campaignWith({ sheet: { name: "Kael", appearance: "a cloaked ranger" } });
+  assert.equal(groundSceneDescription(dir, "a quiet meadow at dawn", []), "a quiet meadow at dawn");
+  assert.equal(groundSceneDescription(dir, "a quiet meadow at dawn", undefined), "a quiet meadow at dawn");
 });
 
 test("hard-caps prompt length so a leaked context blob can't balloon the call (#58)", () => {

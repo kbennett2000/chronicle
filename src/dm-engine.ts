@@ -451,22 +451,35 @@ your own action ("let me roll…"); it is always a request to the player.`);
   // same-session retry (server.ts), but reliable first-pass emission keeps that
   // retry rare.
   sections.push(`=== OUTPUT FORMAT (required on EVERY reply) ===
-Every reply you produce has exactly two parts, in this order:
+Every reply you produce has these parts, in this order:
 (1) your narration — the story the player reads; then
-(2) as the very last line, by itself and with nothing after it, a single scene
-    caption of the form:
+(2) as the next line, by itself, a single scene caption of the form:
     [SCENE: one short third-person, present-tense sentence describing what is
     visually happening right now — the main subject(s), the setting, the action,
     the lighting and mood, and any notable objects]
+(3) optionally, as the very last line, a single presence tag naming which KNOWN
+    entities are VISIBLY PRESENT in this exact moment, of the form:
+    [PRESENT: Name One, Name Two]
 
 The [SCENE: ...] line is MANDATORY and a reply is INCOMPLETE without it. Emit it
 on every single turn, including the very first (opening) scene. It is machine-read
 to illustrate the moment and is stripped out before the player ever sees it, so:
 keep it to one line; write it in the third person, present tense; describe only
 what is visible; use no second person, no dialogue, no inner thoughts, no passage
-of time, and no art-style or medium words. Never refer to this line anywhere in
-your prose, and do NOT include it in the session-log entry you append (rule 8).
-Output nothing at all after it.`);
+of time, and no art-style or medium words.
+
+The [PRESENT: ...] line is OPTIONAL and used only to draw those entities true to
+their established look. Include it only when one or more entities that ALREADY
+EXIST in the campaign's state files — the player character, or a named NPC in
+npc-roster.md — are actually in frame in this moment (not merely mentioned,
+remembered, or off-screen). List them by their exact canonical names, the
+caption's focal subject first, at most three. If no such known entity is visibly
+present (an empty landscape, a solitary new stranger not yet in your files), OMIT
+this line entirely — never invent names, never list unknown or absent entities.
+
+Both tag lines are stripped before the player sees them: never refer to either
+anywhere in your prose, and do NOT include them in the session-log entry you
+append (rule 8). Output nothing at all after the last tag line.`);
 
   return sections.join("\n\n");
 }
@@ -505,7 +518,10 @@ section so it reflects this opening. Write only the in-world scene as your
 reply — no preamble, no bookkeeping notes, no meta commentary. Then, as the
 mandatory final line required on every reply (see the OUTPUT FORMAT section),
 append the single [SCENE: ...] caption: a short third-person, present-tense
-description of this opening moment, used only to illustrate it.`;
+description of this opening moment, used only to illustrate it; and, since
+${character.name} is present in this opening, follow it with the optional
+[PRESENT: ${character.name}] line so the illustration renders them true to their
+sheet.`;
 }
 
 export interface TurnResult {

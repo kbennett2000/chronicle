@@ -287,6 +287,58 @@ export function extractSceneCaption(text: string): { narration: string; sceneCap
   return sceneCaption ? { narration, sceneCaption } : { narration };
 }
 
+// Issue #134: after the mandatory [SCENE:] line the DM may append one optional
+// [PRESENT: Name, Name] line naming the KNOWN entities visibly in frame, so the
+// scene image can render them true to their established look instead of as
+// generic stand-ins. Same tag shape and stripping contract as [SCENE:].
+const PRESENT_TAG_RE = /\[PRESENT:\s*([^\]]*?)\s*\]/gi;
+
+/** Pull the DM-emitted [PRESENT: ...] entity list off a turn's text and strip
+ * every marker from the player-facing narration. Comma-split, trimmed, empties
+ * dropped, deduped case-insensitively with first-seen order preserved (so the
+ * caption's focal subject stays first). Mirrors extractSceneCaption: last
+ * non-empty tag wins, absent tag → empty list, never throws. */
+export function extractPresentEntities(text: string): { narration: string; presentEntities: string[] } {
+  if (!text) return { narration: text, presentEntities: [] };
+  const matches = [...text.matchAll(PRESENT_TAG_RE)];
+  if (matches.length === 0) return { narration: text, presentEntities: [] };
+  // Last non-empty tag wins (the DM is told to end with at most one).
+  let names: string[] = [];
+  for (const m of matches) {
+    const inner = m[1]?.trim();
+    if (inner) names = inner.split(",").map((n) => n.trim()).filter(Boolean);
+  }
+  const seen = new Set<string>();
+  const presentEntities: string[] = [];
+  for (const n of names) {
+    const key = n.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    presentEntities.push(n);
+  }
+  const narration = text
+    .replace(PRESENT_TAG_RE, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { narration, presentEntities };
+}
+
+/** Parse both DM-emitted moment tags off a turn's raw text in one pass — the
+ * mandatory [SCENE: ...] caption and the optional [PRESENT: ...] entity list —
+ * returning the fully-stripped player-facing narration plus both. The two tags
+ * are stripped independently (each regex is global), so their relative order in
+ * the text does not matter. Never throws. */
+export function extractMomentTags(text: string): {
+  narration: string;
+  sceneCaption?: string;
+  presentEntities: string[];
+} {
+  const scene = extractSceneCaption(text);
+  const present = extractPresentEntities(scene.narration);
+  return { narration: present.narration, sceneCaption: scene.sceneCaption, presentEntities: present.presentEntities };
+}
+
 /** ADR-0030: pick the description for a moment image/video. Precedence: an
  * explicit user override (the refine flow, e.g. "the same scene at night") →
  * the turn's cached scene caption → the raw narration fallback. Returns the

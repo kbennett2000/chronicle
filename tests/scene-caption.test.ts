@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   extractSceneCaption,
+  extractPresentEntities,
+  extractMomentTags,
   resolveMomentDescription,
   parseRetryCaption,
   retrySceneCaption,
@@ -60,6 +62,78 @@ test("extractSceneCaption strips an empty marker but yields no caption", () => {
 
 test("extractSceneCaption never throws on empty input", () => {
   assert.deepEqual(extractSceneCaption(""), { narration: "" });
+});
+
+// ── extractPresentEntities (ADR-0031 / #134) ────────────────────────────────
+
+test("extractPresentEntities parses a comma list and strips the tag", () => {
+  const text =
+    "Marta bars the door as the wraith drifts closer.\n" +
+    "[SCENE: a woman braces a door against a pale wraith in a candlelit hall]\n" +
+    "[PRESENT: Marta, Kael]";
+  const { narration, presentEntities } = extractPresentEntities(text);
+  assert.deepEqual(presentEntities, ["Marta", "Kael"]);
+  assert.ok(!/\[PRESENT:/i.test(narration), "narration must not contain the [PRESENT:] marker");
+  // The [SCENE:] line is left intact by this parser (extractSceneCaption owns it).
+  assert.ok(narration.includes("[SCENE:"));
+});
+
+test("extractPresentEntities returns an empty list and unchanged text when absent", () => {
+  const text = "A cold wind crosses the empty moor.\n[SCENE: a windswept moor under grey cloud]";
+  const { narration, presentEntities } = extractPresentEntities(text);
+  assert.deepEqual(presentEntities, []);
+  assert.equal(narration, text);
+});
+
+test("extractPresentEntities trims, drops empties, and dedupes case-insensitively (focal-first order)", () => {
+  const { presentEntities } = extractPresentEntities("[PRESENT:  Marta ,, kael, MARTA , Kael ]");
+  assert.deepEqual(presentEntities, ["Marta", "kael"]);
+});
+
+test("extractPresentEntities keeps the last non-empty tag if the model emits more than one", () => {
+  const { narration, presentEntities } = extractPresentEntities(
+    "[PRESENT: Aelar]\nmid\n[PRESENT: Marta, Kael]"
+  );
+  assert.deepEqual(presentEntities, ["Marta", "Kael"]);
+  assert.ok(!/\[PRESENT:/i.test(narration), "every marker is stripped, not just the last");
+});
+
+test("extractPresentEntities strips an empty tag but yields no names", () => {
+  const { narration, presentEntities } = extractPresentEntities("The hall stands empty.\n[PRESENT: ]");
+  assert.deepEqual(presentEntities, []);
+  assert.ok(!/\[PRESENT:/i.test(narration));
+  assert.equal(narration, "The hall stands empty.");
+});
+
+test("extractPresentEntities never throws on empty input", () => {
+  assert.deepEqual(extractPresentEntities(""), { narration: "", presentEntities: [] });
+});
+
+// ── extractMomentTags: both tags in one pass (ADR-0031 seam) ─────────────────
+
+test("extractMomentTags pulls caption + present list and fully strips both from narration", () => {
+  const text =
+    "Kael lowers his bow as Marta steps from the shadow of the arch.\n\n" +
+    "[SCENE: a ranger lowers a longbow as a scarred woman emerges from a stone arch at dusk]\n" +
+    "[PRESENT: Kael, Marta]";
+  const { narration, sceneCaption, presentEntities } = extractMomentTags(text);
+  assert.equal(sceneCaption, "a ranger lowers a longbow as a scarred woman emerges from a stone arch at dusk");
+  assert.deepEqual(presentEntities, ["Kael", "Marta"]);
+  assert.ok(!/\[SCENE:/i.test(narration) && !/\[PRESENT:/i.test(narration), "no tag leaks to the player");
+  assert.equal(narration, "Kael lowers his bow as Marta steps from the shadow of the arch.");
+});
+
+test("extractMomentTags: order-independent — [PRESENT:] before [SCENE:] still parses both", () => {
+  const text = "beat\n[PRESENT: Marta]\n[SCENE: a woman at a forge]";
+  const { sceneCaption, presentEntities } = extractMomentTags(text);
+  assert.equal(sceneCaption, "a woman at a forge");
+  assert.deepEqual(presentEntities, ["Marta"]);
+});
+
+test("extractMomentTags: caption present, no present tag → empty list, caption intact", () => {
+  const { sceneCaption, presentEntities } = extractMomentTags("beat\n[SCENE: a lone gull over grey surf]");
+  assert.equal(sceneCaption, "a lone gull over grey surf");
+  assert.deepEqual(presentEntities, []);
 });
 
 // ── resolveMomentDescription precedence (ADR-0030 seam) ──────────────────────
