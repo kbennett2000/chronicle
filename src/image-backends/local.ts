@@ -10,6 +10,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sanitizeImagePrompt, saveGeneratedImage, slugify, sceneStyleNegatives } from "../image-generator.js";
 import type { ImageBackend, ImageBackendArgs, ImageGenResult, ImageQuality } from "./types.js";
+import { lookupStyleLora, type StyleLora } from "./style-loras.js";
 
 export type FetchFn = typeof fetch;
 
@@ -70,6 +71,25 @@ export function resolveTier(quality?: ImageQuality): TierParams {
   return TIER_CONFIG[quality ?? "standard"] ?? TIER_CONFIG.standard;
 }
 
+/** ADR-0032: the tier to actually render at once a LoRA recipe is active. This slice
+ * only LoRA-wires the base chain (nodes 4/6/7/3), so a recipe must never run on the
+ * refiner workflow — the LoRA would apply to the base pass and be silently dropped by
+ * the refiner pass. So whenever a recipe is active and the resolved tier is the refiner
+ * (quality=high), swap to a base high-steps tier (40 steps, keeping high's raised
+ * budget). This honors `noRefiner` and is the safe default for ANY recipe; a future
+ * non-noRefiner recipe additionally warns that refiner-aware LoRA injection is TODO.
+ * Exported for tests. */
+export function resolveEffectiveTier(quality: ImageQuality | undefined, recipe: StyleLora): TierParams {
+  const tier = resolveTier(quality);
+  if (tier.workflow !== REFINER_WORKFLOW) return tier;
+  if (!recipe.noRefiner) {
+    console.error(
+      `[image-generator] local LoRA "${recipe.loraFile}" requested at quality=high, but refiner-aware LoRA injection isn't implemented — rendering base high-steps instead`
+    );
+  }
+  return { workflow: BASE_WORKFLOW, steps: 40, timeoutMs: tier.timeoutMs };
+}
+
 const POLL_INTERVAL_MS = 500;
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -92,6 +112,54 @@ function setNodeSeed(graph: Record<string, any>, id: string, seed: number): void
   if (!node) return;
   if ("noise_seed" in node.inputs) node.inputs.noise_seed = seed;
   else node.inputs.seed = seed;
+}
+
+/** ADR-0032: insert a LoraLoader (node "20", unused in both templates) into the cloned
+ * base-chain graph and repoint the checkpoint's model/clip consumers through it, so the
+ * LoRA affects the sampler (node 3) and both CLIP encoders (6 positive, 7 negative).
+ * `["4",0]`/`["4",1]` are the checkpoint's only model/clip consumers (the VAE is a
+ * separate VAELoader), so these are the complete set of edges. Base chain only — a
+ * recipe never reaches the refiner workflow (see resolveEffectiveTier). */
+function applyLora(graph: Record<string, any>, recipe: StyleLora): void {
+  graph["20"] = {
+    class_type: "LoraLoader",
+    inputs: {
+      lora_name: recipe.loraFile,
+      strength_model: recipe.strength,
+      strength_clip: recipe.strength,
+      model: ["4", 0],
+      clip: ["4", 1],
+    },
+  };
+  if (graph["6"]) graph["6"].inputs.clip = ["20", 1];
+  if (graph["7"]) graph["7"].inputs.clip = ["20", 1];
+  if (graph["3"]) graph["3"].inputs.model = ["20", 0];
+}
+
+/** ADR-0032: ensure the LoRA's trigger token is present in the positive prompt,
+ * prepending it (case-insensitive) if absent. Runs AFTER sanitizeImagePrompt's 500-char
+ * cap, so it only lengthens the string and never displaces the grounding budget
+ * (ADR-0031). For the proof styles trigger === artStyle, so the leading style clause
+ * already contains it and this is a no-op. Exported for tests. */
+export function ensureTrigger(prompt: string, trigger: string): string {
+  if (prompt.toLowerCase().includes(trigger.toLowerCase())) return prompt;
+  return `${trigger}. ${prompt}`;
+}
+
+/** ADR-0032: ask ComfyUI what LoRA files IT can load — its own filesystem, which may
+ * differ from this process's when ComfyUI is remote — and whether `loraFile` is among
+ * them. The `/object_info/LoraLoader` response shape is
+ * `{ LoraLoader: { input: { required: { lora_name: [ [file, ...], ... ] } } } }`.
+ * Returns false on any non-200 or parse failure; may throw on a network error — the
+ * caller degrades to prompt-only either way. Uses the injected fetchFn (test-driven). */
+async function loraAvailable(base: string, fetchFn: FetchFn, loraFile: string): Promise<boolean> {
+  const res = await fetchFn(`${base}/object_info/LoraLoader`, {
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!res.ok) return false;
+  const info = (await res.json().catch(() => ({}))) as Record<string, any>;
+  const names = info?.LoraLoader?.input?.required?.lora_name?.[0];
+  return Array.isArray(names) && names.includes(loraFile);
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -125,7 +193,40 @@ export async function generateLocalImage(
   // clause; character-class prompts are built exactly as before.
   const prompt = sanitizeImagePrompt(description, settings, { entityType });
   // ADR-0029: pick the tier's workflow + step count + timeout. Absent tier → standard.
-  const tier = resolveTier(args.imageQuality);
+  let tier = resolveTier(args.imageQuality);
+
+  // ADR-0032: a configured style may ALSO load a specialized SDXL LoRA. The whole path
+  // here is self-contained — any failure (file not loadable, /object_info error, a
+  // thrown fetch) drops back to prompt-only and STILL generates; it must never reach the
+  // outer catch, which would fail the image. Unmapped styles skip this block entirely
+  // and submit a byte-identical graph to today.
+  let recipe: StyleLora | undefined = lookupStyleLora(settings.artStyle);
+  let positivePrompt = prompt;
+  if (recipe) {
+    try {
+      // Only the base chain is LoRA-wired, so force the base workflow for any recipe.
+      tier = resolveEffectiveTier(args.imageQuality, recipe);
+      // Confirm ComfyUI can actually load the file (its filesystem, via /object_info);
+      // otherwise fall back to prompt-only at the originally resolved tier.
+      if (await loraAvailable(base, fetchFn, recipe.loraFile)) {
+        positivePrompt = ensureTrigger(prompt, recipe.trigger);
+      } else {
+        console.error(
+          `[image-generator] local LoRA "${recipe.loraFile}" for style "${settings.artStyle}" is not loadable by ComfyUI — falling back to prompt-only`
+        );
+        recipe = undefined;
+        tier = resolveTier(args.imageQuality);
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[image-generator] local LoRA setup failed for style "${settings.artStyle}" — falling back to prompt-only: ${reason}`
+      );
+      recipe = undefined;
+      tier = resolveTier(args.imageQuality);
+      positivePrompt = prompt;
+    }
+  }
 
   try {
     // Build the graph from the tier's checked-in template (fresh clone per call).
@@ -138,13 +239,16 @@ export async function generateLocalImage(
     // negatives, and per-campaign seed apply IDENTICALLY at every quality tier.
     const extraNeg = sceneStyleNegatives(settings, entityType);
     const seed = deriveCampaignSeed(campaignDir, name);
-    for (const id of ["6", "12"]) setNodeText(graph, id, prompt);
+    for (const id of ["6", "12"]) setNodeText(graph, id, positivePrompt);
     if (extraNeg) for (const id of ["7", "13"]) appendNodeText(graph, id, extraNeg);
     for (const id of ["3", "14"]) setNodeSeed(graph, id, seed);
     // Base-workflow step override (fast/standard); the refiner template bakes its own.
     if (tier.steps != null && graph["3"]?.inputs && "steps" in graph["3"].inputs) {
       graph["3"].inputs.steps = tier.steps;
     }
+    // ADR-0032: a surviving LoRA recipe injects the LoraLoader node and rewires the
+    // base chain through it. Absent recipe → today's graph, untouched.
+    if (recipe) applyLora(graph, recipe);
 
     const clientId = `chronicle-${entityType}-${Date.now()}`;
     const res = await fetchFn(`${base}/prompt`, {
