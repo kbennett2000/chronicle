@@ -812,7 +812,16 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
       const result = await illustrateMoment(connection, campaignId, index, description);
       if (result.ok && result.relPath) {
         const relPath = result.relPath;
-        setTurns((prev) => prev.map((t, i) => (i === index ? { ...t, image: relPath } : t)));
+        // #142: adopt the caption the server drew from — on a fresh, omitted-
+        // caption turn the original response was captionless, so this is how
+        // the regenerate box learns the (backfilled) caption to pre-fill. Guard
+        // against clobbering an existing caption with undefined.
+        const caption = result.sceneCaption;
+        setTurns((prev) =>
+          prev.map((t, i) =>
+            i === index ? { ...t, image: relPath, ...(caption ? { sceneCaption: caption } : {}) } : t
+          )
+        );
         // Bust the image cache so a regenerate (same filename) actually shows.
         setImageNonces((prev) => ({ ...prev, [index]: (prev[index] ?? 0) + 1 }));
       } else {

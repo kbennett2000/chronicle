@@ -4,7 +4,10 @@
 Accepted. Amended by the "Reliability amendment (Issue #130)" section below —
 the caption is reframed from a numbered "exception to rule 17" into a required
 OUTPUT FORMAT contract, and a missing caption is backstopped by one free
-same-session retry.
+same-session retry. Further amended by the "Auto-illustrate ordering amendment
+(Issue #142)" section below — the fresh-turn auto-illustrate seam now waits for
+the after-response backfill before reading the caption, so it no longer races
+that backfill and falls back to narration.
 
 ## Context
 Scene/moment images (the user-triggered "Illustrate this moment" and its
@@ -205,3 +208,47 @@ Constraints that keep it safe and non-disruptive:
 reliability work is confined to the prompt (`dm-engine.ts`), the parse/retry
 helpers (`narration.ts`), the post-hoc setter (`campaign-store.ts`), and the
 three turn handlers (`server.ts`).
+
+## Auto-illustrate ordering amendment (Issue #142)
+
+The reliability amendment above introduced a race the original design didn't
+have. The backfill runs **after** the turn response so narration is instant, and
+it patches the on-disk record only once its retry model call returns. But the web
+client, on receiving that same turn response, **immediately** fires auto-illustrate
+— `POST /illustrate { kind: "moment", turnIndex }` — and that seam re-reads the
+record from disk. So on a turn where the DM omitted `[SCENE:]` (exactly the case
+the backfill exists for), auto-illustrate read the still-captionless record
+**before** the slow backfill wrote the caption, and `resolveMomentDescription`
+fell back to the raw narration slab — the very outcome the caption exists to
+prevent. Two symptoms, one race: the drawn image came from narration, and the
+turn's regenerate box rendered blank (the captionless turn response never taught
+the client the backfilled caption).
+
+### Decision — synchronize the seam, don't reorder the backfill
+
+Narration stays instant: the backfill is **not** moved before the response. Instead
+the auto-illustrate seam waits out the in-flight turn and reads the freshly-stored
+caption:
+
+- **A `settling` signal on the active session.** `ActiveSession` gains a
+  `settling?: Promise<void>` that is created before the turn runs and resolved in
+  the same `finally` that clears `busy` — so it stays pending for the whole turn
+  **including** the after-response backfill, in all three turn handlers.
+- **`/illustrate` (moment) waits then re-reads.** When there is no explicit
+  `description` override and the found record has no caption yet, and a turn is
+  `settling`, the seam `await`s `settling` and re-reads the record. If the backfill
+  already landed (fast path, or an inline `[SCENE:]` that never needed a backfill)
+  there is no wait; if the backfill yielded nothing the record stays captionless and
+  the narration fallback holds, exactly as before.
+- **`/illustrate` echoes the caption back.** The moment response now carries
+  `sceneCaption`, and the client applies it to the turn when it applies the image —
+  so the regenerate box pre-fills on a same-session fresh turn whose original
+  response was necessarily captionless. Absent caption → box stays blank, as today.
+
+Narration latency, the DM prompts, `resolveMomentDescription`, and the image
+backends are all unchanged. The change is confined to the `settling` plumbing in
+the three turn handlers, the `/illustrate` moment branch (`server.ts`), the
+`IllustrateResult` type, and the illustrate-success handler (`web/`). `/animate`
+shares `resolveMomentDescription` and the same theoretical race, but it is
+manual — never auto-fired on a fresh turn — so the backfill has long finished by
+the time a user clicks it; it is intentionally left unchanged.

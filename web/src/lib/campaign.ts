@@ -454,6 +454,11 @@ export interface IllustrateResult {
   relPath?: string;
   error?: string;
   turnIndex?: number;
+  // Issue #142: the DM caption that made this moment's image, echoed back for a
+  // "moment" illustrate. Lets the client prefill the regenerate box on a fresh
+  // turn whose original response was captionless (the DM omitted [SCENE:] and
+  // the server backfilled it after responding). Absent → the box stays blank.
+  sceneCaption?: string;
 }
 
 export async function illustrateEntity(

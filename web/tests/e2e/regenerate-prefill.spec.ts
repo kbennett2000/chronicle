@@ -52,6 +52,53 @@ function seedIllustratedMoments(campaignId: string): void {
   );
 }
 
+// #142: the caption the server drew from is echoed on the /illustrate response
+// and adopted by the client, so a fresh, omitted-caption turn (whose original
+// turn response was captionless because the DM omitted [SCENE:] and the server
+// backfilled it after responding) still pre-fills its regenerate box.
+const BACKFILLED_CAPTION = "a torchlit hall of long shadows, dust hanging in the amber light";
+
+test.describe("Regenerate box adopts the /illustrate caption (#142)", () => {
+  test("illustrating a captionless turn pre-fills the regenerate box with the returned caption", async ({
+    page,
+    chronicleServer,
+  }) => {
+    // The default fixture seeds a captionless opening turn 0 (narration, no image,
+    // no sceneCaption) — exactly an omitted-caption turn. Give it a real image
+    // file so the applied relPath renders, then stub /illustrate to return the
+    // (backfilled) caption alongside the image, as the fixed server now does.
+    const imagesDir = campaignDir(chronicleServer.campaignId, "images");
+    fs.mkdirSync(imagesDir, { recursive: true });
+    fs.copyFileSync(IMAGE_FIXTURE, path.join(imagesDir, "scene-0.png"));
+
+    await page.route("**/campaigns/*/illustrate", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          relPath: "images/scene-0.png",
+          turnIndex: 0,
+          sceneCaption: BACKFILLED_CAPTION,
+        }),
+      });
+    });
+
+    await seedConnection(page, chronicleServer.baseURL, chronicleServer.token);
+    await page.goto(`${chronicleServer.baseURL}/?campaign=${chronicleServer.campaignId}`);
+    await page.getByTestId("continue-button").click();
+    await expect(page.getByText("ACTIVE PLAY")).toBeVisible();
+
+    // Captionless turn → the "Illustrate this moment" affordance, not regenerate.
+    await page.getByTestId("illustrate-moment").click();
+
+    // Once the stubbed image + caption land, the affordance flips to Regenerate;
+    // opening it pre-fills the caption the server returned (blank before #142).
+    await page.getByTestId("regenerate-moment").click();
+    await expect(page.getByTestId("regenerate-input")).toHaveValue(BACKFILLED_CAPTION);
+  });
+});
+
 test.describe("Regenerate-image description prefill (#132)", () => {
   test("prefills the stored caption when present, and is blank when absent", async ({
     page,
