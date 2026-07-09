@@ -112,12 +112,13 @@ test("generateLocalImage: a scene weights the leading style clause and uses a de
 test("generateLocalImage: a color-forward scene appends anti-drift negatives (ADR-0028)", async () => {
   await withCampaignDir(async (dir) => {
     const cap: { submitted?: any } = {};
-    const lego = { model: "claude-sonnet-5", provider: "claude", artStyle: "Lego-style" } as unknown as CampaignSettings;
+    // A color-forward but UNMAPPED style (no LoRA recipe) — exercises the prompt-only path.
+    const style = { model: "claude-sonnet-5", provider: "claude", artStyle: "stained glass" } as unknown as CampaignSettings;
     await generateLocalImage(
-      { campaignDir: dir, entityType: "scene", name: "Throne Room", description: "a vast hall", settings: lego },
+      { campaignDir: dir, entityType: "scene", name: "Throne Room", description: "a vast hall", settings: style },
       capturingFetch(cap)
     );
-    assert.equal(cap.submitted.prompt["6"].inputs.text, "(Lego-style:1.3). a vast hall");
+    assert.equal(cap.submitted.prompt["6"].inputs.text, "(stained glass:1.3). a vast hall");
     // The template's base negative is preserved and the drift steer is appended.
     assert.match(cap.submitted.prompt["7"].inputs.text, /^blurry, lowres, deformed, text, watermark, /);
     assert.match(cap.submitted.prompt["7"].inputs.text, /monochrome/);
@@ -128,12 +129,12 @@ test("generateLocalImage: a color-forward scene appends anti-drift negatives (AD
 test("generateLocalImage: a character keeps the unweighted style and no extra negatives (ADR-0028)", async () => {
   await withCampaignDir(async (dir) => {
     const cap: { submitted?: any } = {};
-    const lego = { model: "claude-sonnet-5", provider: "claude", artStyle: "Lego-style" } as unknown as CampaignSettings;
+    const style = { model: "claude-sonnet-5", provider: "claude", artStyle: "stained glass" } as unknown as CampaignSettings;
     await generateLocalImage(
-      { campaignDir: dir, entityType: "npc", name: "Barrow", description: "a weathered dwarf", settings: lego },
+      { campaignDir: dir, entityType: "npc", name: "Barrow", description: "a weathered dwarf", settings: style },
       capturingFetch(cap)
     );
-    assert.equal(cap.submitted.prompt["6"].inputs.text, "Lego-style. a weathered dwarf");
+    assert.equal(cap.submitted.prompt["6"].inputs.text, "stained glass. a weathered dwarf");
     assert.equal(cap.submitted.prompt["7"].inputs.text, "blurry, lowres, deformed, text, watermark");
   });
 });
@@ -161,7 +162,10 @@ test("deriveCampaignSeed: stable per (campaign, entity), varies by campaign, dis
 
 // --- ADR-0029: per-tier image quality (fast / standard / high) ---
 
-const LEGO = { model: "claude-sonnet-5", provider: "claude", artStyle: "Lego-style" } as unknown as CampaignSettings;
+// A color-forward but UNMAPPED style, so the ADR-0029 refiner tests exercise the plain
+// (non-LoRA) high path — "Lego-style" is now a LoRA style (ADR-0032 Slice 2) that would
+// force the base workflow.
+const UNMAPPED = { model: "claude-sonnet-5", provider: "claude", artStyle: "stained glass" } as unknown as CampaignSettings;
 
 test("resolveTier / TIER_CONFIG: high → refiner template + raised timeout; standard is today's exact params (ADR-0029)", () => {
   assert.equal(resolveTier("standard").workflow, "sdxl-txt2img.json");
@@ -211,15 +215,15 @@ test("generateLocalImage: high quality submits the refiner ensemble with prompt+
   await withCampaignDir(async (dir) => {
     const cap: { submitted?: any } = {};
     await generateLocalImage(
-      { campaignDir: dir, entityType: "location", name: "The Hall", description: "a vast hall", settings: LEGO, imageQuality: "high" },
+      { campaignDir: dir, entityType: "location", name: "The Hall", description: "a vast hall", settings: UNMAPPED, imageQuality: "high" },
       capturingFetch(cap)
     );
     const g = cap.submitted.prompt;
     // The refiner checkpoint is present (proves the refiner template was selected).
     assert.equal(g["11"].inputs.ckpt_name, "sd_xl_refiner_1.0.safetensors");
     // ADR-0028 style clause is injected into BOTH the base and refiner encode nodes.
-    assert.equal(g["6"].inputs.text, "(Lego-style:1.3). a vast hall");
-    assert.equal(g["12"].inputs.text, "(Lego-style:1.3). a vast hall");
+    assert.equal(g["6"].inputs.text, "(stained glass:1.3). a vast hall");
+    assert.equal(g["12"].inputs.text, "(stained glass:1.3). a vast hall");
     // ADR-0028 anti-drift negatives are appended to BOTH negative encodes.
     assert.match(g["7"].inputs.text, /graphite/);
     assert.match(g["13"].inputs.text, /graphite/);
@@ -422,6 +426,37 @@ test("generateLocalImage: a noRefiner LoRA style at quality=high renders base hi
     assert.deepEqual(g["3"].inputs.model, ["20", 0]);
     // The per-campaign seed still lands on the base KSampler's `seed` key.
     assert.equal(g["3"].inputs.seed, deriveCampaignSeed(dir, "The Hall"));
+  });
+});
+
+test("generateLocalImage: the 'Lego-style' preset value resolves its LoRA and prepends the trigger (ADR-0032 Slice 2)", async () => {
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
+    const lego = { model: "claude-sonnet-5", provider: "claude", artStyle: "Lego-style" } as unknown as CampaignSettings;
+    await generateLocalImage(
+      { campaignDir: dir, entityType: "npc", name: "Barrow", description: "a weathered dwarf", settings: lego },
+      capturingFetchLoras(cap, { loraNames: ["Lego_XL_v2.1.safetensors"] })
+    );
+    const g = cap.submitted.prompt;
+    assert.equal(g["20"].inputs.lora_name, "Lego_XL_v2.1.safetensors");
+    assert.equal(g["20"].inputs.strength_model, 0.8);
+    // "LEGO MiniFig" isn't in "Lego-style. a weathered dwarf", so it's prepended.
+    assert.match(g["6"].inputs.text, /^LEGO MiniFig\. Lego-style\. a weathered dwarf/);
+  });
+});
+
+test("generateLocalImage: comic book appends its per-style extraNegatives to the negative encode (ADR-0032 Slice 2)", async () => {
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
+    const comic = { model: "claude-sonnet-5", provider: "claude", artStyle: "comic book" } as unknown as CampaignSettings;
+    await generateLocalImage(
+      { campaignDir: dir, entityType: "npc", name: "Vex", description: "a masked vigilante", settings: comic },
+      capturingFetchLoras(cap, { loraNames: ["EldritchComicsXL1.2.safetensors"] })
+    );
+    const g = cap.submitted.prompt;
+    assert.equal(g["20"].inputs.lora_name, "EldritchComicsXL1.2.safetensors");
+    // Per-style negatives land on the base negative encode (npc → no scene drift negatives).
+    assert.match(g["7"].inputs.text, /book, magazine/);
   });
 });
 

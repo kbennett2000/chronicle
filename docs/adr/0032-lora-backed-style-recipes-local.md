@@ -36,10 +36,11 @@ follow-up slice adds more recipes and the preset-button UI.
 
 ```ts
 interface StyleLora {
-  loraFile: string;    // filename in ComfyUI's models/loras/, .safetensors
-  trigger: string;     // token ensured present in the positive prompt
-  strength: number;    // applied to both strength_model and strength_clip
-  noRefiner?: boolean; // skip the base→refiner pass under quality=high
+  loraFile: string;         // filename in ComfyUI's models/loras/, .safetensors
+  trigger: string;          // token ensured present in the positive prompt
+  strength: number;         // applied to both strength_model and strength_clip
+  noRefiner?: boolean;      // skip the base→refiner pass under quality=high
+  extraNegatives?: string;  // Slice 2: per-style extra negative-prompt terms
 }
 ```
 
@@ -56,6 +57,57 @@ Both are base **SDXL 1.0** `.safetensors`, verified before wiring, and live in
 `~/comfyui/models/loras/` as **host assets** — not committed, exactly like the
 refiner checkpoint in ADR-0029 (real assets are out of git, ADR-0005). The ADR is
 their provenance record.
+
+### Amendment — Slice 2 (#138): full preset roster + per-style negatives + new presets
+Slice 2 extends the recipe map to the rest of the shipping presets and adds six new
+selectable presets, reusing the identical mechanism. Two small additions:
+
+- **`extraNegatives?` on `StyleLora`** — optional per-style negative-prompt terms,
+  appended to the negative CLIP nodes (`"7"`/`"13"`) via the same `appendNodeText` path
+  the ADR-0028 anti-drift negatives already use, but only when that style's recipe is
+  active. Used by `comic book` (`book, magazine`) to suppress the source LoRA's tendency
+  to draw comic-book *covers* with cover text. This is the only backend change; the
+  runtime injection, trigger, `/object_info` gate, and `noRefiner` handling are unchanged.
+- **New presets need no server change.** `settings.artStyle` is free-form (typeof-checked
+  only, no allow-list), so a new preset is purely a `web/…/LookControls.tsx` `ART_PRESETS`
+  addition; the free-text escape hatch is preserved. A `PRESET_LABELS` map provides
+  display-only names (e.g. stored `3d` shown as "3D / Pixar").
+
+**Every LoRA style is `noRefiner: true`, on purpose** (kept as an invariant-tested rule,
+not a temporary limit). The SDXL refiner's sole job is fine *photoreal* detail; every
+LoRA style we ship is a deliberately non-photoreal look (pixel art, oil, comic, lego,
+anime, sketch, watercolour, storybook, pixar/3d, cyberpunk, ukiyo-e, claymation), which
+the refiner would fight rather than improve. So at `quality=high` a LoRA style renders as
+a base high-steps pass with the LoRA — the ADR-0028 style clause/negatives and per-campaign
+seed still apply. Refiner-chain LoRA injection (a 2nd `LoraLoader` off node 11) remains a
+**future item**, worth adding only if a photoreal LoRA style is ever introduced.
+
+Full Slice-2 roster (all base SDXL 1.0, all `noRefiner: true`; final strengths may be
+lowered from these starting points during grounding-coexistence tuning):
+
+Sources: gating on CivitAI is per-creator, so where the brief's specific model was
+login-gated, an equivalent **ungated** base-SDXL LoRA (different creator, or a Hugging Face
+mirror) was used and verified (safetensors header, 2048-dim SDXL cross-attention, tens–hundreds
+of MB). Final roster as installed:
+
+| artStyle | loraFile (host) | trigger | strength | source |
+|---|---|---|---|---|
+| `comic book` | `EldritchComicsXL1.2.safetensors` | `comic book` | 0.9 | Eldritch Comics XL (EldritchAdam), CivitAI 305491; `extraNegatives: "book, magazine"` |
+| `lego-style` | `Lego_XL_v2.1.safetensors` | `LEGO MiniFig` | 0.8 | LeLo LEGO XL v2.1 (lordjia), CivitAI 318915; key normalizes from preset `Lego-style` |
+| `pencil sketch` | `sketch_style.safetensors` | `sketch` | 1.0 | Caith's Sketch XL, CivitAI 254554 |
+| `watercolour` | `watercolor-orie-xl.safetensors` | `watercolor style` | 1.0 | Watercolor (orie) SDXL, CivitAI 332971 |
+| `anime` | `animelora-sdxl.safetensors` | `anime` | 0.9 | Anime LoRA SDXL, HF `Muapi/animelora-sdxl` |
+| `storybook` | `StoryBookRedmond-KidsRedmAF.safetensors` | `KidsRedmAF` | 1.0 | StorybookRedmond (artificialguybr), CivitAI 145304 |
+| `3d` | `PixarXL.safetensors` | `pixar style` | 1.0 | Pixar Style SDXL, CivitAI 211735; shown "3D / Pixar" |
+| `cyberpunk` | `cyberpunk_xl_v1.safetensors` | `cyberpunk` | 0.8 | Cyberpunk Sci-Fi XL, CivitAI 149348 |
+| `ukiyo-e` | `Ukiyo-e-Art-XL.safetensors` | `Ukiyo-e Art` | 0.8 | Ukiyo-e Art SDXL, CivitAI 154278 |
+| `claymation` | `CLAYMATE-v2-sdxl.safetensors` | `claymation` | 1.0 | CLAYMATE v2 SDXL, HF `Muapi/claymate-claymation-style-for-sdxl` |
+| `ghibli` | — | — | — | new preset; no reliable ungated **SDXL** Ghibli LoRA (candidate CivitAI 128832 is SD 1.5) → **prompt-only** |
+
+`noir` stays prompt-only (no reliable base-SDXL LoRA) — no recipe. `ghibli` ships as a
+prompt-only preset. Any style whose file couldn't be obtained from an ungated SDXL source is
+left prompt-only and flagged rather than blocking the slice. Final strengths above may have been
+lowered from starting points during grounding-coexistence tuning; the PR/report records changes.
 
 ### Runtime graph injection, not a baked template node
 When (and only when) a recipe matches, the backend inserts a `LoraLoader` node into
