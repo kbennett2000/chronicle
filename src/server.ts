@@ -1092,6 +1092,10 @@ const ROUTES: Array<{
           sessionId: result.sessionId ?? null,
           model: result.model,
           isError: result.isError,
+          // #132: surface the caption so a same-session regenerate can pre-fill
+          // it (undefined when the DM omitted it — the client falls back to
+          // blank, and the transcript carries it after any later backfill).
+          sceneCaption,
         });
 
         // ADR-0030 (Issue #130): the DM often omits the [SCENE:] line in live
@@ -1140,6 +1144,7 @@ const ROUTES: Array<{
           model: active.model,
           isError: false,
           alreadyStarted: true,
+          sceneCaption: existing[0].sceneCaption, // #132: prefill on re-entry
         });
         return;
       }
@@ -1195,6 +1200,7 @@ const ROUTES: Array<{
           sessionId: result.sessionId ?? null,
           model: result.model,
           isError: result.isError,
+          sceneCaption, // #132: prefill the opening's regenerate box
         });
 
         // ADR-0030 (Issue #130): backfill a missing opening caption via one
@@ -1316,6 +1322,7 @@ const ROUTES: Array<{
           isError: result.isError,
           turnIndex,
           discardedCount,
+          sceneCaption, // #132: prefill the re-run turn's regenerate box
         });
 
         // ADR-0030 (Issue #130): backfill a missing caption on the re-run via

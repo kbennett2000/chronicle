@@ -76,6 +76,11 @@ export interface TurnTranscriptRecord {
   /** Issue #118: an "Animate" action records the moment's clip relative path
    * here; absent on turns never animated. */
   video?: string;
+  /** ADR-0030 (#128/#130): the DM-emitted scene caption that drives this
+   * moment's image. Read-only on the client — surfaced (#132) so the
+   * regenerate box can pre-fill the description that made the current image.
+   * Absent on old, pre-caption turns. */
+  sceneCaption?: string;
 }
 
 export interface StateSnapshot {
@@ -353,6 +358,11 @@ export interface TurnResult {
   sessionId: string | null;
   model: string;
   isError: boolean;
+  /** ADR-0030 (#132): the turn's scene caption when the DM emitted it inline,
+   * so a same-session regenerate can pre-fill it without a reload. Absent when
+   * the DM omitted it (a later free retry may still backfill it on disk, which
+   * the transcript hydration then picks up). */
+  sceneCaption?: string;
 }
 
 /** No sessionId is sent here, and none is required — the active Agent SDK
@@ -418,6 +428,8 @@ export interface OpeningResult {
   model: string;
   isError: boolean;
   alreadyStarted?: boolean;
+  /** ADR-0030 (#132): the opening scene's caption, when emitted inline. */
+  sceneCaption?: string;
 }
 
 export async function generateOpening(connection: Connection, campaignId: string): Promise<OpeningResult> {
