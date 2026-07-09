@@ -255,3 +255,47 @@ export function stripMetaChatter(text: string, opts: { autoRoll?: boolean } = {}
   out = truncateAfterHandback(out);
   return tidyWhitespace(out);
 }
+
+// ADR-0030: the DM ends each turn with one machine-readable `[SCENE: ...]` line
+// — a short visual caption of the moment, used only to illustrate/animate it.
+// It is not player-facing narration, so we pull it off the turn text and strip
+// every `[SCENE:...]` token from the prose the player reads. `stripMetaChatter`
+// runs earlier (inside the backend) and matches none of these markers, so the
+// caption survives to here intact.
+const SCENE_CAPTION_RE = /\[SCENE:\s*([^\]]*?)\s*\]/gi;
+
+/** Split a turn's raw text into the player-facing narration and the DM-emitted
+ * scene caption. If no `[SCENE: ...]` line is present the text is returned
+ * unchanged with no caption. Never throws — safe on any string, including the
+ * raw (un-stripped) text of an error turn. */
+export function extractSceneCaption(text: string): { narration: string; sceneCaption?: string } {
+  if (!text) return { narration: text };
+  const matches = [...text.matchAll(SCENE_CAPTION_RE)];
+  if (matches.length === 0) return { narration: text };
+  // Last non-empty caption wins (the DM is told to end with exactly one).
+  let sceneCaption: string | undefined;
+  for (const m of matches) {
+    const inner = m[1]?.trim();
+    if (inner) sceneCaption = inner;
+  }
+  // Strip every marker (even empty ones) so nothing leaks to the player.
+  const narration = text
+    .replace(SCENE_CAPTION_RE, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return sceneCaption ? { narration, sceneCaption } : { narration };
+}
+
+/** ADR-0030: pick the description for a moment image/video. Precedence: an
+ * explicit user override (the refine flow, e.g. "the same scene at night") →
+ * the turn's cached scene caption → the raw narration fallback. Returns the
+ * pre-cap string; callers keep the downstream 500-char clamp + default. */
+export function resolveMomentDescription(
+  override: string,
+  record: { narration: string; sceneCaption?: string }
+): string {
+  if (override) return override;
+  if (record.sceneCaption && record.sceneCaption.trim()) return record.sceneCaption;
+  return record.narration;
+}
