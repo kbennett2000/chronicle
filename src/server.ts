@@ -62,6 +62,7 @@ import {
   type ModelId,
 } from "./campaign-store.js";
 import { generateImage } from "./image-generator.js";
+import { IMAGE_PROVIDERS, isValidImageProvider, type ImageProvider } from "./image-backends/types.js";
 import { generateVideo } from "./video-generator.js";
 import { parseVideoBlock, resolveVideoConfig, type UserVideo } from "./video-store.js";
 import {
@@ -287,6 +288,14 @@ function parseDefaultSettings(
       if (typeof body[key] !== "boolean") return { error: `${key} must be a boolean` };
       out[key] = body[key];
     }
+  }
+  // ADR-0027: which image engine this account defaults to (grok | local),
+  // live-resolved (never copy-on-create), same as it flows on a campaign.
+  if (body.imageProvider !== undefined) {
+    if (!isValidImageProvider(body.imageProvider)) {
+      return { error: `imageProvider must be one of ${IMAGE_PROVIDERS.join(", ")}` };
+    }
+    out.imageProvider = body.imageProvider;
   }
   // ADR-0020: music is stored under a `music` key. The Navidrome credentials are
   // deliberately NOT accepted here — they stay server-side in .env; a user may
@@ -1239,6 +1248,7 @@ const ROUTES: Array<{
         generateVideos?: boolean;
         music?: UserMusic | null;
         video?: UserVideo | null;
+        imageProvider?: ImageProvider | null;
       } = {};
 
       if (body.artStyle !== undefined) {
@@ -1313,6 +1323,18 @@ const ROUTES: Array<{
           return;
         }
         updates.generateVideos = body.generateVideos;
+      }
+      // ADR-0027: per-game image engine override. `null` resets to the account
+      // default (freely switchable mid-campaign — no session reset like the DM
+      // engine's `provider`).
+      if (body.imageProvider === null) {
+        updates.imageProvider = null;
+      } else if (body.imageProvider !== undefined) {
+        if (!isValidImageProvider(body.imageProvider)) {
+          sendJson(res, 400, { error: `imageProvider must be one of ${IMAGE_PROVIDERS.join(", ")}` });
+          return;
+        }
+        updates.imageProvider = body.imageProvider;
       }
       // #109: an optional per-game music override (same shape/validation as the
       // user default). Empty subfields clear that field back to the user default;

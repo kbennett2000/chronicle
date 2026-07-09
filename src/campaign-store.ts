@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseMusicBlock, type UserMusic } from "./music-store.js";
 import { parseVideoBlock, type UserVideo } from "./video-store.js";
+import { isValidImageProvider, type ImageProvider } from "./image-backends/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const CAMPAIGNS_ROOT = path.resolve(__dirname, "../campaigns");
@@ -55,6 +56,20 @@ export function resolveCampaignDir(userId: string, campaignId: string): string {
     throw new CampaignNotFoundError(`campaign not found: ${campaignId}`);
   }
   return dir;
+}
+
+/** ADR-0019/ADR-0027: campaigns nest at campaigns/<userId>/<campaignId>, so the
+ * owning user id is the parent dir's name. Used at the image-generation seam,
+ * which sits below the route (and in a separate stdio subprocess) where only
+ * `campaignDir` is in scope, to recover the user and read their provider default.
+ * Returns undefined when campaignDir isn't a direct child of a user dir under
+ * CAMPAIGNS_ROOT (e.g. a stray temp dir), so callers fall back to env/code
+ * defaults rather than a bogus user. */
+export function campaignDirUserId(campaignDir: string): string | undefined {
+  const parent = path.dirname(path.resolve(campaignDir)); // campaigns/<userId>
+  if (path.dirname(parent) !== CAMPAIGNS_ROOT) return undefined;
+  const id = path.basename(parent);
+  return USER_ID_PATTERN.test(id) ? id : undefined;
 }
 
 /** Issue #50: permanently removes a campaign's directory. resolveCampaignDir
@@ -463,6 +478,13 @@ export interface CampaignSettings {
    * depends on Grok Build/SuperGrok access being configured on the host —
    * opt-in, never assumed. */
   generateImages?: boolean;
+  /** ADR-0027: which engine draws this game's images — "grok" (the Grok Build
+   * CLI, default) or "local" (self-hosted ComfyUI). Absent means the game tracks
+   * the user's account default (which falls back to `.env` DEFAULT_IMAGE_PROVIDER,
+   * then "grok"), resolved live via resolveImageProvider. Unlike `provider`
+   * (the DM engine), this is freely switchable mid-campaign — there's no session
+   * state to reset; it only changes who draws the NEXT image. */
+  imageProvider?: ImageProvider;
   /** Issue #44: when on (the default — treat absent as ON), the engine rolls
    * dice itself via the roll_dice tool and narrates the result. When
    * explicitly false, it reverts to asking the player to supply the value. */
@@ -519,6 +541,11 @@ export function readCampaignSettings(campaignDir: string): CampaignSettings {
   if (typeof raw.generateImages === "boolean") {
     settings.generateImages = raw.generateImages;
   }
+  // ADR-0027: only attach a valid provider; a bad/absent value falls through to
+  // the user default → .env → "grok" at resolve time.
+  if (isValidImageProvider(raw.imageProvider)) {
+    settings.imageProvider = raw.imageProvider;
+  }
   if (typeof raw.autoRollDice === "boolean") {
     settings.autoRollDice = raw.autoRollDice;
   }
@@ -555,17 +582,23 @@ export function persistCampaignSettings(
   // #109: `music: null` is an explicit "reset to account default" — it drops the
   // whole per-game override (the only way to clear a stored boolean `enabled`,
   // which can't be cleared via the empty-string path below).
-  updates: Partial<Omit<CampaignSettings, "model" | "provider" | "music" | "video">> & {
+  updates: Partial<Omit<CampaignSettings, "model" | "provider" | "music" | "video" | "imageProvider">> & {
     music?: UserMusic | null;
     // #118: `video: null` is an explicit "reset to account default" — it drops
     // the whole per-game params override (mirrors `music`).
     video?: UserVideo | null;
+    // ADR-0027: `imageProvider: null` resets the game to the account default (the
+    // only way to un-pin a stored provider — a flat enum has no empty-string path).
+    imageProvider?: ImageProvider | null;
   }
 ): CampaignSettings {
   const raw = readRawSettings(campaignDir);
   const merged: Record<string, unknown> = { ...raw, ...updates };
   if (merged.artStyle === "") delete merged.artStyle;
   if (merged.worldSetting === "") delete merged.worldSetting;
+  // ADR-0027: `imageProvider: null` drops the per-game override so the game
+  // tracks the account default again; a valid value pins it.
+  if (updates.imageProvider === null) delete merged.imageProvider;
   // #109: music is a nested object — one-level-deep merge (mirrors the #95 fix in
   // writeUserSettings) so patching one field (e.g. just the playlist) doesn't
   // wipe the siblings. Empty-string subfields clear that override back to absent

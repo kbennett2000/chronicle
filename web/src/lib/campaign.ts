@@ -124,6 +124,10 @@ export interface CampaignSettings {
   contentIntensity?: "standard" | "low";
   responseLength?: ResponseLength;
   generateImages?: boolean;
+  /** ADR-0027: which engine draws this game's images ("grok" | "local"). Absent
+   * === tracks the account default (→ `.env` → "grok"). Unlike `provider` (the DM
+   * engine), it is freely switchable mid-game — no session reset. */
+  imageProvider?: "grok" | "local";
   /** Issue #44: absent === on. When explicitly false, the player supplies
    * their own dice values instead of the engine rolling. */
   autoRollDice?: boolean;

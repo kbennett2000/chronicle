@@ -1,5 +1,5 @@
 import type { CampaignSettings, CampaignSettingsPatch } from "../lib/campaign";
-import { ToggleRow, ArtStylePicker } from "./LookControls";
+import { ToggleRow, ArtStylePicker, ImageProviderPicker } from "./LookControls";
 
 // Shared "THE LOOK" controls, lifted out of the Settings screen (issue #114) so
 // the main Settings screen (editing account defaults) and the in-game settings
@@ -8,7 +8,7 @@ import { ToggleRow, ArtStylePicker } from "./LookControls";
 // immediately — the host owns the endpoint (/me/settings vs /campaigns/:id/settings).
 
 interface LookSettingsEditorProps {
-  value: Pick<CampaignSettings, "generateImages" | "autoIllustrateTurns" | "artStyle">;
+  value: Pick<CampaignSettings, "generateImages" | "autoIllustrateTurns" | "artStyle" | "imageProvider">;
   onPatch: (patch: CampaignSettingsPatch) => void;
 }
 
@@ -24,7 +24,7 @@ export function LookSettingsEditor({ value, onPatch }: LookSettingsEditorProps) 
       />
 
       {/* Issue #56: auto-illustrate each turn — only meaningful (and only shown)
-          when scene art is on, since it needs Grok Build too. */}
+          when scene art is on, since it needs an image engine too. */}
       {value.generateImages && (
         <ToggleRow
           testId="auto-illustrate-toggle"
@@ -33,6 +33,14 @@ export function LookSettingsEditor({ value, onPatch }: LookSettingsEditorProps) 
           checked={!!value.autoIllustrateTurns}
           onChange={(next) => onPatch({ autoIllustrateTurns: next })}
           containerStyle={{ marginTop: 8 }}
+        />
+      )}
+
+      {/* ADR-0027: which engine draws images — only shown when scene art is on. */}
+      {value.generateImages && (
+        <ImageProviderPicker
+          value={value.imageProvider ?? "grok"}
+          onChange={(provider) => onPatch({ imageProvider: provider })}
         />
       )}
 
