@@ -50,21 +50,29 @@ export function LoadingSlideshow({ connection, campaignId }: { connection: Conne
         return; // no slideshow if we can't list — loader shows on its own
       }
       const picked = shuffle(refs).slice(0, MAX_IMAGES);
-      for (const ref of picked) {
-        if (cancelled) return;
-        try {
-          const blob = await fetchImageBlob(
-            connection,
-            `/campaigns/${encodeURIComponent(ref.campaignId)}/images/${encodeURIComponent(ref.filename)}`
-          );
-          if (cancelled) return;
-          const url = URL.createObjectURL(blob);
-          created.push(url);
-          setUrls((prev) => [...prev, url]);
-        } catch {
-          // skip an image that won't load
-        }
-      }
+      // Load the picked images CONCURRENTLY, not one-at-a-time. The old
+      // sequential `await` loop meant the slideshow couldn't appear until the
+      // first image had fully downloaded (and couldn't cross-fade until the
+      // second) — long enough that the opening scene could arrive first and the
+      // loader would vanish before any art ever showed. Firing all fetches at
+      // once makes the first frames appear near-instantly; each blob is appended
+      // the moment it resolves, and a failed fetch is dropped, never shown.
+      await Promise.all(
+        picked.map(async (ref) => {
+          try {
+            const blob = await fetchImageBlob(
+              connection,
+              `/campaigns/${encodeURIComponent(ref.campaignId)}/images/${encodeURIComponent(ref.filename)}`
+            );
+            if (cancelled) return;
+            const url = URL.createObjectURL(blob);
+            created.push(url);
+            setUrls((prev) => [...prev, url]);
+          } catch {
+            // skip an image that won't load
+          }
+        })
+      );
     })();
     return () => {
       cancelled = true;
@@ -101,7 +109,10 @@ export function LoadingSlideshow({ connection, campaignId }: { connection: Conne
     width: "100%",
     height: "100%",
     objectFit: "cover",
-    opacity: active === layerIndex ? 0.32 : 0,
+    // Issue #140: the active image was barely perceptible (0.32) beneath the
+    // heavy scrim below, so the slideshow read as "not there". Raised so the
+    // artwork is clearly visible while the centred ember + text stay legible.
+    opacity: active === layerIndex ? 0.5 : 0,
     transition: `opacity ${FADE_MS}ms ease-in-out`,
     animation: `slideshowDrift ${DISPLAY_MS + FADE_MS}ms ease-out both`,
     // Restart the slow drift each time this layer becomes active.
@@ -128,8 +139,11 @@ export function LoadingSlideshow({ connection, campaignId }: { connection: Conne
         style={{
           position: "absolute",
           inset: 0,
+          // Issue #140: lightened from 0.55/0.72/0.88 so the art shows through
+          // instead of being smothered, while keeping the centre dark enough
+          // that the light-cream loader text stays readable.
           background:
-            "radial-gradient(120% 100% at 50% 45%, rgba(20,14,10,0.55) 0%, rgba(20,14,10,0.72) 55%, rgba(20,14,10,0.88) 100%)",
+            "radial-gradient(120% 100% at 50% 45%, rgba(20,14,10,0.40) 0%, rgba(20,14,10,0.52) 55%, rgba(20,14,10,0.70) 100%)",
         }}
       />
     </div>
