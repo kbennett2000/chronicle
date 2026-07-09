@@ -241,6 +241,9 @@ export async function generateLocalImage(
     const seed = deriveCampaignSeed(campaignDir, name);
     for (const id of ["6", "12"]) setNodeText(graph, id, positivePrompt);
     if (extraNeg) for (const id of ["7", "13"]) appendNodeText(graph, id, extraNeg);
+    // ADR-0032 (Slice 2): a recipe's per-style extra negatives, appended alongside the
+    // ADR-0028 anti-drift set. Only when the recipe survived availability (still set).
+    if (recipe?.extraNegatives) for (const id of ["7", "13"]) appendNodeText(graph, id, recipe.extraNegatives);
     for (const id of ["3", "14"]) setNodeSeed(graph, id, seed);
     // Base-workflow step override (fast/standard); the refiner template bakes its own.
     if (tier.steps != null && graph["3"]?.inputs && "steps" in graph["3"].inputs) {

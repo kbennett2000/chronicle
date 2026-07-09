@@ -6,7 +6,10 @@ import { useEffect, useState, type CSSProperties } from "react";
 // each change immediately (POST /settings), New Chronicle collects them into the
 // create payload.
 
-/** Art-style presets offered as chips. Single source of truth for both screens. */
+/** Art-style presets offered as chips. Single source of truth for both screens.
+ * The stored `settings.artStyle` value IS the chip string — several of these map to a
+ * LoRA on the local backend (src/image-backends/style-loras.ts, keyed on the normalized
+ * lower-cased value). Adding a preset needs no server change (artStyle is free-form). */
 export const ART_PRESETS = [
   "comic book",
   "Lego-style",
@@ -16,7 +19,21 @@ export const ART_PRESETS = [
   "pixel art",
   "noir",
   "oil painting",
+  // Slice 2 (#138): new presets
+  "storybook",
+  "3d",
+  "ghibli",
+  "cyberpunk",
+  "ukiyo-e",
+  "claymation",
 ];
+
+/** Display-only label overrides for chips whose stored value isn't the nicest label.
+ * The stored value (and the LoRA-recipe key) stays the map key; only the button text
+ * differs. */
+export const PRESET_LABELS: Record<string, string> = {
+  "3d": "3D / Pixar",
+};
 
 interface ToggleRowProps {
   title: string;
@@ -234,7 +251,7 @@ export function ArtStylePicker({ artStyle, onChange }: ArtStylePickerProps) {
                 color: selected ? "#fbeede" : "var(--ink-dim)",
               }}
             >
-              {preset}
+              {PRESET_LABELS[preset] ?? preset}
             </button>
           );
         })}
@@ -245,7 +262,7 @@ export function ArtStylePicker({ artStyle, onChange }: ArtStylePickerProps) {
         onBlur={() => {
           if (customArtStyle.trim()) onChange(customArtStyle.trim());
         }}
-        placeholder="or describe your own — stained glass, ukiyo-e, storybook…"
+        placeholder="or describe your own — stained glass, art deco, vaporwave…"
         data-testid="art-custom-input"
         style={{
           marginTop: 8,

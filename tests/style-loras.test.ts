@@ -16,7 +16,7 @@ test("lookupStyleLora: normalizes the key (trim + case-insensitive) to the same 
 
 test("lookupStyleLora: unmapped / free-text / empty styles return undefined (prompt-only)", () => {
   assert.equal(lookupStyleLora("ink wash"), undefined);
-  assert.equal(lookupStyleLora("Lego-style"), undefined);
+  assert.equal(lookupStyleLora("stained glass"), undefined);
   assert.equal(lookupStyleLora("a style nobody mapped"), undefined);
   assert.equal(lookupStyleLora(""), undefined);
   assert.equal(lookupStyleLora(undefined), undefined);
@@ -32,6 +32,40 @@ test("STYLE_LORAS: the two proof recipes have the expected shape", () => {
   assert.equal(oil.loraFile, "ClassipeintXL2.1.safetensors");
   assert.equal(oil.trigger, "oil painting");
   assert.equal(oil.strength, 0.8);
+});
+
+test("lookupStyleLora: every Slice-2 style resolves (case-insensitive) to its recipe file", () => {
+  const cases: [string, string][] = [
+    ["comic book", "EldritchComicsXL1.2.safetensors"],
+    ["Comic Book", "EldritchComicsXL1.2.safetensors"],
+    ["Lego-style", "Lego_XL_v2.1.safetensors"], // the picker stores "Lego-style"
+    ["pencil sketch", "sketch_style.safetensors"],
+    ["watercolour", "watercolor-orie-xl.safetensors"],
+    ["anime", "animelora-sdxl.safetensors"],
+    ["storybook", "StoryBookRedmond-KidsRedmAF.safetensors"],
+    ["3d", "PixarXL.safetensors"],
+    ["3D", "PixarXL.safetensors"],
+    ["cyberpunk", "cyberpunk_xl_v1.safetensors"],
+    ["ukiyo-e", "Ukiyo-e-Art-XL.safetensors"],
+    ["Ukiyo-E", "Ukiyo-e-Art-XL.safetensors"],
+    ["claymation", "CLAYMATE-v2-sdxl.safetensors"],
+  ];
+  for (const [style, file] of cases) {
+    const r = lookupStyleLora(style);
+    assert.ok(r, `"${style}" should resolve to a recipe`);
+    assert.equal(r.loraFile, file, `"${style}" → wrong file`);
+  }
+});
+
+test("lookupStyleLora: noir and ghibli stay prompt-only (no recipe)", () => {
+  assert.equal(lookupStyleLora("noir"), undefined);
+  assert.equal(lookupStyleLora("ghibli"), undefined);
+});
+
+test("STYLE_LORAS: comic book carries per-style extraNegatives; others don't set them", () => {
+  assert.equal(STYLE_LORAS["comic book"].extraNegatives, "book, magazine");
+  assert.equal(STYLE_LORAS["pixel art"].extraNegatives, undefined);
+  assert.equal(STYLE_LORAS["lego-style"].extraNegatives, undefined);
 });
 
 test("STYLE_LORAS invariant: every recipe is noRefiner this slice (only the base chain is LoRA-wired)", () => {

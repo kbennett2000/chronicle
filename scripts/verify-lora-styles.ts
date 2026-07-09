@@ -1,65 +1,63 @@
 /** Ad-hoc live verification for ADR-0032 (LoRA-backed art styles, local backend).
- * Drives generateLocalImage directly against the real ComfyUI service for the same
- * scene at several styles, so the operator can eyeball whether the LoRA visibly
- * applies. NOT a unit test — needs a GPU + ComfyUI + the two LoRA files. Deleted with
- * the scratch campaign after the slice. Usage: npx tsx scripts/verify-lora-styles.ts <campaignDir>
+ * Drives generateLocalImage directly against the real ComfyUI service across the whole
+ * style roster, so the operator can eyeball whether each LoRA visibly applies and whether
+ * a grounded character survives the heavy styles. NOT a unit test — needs a GPU + ComfyUI +
+ * the LoRA files. Usage: npx tsx scripts/verify-lora-styles.ts <campaignDir> [styleFilter]
  */
 import "dotenv/config";
 import path from "node:path";
 import fs from "node:fs";
 import { generateLocalImage } from "../src/image-backends/local.js";
 import type { CampaignSettings } from "../src/campaign-store.js";
-import type { ImageQuality } from "../src/image-backends/types.js";
 
 const campaignDir = path.resolve(process.argv[2] ?? "");
+const filter = process.argv[3]; // optional substring to render a subset
 if (!campaignDir || !fs.existsSync(campaignDir)) {
-  console.error("usage: npx tsx scripts/verify-lora-styles.ts <campaignDir>");
+  console.error("usage: npx tsx scripts/verify-lora-styles.ts <campaignDir> [styleFilter]");
   process.exit(1);
 }
 
 const SCENE = "a lone knight stands on a windswept cliff at dawn, a ruined tower behind";
-// A "grounded" NPC description — the canonical appearance grounding (ADR-0031) would
-// prepend — to check the oil LoRA at 0.8 doesn't steamroll a described character.
+// A "grounded" NPC description (as ADR-0031 grounding would prepend) to check heavy LoRAs
+// at their strengths don't steamroll canonical features.
 const GROUNDED_NPC =
   "a stern half-elf woman with a long silver braid, a jagged scar across her left cheek, and worn green leather armor, standing in a torchlit hall";
+
+// Every mapped style + the two prompt-only controls (noir preset, free-text).
+const SCENE_STYLES = [
+  "comic book", "Lego-style", "pencil sketch", "watercolour", "anime", "pixel art", "oil painting",
+  "storybook", "3d", "cyberpunk", "ukiyo-e", "claymation",
+  "ghibli",          // prompt-only preset (no SDXL LoRA)
+  "noir",            // prompt-only preset
+  "stained glass",   // free-text, unmapped
+];
+// Grounded-NPC coexistence check in the heaviest styles.
+const NPC_STYLES = ["Lego-style", "claymation", "oil painting", "3d"];
 
 function settings(artStyle: string): CampaignSettings {
   return { model: "claude-sonnet-5", provider: "claude", artStyle } as unknown as CampaignSettings;
 }
 
-interface Job {
-  label: string;
-  entityType: "scene" | "npc";
-  name: string;
-  description: string;
-  artStyle: string;
-  quality?: ImageQuality;
+const slug = (s: string) => s.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+
+async function run(label: string, entityType: "scene" | "npc", name: string, description: string, artStyle: string) {
+  process.stdout.write(`[${label}] style="${artStyle}" … `);
+  const t = Date.now();
+  const res = await generateLocalImage({ campaignDir, entityType, name, description, settings: settings(artStyle) });
+  const secs = ((Date.now() - t) / 1000).toFixed(1);
+  console.log(res.ok ? `OK ${res.relPath} (${secs}s)` : `FAIL ${res.error} (${secs}s)`);
 }
 
-const jobs: Job[] = [
-  { label: "pixel-art", entityType: "scene", name: "Cliff Pixel", description: SCENE, artStyle: "pixel art" },
-  { label: "oil-painting", entityType: "scene", name: "Cliff Oil", description: SCENE, artStyle: "oil painting" },
-  { label: "unmapped-watercolour", entityType: "scene", name: "Cliff Watercolour", description: SCENE, artStyle: "watercolour" },
-  { label: "grounded-npc-oil", entityType: "npc", name: "Marta Oil", description: GROUNDED_NPC, artStyle: "oil painting" },
-];
-
 async function main() {
-  for (const j of jobs) {
-    process.stdout.write(`\n[${j.label}] style="${j.artStyle}" entity=${j.entityType} … `);
-    const t = Date.now();
-    const res = await generateLocalImage({
-      campaignDir,
-      entityType: j.entityType,
-      name: j.name,
-      description: j.description,
-      settings: settings(j.artStyle),
-      imageQuality: j.quality,
-    });
-    const secs = ((Date.now() - t) / 1000).toFixed(1);
-    if (res.ok) console.log(`OK ${res.relPath} (${secs}s)`);
-    else console.log(`FAIL ${res.error} (${secs}s)`);
+  for (const s of SCENE_STYLES) {
+    if (filter && !s.includes(filter)) continue;
+    await run(`scene:${slug(s)}`, "scene", `Cliff ${slug(s)}`, SCENE, s);
   }
-  console.log(`\nImages saved under ${path.join(campaignDir, "images")}`);
+  for (const s of NPC_STYLES) {
+    if (filter && !s.includes(filter)) continue;
+    await run(`npc:${slug(s)}`, "npc", `Marta ${slug(s)}`, GROUNDED_NPC, s);
+  }
+  console.log(`\nImages under ${path.join(campaignDir, "images")}`);
 }
 
 main().catch((e) => {
