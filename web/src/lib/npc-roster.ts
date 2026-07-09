@@ -1,5 +1,11 @@
 import { parseMarkdownSections, parseBulletFields } from "./markdown";
-import { NPC_DESCRIPTION_FIELD, NPC_DISPOSITION_FIELD, NPC_KNOWS_FIELD, NPC_PORTRAIT_FIELD } from "./state-headings";
+import {
+  NPC_DESCRIPTION_FIELD,
+  NPC_DISPOSITION_FIELD,
+  NPC_KNOWS_FIELD,
+  NPC_PORTRAIT_FIELD,
+  NPC_PORTRAIT_VIDEO_FIELD,
+} from "./state-headings";
 
 export interface NpcEntry {
   name: string;
@@ -12,6 +18,9 @@ export interface NpcEntry {
    * May still carry the "images/" prefix from image-generator.ts's
    * relPath; lib/useAuthedImage.ts strips that down to a basename. */
   portraitImage?: string;
+  /** Issue #118: the "Portrait video ID" bullet's value (an on-demand clip), or
+   * undefined if never animated. Same normalization as portraitImage. */
+  portraitVideo?: string;
 }
 
 const REQUIRED_FIELDS = [NPC_DESCRIPTION_FIELD, NPC_DISPOSITION_FIELD, NPC_KNOWS_FIELD];
@@ -47,6 +56,7 @@ export function parseNpcRoster(markdown: string): NpcEntry[] {
         disposition: fields[NPC_DISPOSITION_FIELD] || undefined,
         knows: fields[NPC_KNOWS_FIELD] || undefined,
         portraitImage: normalizePortraitValue(fields[NPC_PORTRAIT_FIELD]),
+        portraitVideo: normalizePortraitValue(fields[NPC_PORTRAIT_VIDEO_FIELD]),
       };
     });
 }

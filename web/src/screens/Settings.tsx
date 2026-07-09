@@ -14,6 +14,7 @@ import { ToggleRow } from "../components/LookControls";
 import { EnginePicker } from "../components/EnginePicker";
 import { LookSettingsEditor } from "../components/LookSettingsEditor";
 import { WorldSettingsEditor } from "../components/WorldSettingsEditor";
+import { VideoSettingsEditor } from "../components/VideoSettingsEditor";
 import { PlaylistPicker } from "../components/PlaylistPicker";
 import { useIsDesktop } from "../lib/useIsDesktop";
 import {
@@ -22,6 +23,7 @@ import {
   type MusicConfig,
   type MusicSource,
 } from "../lib/music";
+import { getVideoConfig, type VideoConfig } from "../lib/video";
 
 interface SettingsProps {
   onBack: () => void;
@@ -96,6 +98,8 @@ export function Settings({
   const [engineSave, setEngineSave] = useState<SaveState>("idle");
   const [lookSave, setLookSave] = useState<SaveState>("idle");
   const [worldSave, setWorldSave] = useState<SaveState>("idle");
+  const [videoSave, setVideoSave] = useState<SaveState>("idle");
+  const [videoConfig, setVideoConfig] = useState<VideoConfig | null>(null);
   const [music, setMusic] = useState<MusicConfig | null>(null);
   const [navUrl, setNavUrl] = useState("");
 
@@ -107,6 +111,9 @@ export function Settings({
         setMusic(cfg);
         setNavUrl(cfg.navidrome.url);
       })
+      .catch(() => {});
+    getVideoConfig(connection)
+      .then((cfg) => !cancelled && setVideoConfig(cfg))
       .catch(() => {});
     // Fetch the engine catalog and the account defaults independently.
     getModels(connection)
@@ -155,6 +162,22 @@ export function Settings({
       setState("saved");
     } catch {
       setState("error");
+    }
+  }
+
+  /** #118: a video-params/toggle patch to account defaults. Persist, then
+   * refetch the defaults + effective config so the chips reflect the merged
+   * result (a shallow optimistic merge would drop sibling video fields). */
+  async function patchVideoDefaults(patch: CampaignSettingsPatch) {
+    setVideoSave("saving");
+    try {
+      await saveUserDefaults(connection, patch as Partial<CampaignSettings>);
+      const [next, cfg] = await Promise.all([getUserDefaults(connection), getVideoConfig(connection)]);
+      setDefaults((prev) => ({ ...prev, ...next }));
+      setVideoConfig(cfg);
+      setVideoSave("saved");
+    } catch {
+      setVideoSave("error");
     }
   }
 
@@ -265,6 +288,15 @@ export function Settings({
                 {worldSave === "saving" && "Saving…"}
                 {worldSave === "saved" && "Saved as your default."}
                 {worldSave === "error" && "Couldn't save — try again."}
+              </div>
+
+              {/* VIDEO CLIPS — account default (#118) */}
+              <div style={sectionHeadingStyle}>VIDEO CLIPS</div>
+              <VideoSettingsEditor value={defaults} effective={videoConfig ?? undefined} onPatch={patchVideoDefaults} />
+              <div data-testid="video-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 6 }}>
+                {videoSave === "saving" && "Saving…"}
+                {videoSave === "saved" && "Saved as your default."}
+                {videoSave === "error" && "Couldn't save — try again."}
               </div>
             </>
           )}

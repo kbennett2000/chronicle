@@ -9,6 +9,8 @@ export interface GalleryItem {
   type: GalleryEntityType;
   name: string;
   image?: string;
+  /** Issue #118: an on-demand "Animate" clip of this entity, if one exists. */
+  video?: string;
   /** A short visual description used to seed on-demand illustration
    * (ADR-0009). Best-effort — falls back to the name if none is recorded. */
   description?: string;
@@ -21,6 +23,8 @@ const TOP_BULLET_RE = /^-\s*\*\*([^*]+)\*\*\s*(?:[—-]\s*)?(.*)$/;
 // bullet like npc-roster.md's "Portrait asset ID". This tolerates a
 // leading bullet dash and/or bold markers around the word "Image".
 const IMAGE_LINE_RE = /^-?\s*\*{0,2}Image\*{0,2}:\s*(.+)$/i;
+// Issue #118: the "Video" analog of the location Image line (withLocationVideo).
+const VIDEO_LINE_RE = /^-?\s*\*{0,2}Video\*{0,2}:\s*(.+)$/i;
 
 function normalizeImageValue(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
@@ -36,9 +40,9 @@ function normalizeImageValue(raw: string | undefined): string | undefined {
  * location's name and (if ever generated) image path matter for the
  * gallery, so this doesn't carry the full continuation-line reassembly
  * quest-log.ts needs for its prose detail/progress fields. */
-function parseLocations(body: string): Array<{ name: string; image?: string; description?: string }> {
-  const entries: Array<{ name: string; image?: string; description?: string }> = [];
-  let current: { name: string; image?: string; description?: string } | null = null;
+function parseLocations(body: string): Array<{ name: string; image?: string; video?: string; description?: string }> {
+  const entries: Array<{ name: string; image?: string; video?: string; description?: string }> = [];
+  let current: { name: string; image?: string; video?: string; description?: string } | null = null;
 
   const flush = () => {
     if (current) entries.push(current);
@@ -63,7 +67,12 @@ function parseLocations(body: string): Array<{ name: string; image?: string; des
     if (!current) continue;
 
     const imageMatch = IMAGE_LINE_RE.exec(line);
-    if (imageMatch) current.image = normalizeImageValue(imageMatch[1]);
+    if (imageMatch) {
+      current.image = normalizeImageValue(imageMatch[1]);
+      continue;
+    }
+    const videoMatch = VIDEO_LINE_RE.exec(line);
+    if (videoMatch) current.video = normalizeImageValue(videoMatch[1]);
   }
   flush();
 
@@ -90,18 +99,31 @@ export function buildGallery(characterSheet: CharacterSheet, npcRoster: string, 
       type: "character",
       name: characterSheet.name,
       image: normalizeImageValue(characterSheet.portraitImage),
+      video: normalizeImageValue(characterSheet.portraitVideo),
       description: characterDescription,
     },
   ];
 
   for (const npc of parseNpcRoster(npcRoster)) {
-    items.push({ type: "npc", name: npc.name, image: npc.portraitImage, description: npc.description });
+    items.push({
+      type: "npc",
+      name: npc.name,
+      image: npc.portraitImage,
+      video: npc.portraitVideo,
+      description: npc.description,
+    });
   }
 
   const locations = findMarkdownSection(worldState, LOCATIONS_VISITED_HEADING);
   if (locations) {
     for (const location of parseLocations(locations.body)) {
-      items.push({ type: "location", name: location.name, image: location.image, description: location.description });
+      items.push({
+        type: "location",
+        name: location.name,
+        image: location.image,
+        video: location.video,
+        description: location.description,
+      });
     }
   }
 

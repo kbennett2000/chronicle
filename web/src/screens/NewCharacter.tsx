@@ -133,6 +133,8 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
   const [autoIllustrateTurns, setAutoIllustrateTurns] = useState(false);
   const [artStyle, setArtStyle] = useState("");
   const [autoRollDice, setAutoRollDice] = useState(true);
+  // Issue #118: opt-in video clips (copy-on-create like generateImages).
+  const [generateVideos, setGenerateVideos] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Issue #57/#64: pick the model at new-game time, pre-filled from the last
@@ -166,6 +168,7 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
         setModel(modelValid ? wantModel! : p?.default ?? modelsResult.default);
         setGenerateImages(defaults.generateImages ?? false);
         setAutoIllustrateTurns(defaults.autoIllustrateTurns ?? false);
+        setGenerateVideos(defaults.generateVideos ?? false);
         setArtStyle(defaults.artStyle ?? "");
         setAutoRollDice(defaults.autoRollDice ?? true);
         if (defaults.contentIntensity) setContentIntensity(defaults.contentIntensity);
@@ -319,6 +322,7 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
       generateImages,
       autoIllustrateTurns,
       autoRollDice,
+      generateVideos,
       contentIntensity,
       responseLength,
       toneWhimsy,
@@ -680,6 +684,16 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
           checked={autoRollDice}
           onChange={setAutoRollDice}
           containerStyle={{ marginTop: 12 }}
+        />
+        {/* Issue #118: opt-in video clips. Length/resolution/shape are tuned in
+            Settings; here it's just the on/off (copy-on-create like scene art). */}
+        <ToggleRow
+          testId="newchar-videos-toggle"
+          title="Enable video clips"
+          description="Off by default · needs Grok Build · adds an “Animate” button to stills"
+          checked={generateVideos}
+          onChange={setGenerateVideos}
+          containerStyle={{ marginTop: 8 }}
         />
 
         {/* Issue #48: describe the world at creation, not only later in Settings. */}
