@@ -205,6 +205,13 @@ interface ActiveSession {
   // parallel and race on the same state files, silently clobbering one
   // turn's edits. Set true for the duration of a turn, cleared in a finally.
   busy?: boolean;
+  // Issue #142: pending for the whole `busy` window of the current turn —
+  // including the after-response scene-caption backfill (ADR-0030). The
+  // auto-illustrate seam (`/illustrate` moment) awaits this so it reads the
+  // freshly-backfilled caption instead of racing it and falling back to
+  // narration. Undefined between turns. Created before the turn runs and
+  // resolved in the same finally that clears `busy`, so it can never stick.
+  settling?: Promise<void>;
 }
 
 // In-memory only: which campaign's Agent SDK session/log is "active" for
@@ -1030,6 +1037,10 @@ const ROUTES: Array<{
         return;
       }
       active.busy = true;
+      // Issue #142: signal that a turn (and its after-response caption backfill)
+      // is settling, so the auto-illustrate seam can wait it out.
+      let settle!: () => void;
+      active.settling = new Promise<void>((r) => { settle = r; });
 
       try {
         console.log(`[${campaignId}] turn on model ${active.model}`);
@@ -1118,6 +1129,10 @@ const ROUTES: Array<{
         // error, and on a thrown exception (which propagates to the top-level
         // catch → 500). The lock must never stick.
         active.busy = false;
+        // Issue #142: release the auto-illustrate seam — the turn and any
+        // caption backfill are done; the record now carries its final caption.
+        active.settling = undefined;
+        settle();
       }
     },
   },
@@ -1163,6 +1178,10 @@ const ROUTES: Array<{
         return;
       }
       active.busy = true;
+      // Issue #142: signal that a turn (and its after-response caption backfill)
+      // is settling, so the auto-illustrate seam can wait it out.
+      let settle!: () => void;
+      active.settling = new Promise<void>((r) => { settle = r; });
 
       try {
         console.log(`[${campaignId}] opening scene on model ${active.model}`);
@@ -1217,6 +1236,10 @@ const ROUTES: Array<{
         }
       } finally {
         active.busy = false;
+        // Issue #142: release the auto-illustrate seam — the turn and any
+        // caption backfill are done; the record now carries its final caption.
+        active.settling = undefined;
+        settle();
       }
     },
   },
@@ -1268,6 +1291,10 @@ const ROUTES: Array<{
         return;
       }
       active.busy = true;
+      // Issue #142: signal that a turn (and its after-response caption backfill)
+      // is settling, so the auto-illustrate seam can wait it out.
+      let settle!: () => void;
+      active.settling = new Promise<void>((r) => { settle = r; });
 
       try {
         const discardedCount = transcript.length - 1 - turnIndex;
@@ -1340,6 +1367,10 @@ const ROUTES: Array<{
         }
       } finally {
         active.busy = false;
+        // Issue #142: release the auto-illustrate seam — the turn and any
+        // caption backfill are done; the record now carries its final caption.
+        active.settling = undefined;
+        settle();
       }
     },
   },
@@ -1576,7 +1607,7 @@ const ROUTES: Array<{
           sendJson(res, 400, { error: "turnIndex must be a non-negative integer" });
           return;
         }
-        const record = readTurnTranscript(campaignDir, active.sessionLogPath).find(
+        let record = readTurnTranscript(campaignDir, active.sessionLogPath).find(
           (r) => r.turnIndex === body.turnIndex
         );
         if (!record) {
@@ -1591,6 +1622,20 @@ const ROUTES: Array<{
         // ADR-0031: ground KNOWN entities the DM flagged present ([PRESENT:]) in
         // their canonical appearance before the cap, so they render on-model.
         const override = typeof body.description === "string" && body.description.trim() ? body.description.trim() : "";
+        // Issue #142: when the DM omitted [SCENE:], the caption is produced by
+        // the after-response backfill (ADR-0030) — the same turn response that
+        // triggers this auto-illustrate. If that turn is still settling and the
+        // record has no caption yet, wait it out and re-read, so we draw from
+        // the freshly-backfilled caption instead of racing it and falling back
+        // to narration. No wait when an override is given, the caption already
+        // landed, or no turn is in flight.
+        if (!override && active.settling && !record.sceneCaption?.trim()) {
+          await active.settling;
+          record =
+            readTurnTranscript(campaignDir, active.sessionLogPath).find(
+              (r) => r.turnIndex === body.turnIndex
+            ) ?? record;
+        }
         const base = groundSceneDescription(campaignDir, resolveMomentDescription(override, record), record.presentEntities);
         const description = base.trim().slice(0, 500) || "a scene from the story";
         const sessionBase = path.basename(active.sessionLogPath).replace(/\.md$/, "");
@@ -1600,7 +1645,11 @@ const ROUTES: Array<{
         if (result.ok && result.relPath) {
           setTranscriptRecordImage(campaignDir, active.sessionLogPath, body.turnIndex, result.relPath);
         }
-        sendJson(res, 200, { ...result, turnIndex: body.turnIndex });
+        // Issue #142: surface the caption that made this image so the client can
+        // prefill the regenerate box on a same-session fresh turn whose original
+        // response was captionless (the caption arrived via the backfill above).
+        // Undefined when genuinely absent → the box stays blank, as before.
+        sendJson(res, 200, { ...result, turnIndex: body.turnIndex, sceneCaption: record.sceneCaption });
         return;
       }
 
