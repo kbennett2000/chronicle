@@ -48,6 +48,9 @@ interface DisplayTurn {
   image?: string;
   /** Issue #118: the clip a user animated for this moment, if any. */
   video?: string;
+  /** ADR-0030 (#132): the DM-emitted caption that made this moment's image,
+   * used to pre-fill the regenerate box. Absent on old, pre-caption turns. */
+  sceneCaption?: string;
 }
 
 const TABS = ["Self", "Folk", "Quest", "Views"] as const;
@@ -213,7 +216,10 @@ function TurnView({
   // Issue #66: regenerate affordance for an already-drawn moment — optionally
   // with a refined prompt. Collapsed by default so it doesn't clutter the log.
   const [regenOpen, setRegenOpen] = useState(false);
-  const [regenDraft, setRegenDraft] = useState("");
+  // #132: pre-fill the regenerate box with the caption that made the current
+  // image (the turn's stored sceneCaption) so the player tweaks it (e.g.
+  // "…at night") instead of retyping. Blank on old, pre-caption turns.
+  const [regenDraft, setRegenDraft] = useState(turn.sceneCaption ?? "");
   // Issue #68: inline edit of this turn's player message.
   const [editOpen, setEditOpen] = useState(false);
   const [editDraft, setEditDraft] = useState(turn.playerMessage);
@@ -367,7 +373,7 @@ function TurnView({
           {!regenOpen ? (
             <button
               data-testid="regenerate-moment"
-              onClick={() => setRegenOpen(true)}
+              onClick={() => { setRegenDraft(turn.sceneCaption ?? ""); setRegenOpen(true); }}
               disabled={drawing}
               style={{
                 cursor: drawing ? "default" : "pointer",
@@ -667,6 +673,7 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
               narration: record.narration,
               image: record.image,
               video: record.video,
+              sceneCaption: record.sceneCaption,
             }))
           );
         } else {
@@ -707,7 +714,7 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
           setOpeningError(result.narration || "The Dungeon Master couldn't set the scene.");
           return;
         }
-        setTurns([{ playerMessage: "", narration: result.narration }]);
+        setTurns([{ playerMessage: "", narration: result.narration, sceneCaption: result.sceneCaption }]);
         // Current Situation / gear the opening just established need to reach
         // the Self/Views panels, same as after a normal turn.
         getState(connection, campaignId).then(applyPanelState).catch(() => {});
@@ -753,7 +760,7 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
       const result = await sendTurn(connection, campaignId, message);
       setTurns((prev) => {
         const next = [...prev];
-        next[next.length - 1] = { playerMessage: message, narration: result.narration, isError: result.isError };
+        next[next.length - 1] = { playerMessage: message, narration: result.narration, isError: result.isError, sceneCaption: result.sceneCaption };
         return next;
       });
       // Whatever the DM just wrote (HP/inventory, a new NPC, quest
@@ -863,6 +870,7 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
           narration: record.narration,
           image: record.image,
           video: record.video,
+          sceneCaption: record.sceneCaption,
         }))
       );
     } else {

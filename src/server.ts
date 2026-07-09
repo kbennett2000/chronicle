@@ -1039,6 +1039,10 @@ const ROUTES: Array<{
           sessionId: result.sessionId ?? null,
           model: result.model,
           isError: result.isError,
+          // #132: surface the caption so a same-session regenerate can pre-fill
+          // it (undefined when the DM omitted it — the client falls back to
+          // blank, and the transcript carries it after any later backfill).
+          sceneCaption,
         });
       } finally {
         // Always clear the single-flight lock — on success, on a 502 engine
@@ -1078,6 +1082,7 @@ const ROUTES: Array<{
           model: active.model,
           isError: false,
           alreadyStarted: true,
+          sceneCaption: existing[0].sceneCaption, // #132: prefill on re-entry
         });
         return;
       }
@@ -1133,6 +1138,7 @@ const ROUTES: Array<{
           sessionId: result.sessionId ?? null,
           model: result.model,
           isError: result.isError,
+          sceneCaption, // #132: prefill the opening's regenerate box
         });
       } finally {
         active.busy = false;
@@ -1247,6 +1253,7 @@ const ROUTES: Array<{
           isError: result.isError,
           turnIndex,
           discardedCount,
+          sceneCaption, // #132: prefill the re-run turn's regenerate box
         });
       } finally {
         active.busy = false;
