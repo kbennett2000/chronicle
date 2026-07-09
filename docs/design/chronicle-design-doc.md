@@ -35,19 +35,32 @@ communicate through the campaign's persistent state files.
 - Either way, responsible for: narration, rules adjudication, updating state
   files, emitting asset-request events.
 
-### 2.2 Asset Engine — Grok Build (headless)
-- Note: Grok appears in two distinct roles — here as the always-headless
+### 2.2 Asset Engine — pluggable image backend (Grok Build or local ComfyUI)
+- Note: Grok appears in two distinct roles — here as an always-headless
   **image** worker, and (ADR-0018) as an optional **DM** backend in §2.1. They
   are separate invocations with separate isolation.
-- Runs `grok -p "/imagine <prompt>"` non-interactively (or via ACP) as a
-  separate worker process, triggered by DM Engine events — not called by the
-  DM Engine's own reasoning loop.
+- The asset worker is a **pluggable image backend** (ADR-0027): the same
+  `ImageBackend` seam that ADR-0018 established for the DM engine. Two
+  implementations behind one dispatcher, chosen **per campaign** and freely
+  switchable mid-game (there's no session to reset):
+  - **Grok Build** (default, zero-infra) — runs `grok -p "/imagine <prompt>"`
+    non-interactively as a separate, sandboxed worker process.
+  - **Local ComfyUI/SDXL** — draws on the host's own GPU via ComfyUI's HTTP API
+    with checked-in SDXL workflow graphs (`src/workflows/*.json`), no per-image
+    cost or external dependency. Adds per-tier quality (fast/standard/high,
+    ADR-0029), scene-style adherence (ADR-0028), and **LoRA-backed art styles**
+    (ADR-0032).
+- Either backend is triggered by DM Engine events — not called by the DM
+  Engine's own reasoning loop.
 - Prompts are built **from the entity's already-established description** in
-  the state files, never invented fresh — so art matches what's already been
-  narrated, not a divergent guess.
+  the state files (`buildImagePrompt`), never invented fresh — so art matches
+  what's already been narrated. Scene/moment images additionally carry a
+  **DM-emitted caption** (ADR-0030) and are grounded in known entities'
+  canonical appearance (ADR-0031).
 - Output cached per-entity, keyed by ID, generated once, reused forever.
-- Video generation (`/imagine-video`) deferred — not currently working in
-  testing. Config schema should leave room for it, feature flagged off.
+- **Video is built** (ADR-0026): short on-demand clips via Grok Imagine's
+  `/imagine-video`, produced only by an explicit "Animate" action — never
+  auto-generated on a turn — and served alongside images.
 
 ## 3. Persistent Campaign State (the anti-drift layer)
 
@@ -176,8 +189,10 @@ Fires only on **first creation** of a registry entry, not every mention:
 - Discovery of a **notable item** (magic/legendary gear, quest-critical object)
 - A boss/major antagonist's reveal
 
-Settings screen: single **Generate Images** toggle (video toggle stubbed,
-hidden/off, for later), plus a **provider toggle** and a **model selector**
+Settings screen: a **Generate Images** toggle and a separate **Generate Video**
+toggle (ADR-0026 — video is built; clips are on-demand "Animate" only, never
+auto-generated), an **image-provider** picker (Grok Build vs local ComfyUI,
+ADR-0027), plus the DM-engine **provider toggle** and **model selector**
 (ADR-0018):
 - **Provider toggle** (Claude / Grok): picks the DM backend (§2.1). Claude is
   the recommended default. The model list below shows the selected provider's
@@ -243,8 +258,12 @@ alongside the existing provider + model selection (§8) in
 `campaign-settings.json`, all optional with sensible defaults:
 
 - **Art style** — freeform string appended to image-generation prompts.
-  UI offers presets (comic book, Lego-style, pencil sketch, watercolor,
-  anime, pixel art, noir, oil painting) plus a custom text field.
+  UI offers a preset roster (comic book, Lego-style, pencil sketch, watercolour,
+  anime, pixel art, noir, oil painting, storybook, 3D/Pixar, Ghibli, cyberpunk,
+  ukiyo-e, claymation) plus a custom text field. On the **local ComfyUI
+  backend** each preset can be backed by a per-style **LoRA recipe**
+  (`src/image-backends/style-loras.ts`, ADR-0032) for stronger adherence than a
+  prompt string alone; Grok uses the string form.
 - **World setting** — optional freeform description (medieval fantasy is
   the default with nothing set). Reskins the *flavor* of rolled seeds via
   DM engine instruction; does not fork or bypass the seed tables,
@@ -287,5 +306,11 @@ roughly now for Design to redo later.
 When the gate is met, the deliverable is a complete backend brief for
 Design: full API surface (endpoints, request/response shapes), the
 state-file schema, the settings model, how images arrive and where
-they're served from, auth (shared-secret header), and an explicit note on
-what's *not* the backend's concern (styling, layout, interaction design).
+they're served from, auth, and an explicit note on what's *not* the
+backend's concern (styling, layout, interaction design).
+
+> **Update (2026-07-09):** the gate has since been met and the handoff was
+> delivered (`docs/design/handoff-2026-07/`). Two things in that brief have
+> since changed: auth is now **per-user accounts** (register/login), not a
+> shared-secret header (ADR-0019); and **video generation is built** (ADR-0026).
+> The pluggable image backend (ADR-0027) also post-dates it.

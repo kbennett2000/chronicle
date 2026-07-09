@@ -73,8 +73,10 @@ sequentially — read `0001-core-architecture.md` first.
   solo-maintained project.
 - `@anthropic-ai/claude-agent-sdk` (or current equivalent package name —
   confirm against current docs before pinning) for the DM engine.
-- Grok Build CLI, invoked headlessly, for image generation. Requires
-  `XAI_API_KEY` or equivalent auth in the environment; do not commit keys.
+- Image generation via a **pluggable backend** (ADR-0027): Grok Build CLI
+  (headless; `XAI_API_KEY` or `~/.grok`, do not commit keys) or a local
+  ComfyUI/SDXL engine on the host GPU. On-demand video via Grok Imagine
+  (ADR-0026).
 - Campaign state stored as plain files (JSON/Markdown) per campaign,
   per the schema in the design doc §3.
 
@@ -85,6 +87,10 @@ sequentially — read `0001-core-architecture.md` first.
   removes drift, before any UI, images, or rules-grounding work begins.
 
 ## What NOT to do yet
+> **Historical (kickoff sequencing).** All three gates below have since been
+> passed — images (ADR-0009/0027), SRD grounding (ADR-0006), and the desktop
+> layout (ADR-0021/0022) are all shipped. Kept for the record of the original
+> slice ordering.
 - No image generation wiring until the DM engine's state-file loop is
   proven (Slice 1 complete).
 - No SRD rules-grounding until its own dedicated slice.

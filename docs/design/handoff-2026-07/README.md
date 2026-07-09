@@ -5,6 +5,15 @@ Chronicle is a **mobile-first, single-household solo D&D 5e app**. A Claude-powe
 
 The design deliberately answers the product's one open UX question — how much persistent character UI to show — by keeping the reading surface clean and **surfacing status only on change**, with a four-tab journal (Self / Folk / Quest / Views) always one tap away at the bottom.
 
+> **Reconciled with current state 2026-07-09.** This is a point-in-time 2026-07
+> handoff; the *visual* design is still authoritative, but three backend facts
+> have changed since it was written (see `backend-contract.md` for detail):
+> **auth is now per-user accounts** (register/login with a session token), *not*
+> the shared-passphrase `X-Chronicle-Token` header (ADR-0019); **video is built**
+> (on-demand "Animate", ADR-0026); and **images are a pluggable backend** — Grok
+> Build or local ComfyUI/SDXL (ADR-0027). The Settings → The Hearth "Passphrase"
+> field is therefore replaced by login/identity.
+
 ---
 
 ## About the Design Files
@@ -130,7 +139,7 @@ The whole app is one phone-sized surface (designed at 402×874, iOS dark frame; 
   - `THE LOOK` — **Generate scene art** toggle (note: "Off by default · needs Grok Build configured"); **Art style** = 8 preset chips (single-select) **plus a free-text "or describe your own…" field** (typing sets a custom style and de-selects presets; picking a preset clears the custom text).
   - `THE WORLD` — **Setting** free-text ("empty keeps standard fantasy", placeholder "underwater merfolk city-states…"); **Tone & whimsy** slider 0–1 with a live word label (Grounded → Deeply strange); **Content intensity** = Standard / Low segmented, each with a note.
   - `THE HEARTH` — italic clarifier *"Your phone only talks to your home server over the LAN — that server is what reaches out to Claude and Grok."*; **Server address** (monospace); **Passphrase** (monospace, masked); connection status dot + **Test** button.
-- **API:** `GET/POST /campaigns/:id/settings` for `{ model, artStyle?, worldSetting?, toneWhimsy(0–1), contentIntensity('standard'|'low'), generateImages }`. Model options + their fidelity/cost descriptions come from `GET /models` — **do not hardcode** those descriptions. Server address + passphrase are stored client-side and sent as the `X-Chronicle-Token` header (see Auth).
+- **API:** `GET/POST /campaigns/:id/settings` for `{ model, artStyle?, worldSetting?, toneWhimsy(0–1), contentIntensity('standard'|'low'), generateImages }`. Model options + their fidelity/cost descriptions come from `GET /models` — **do not hardcode** those descriptions. The server address is stored client-side; requests carry the logged-in user's **session token** (not the old `X-Chronicle-Token` passphrase — see Auth).
 
 ---
 
@@ -158,11 +167,11 @@ Real data source: `GET /campaigns/:id/state` hydrates the log + all four panels;
 
 ## Backend contract (authoritative)
 Full text in **`backend-contract.md`** (copied into this bundle). Essentials:
-- **Auth:** every route requires header `X-Chronicle-Token: <shared passphrase>`; 401 otherwise. Single household LAN secret, no user accounts. Address + passphrase entered in Settings → The Hearth, stored client-side.
+- **Auth (updated — ADR-0019):** ~~shared passphrase `X-Chronicle-Token`~~ → **per-user accounts**. `POST /auth/register` / `POST /auth/login` return a **session token**; every route requires it (401 otherwise). Server address is still entered in Settings → The Hearth; the passphrase field is replaced by login/identity.
 - **Endpoints:** `POST /campaigns/:id/session/start` · `POST /campaigns/:id/turns` · `GET /campaigns/:id/state` · `GET/POST /campaigns/:id/settings` · `GET /models` · `GET /campaigns/:id/images/:filename`.
 - **Image trigger points** (generated once, on first creation): character portrait, first major-NPC appearance, first significant-location entry, notable item, boss reveal. Failure never blocks narration — the entity simply has no image.
 - **Image filenames:** `<entity-type>-<slug>.<ext>` e.g. `location-millbrook-town-square.jpg`, `npc-old-wick-thistlewood.jpg`; the path lives in that entity's state entry.
-- **Not the UI's concern / not built yet:** video, multi-user identity. SRD rules adjudication + travel/rumor content are pending but don't change any API shape.
+- **Not the UI's concern:** styling/layout the backend leaves open. (Note: video and multi-user identity were listed here as "not built yet" — **both now exist**: video via on-demand Animate (ADR-0026), accounts via ADR-0019.) SRD rules adjudication + travel/rumor content are pending but don't change any API shape.
 
 ---
 

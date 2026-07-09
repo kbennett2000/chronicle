@@ -7,6 +7,17 @@ styling, layout, visual design, and interaction design are deliberately
 doc says "the current UI does X," treat that as the functional behavior to
 preserve, not the visual approach to keep.
 
+> **Reconciled with current state 2026-07-09.** This 2026-07 handoff was written
+> against an earlier backend; three things have changed since and are corrected
+> inline below:
+> - **Auth is now per-user accounts** (register / login), *not* the shared-secret
+>   `X-Chronicle-Token` header — every route is gated by a **session token**
+>   from login (ADR-0019). Read every `X-Chronicle-Token` mention as "the
+>   logged-in user's session token."
+> - **Video generation is built** (ADR-0026): on-demand "Animate" clips.
+> - **Images are a pluggable backend** — Grok Build *or* local ComfyUI/SDXL,
+>   chosen per campaign (ADR-0027) — not Grok-only.
+
 ---
 
 ## 1. What Chronicle Is
@@ -21,20 +32,19 @@ is what actually matters for building against.
 
 ## 2. Auth
 
-Every API route (everything below except static asset serving) requires
-a header:
+> **Superseded by per-user accounts (ADR-0019).** The shared-passphrase model
+> below is no longer how auth works — kept only for context. Current model:
+> `POST /auth/register` and `POST /auth/login` (username + password) return a
+> **session token**; every other route requires it (an `Authorization` header,
+> or `?token=` for media/streaming URLs) and returns 401 without it. Each person
+> registers their own account and sees only their own campaigns; campaigns nest
+> under `campaigns/<user>/`. The Settings → Connection UX still holds the server
+> address, but the passphrase field is replaced by login/identity.
 
-```
-X-Chronicle-Token: <shared secret>
-```
-
-Missing or wrong token returns 401. This is a single shared passphrase for
-one household LAN, not per-user accounts — there's no login/identity
-system, just this one gate. The existing UI has a Settings -> Connection
-section where the server address and this passphrase are entered and
-stored client-side (currently localStorage); that functional piece needs
-to keep existing in whatever Design builds, since without it the app
-can't reach its own backend.
+~~Every API route (everything below except static asset serving) requires
+a header `X-Chronicle-Token: <shared secret>`; missing or wrong token
+returns 401 — a single shared passphrase for one household LAN, no
+login/identity system.~~ (Historical; see the note above.)
 
 ## 3. Core API Surface
 
@@ -208,10 +218,12 @@ design for, not an edge case.
 
 ## 8. Known Constraints Worth Knowing
 
-- Video generation is scoped but not implemented (/imagine-video wasn't
-  working in testing) -- no video-related settings or endpoints exist.
-- This is a single-household LAN app, not multi-user -- no per-user
-  identity anywhere in the API.
+- ~~Video generation is scoped but not implemented.~~ **Now built** (ADR-0026):
+  on-demand "Animate" clips via a `generateVideos` toggle, `POST
+  /campaigns/:id/animate`, and `GET /campaigns/:id/videos/:filename`.
+- ~~This is a single-household LAN app, not multi-user.~~ **Now multi-user**
+  (ADR-0019): per-user register/login and per-user campaign isolation (still a
+  single-household-LAN posture, no HTTPS).
 - SRD-grounded rules adjudication and the travel/rumor/encounter-twist
   narrative content are still pending backend work -- they don't change
   any API shape above, so Design doesn't need to wait on them.
