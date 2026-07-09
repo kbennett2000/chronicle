@@ -299,3 +299,61 @@ export function resolveMomentDescription(
   if (record.sceneCaption && record.sceneCaption.trim()) return record.sceneCaption;
   return record.narration;
 }
+
+// ADR-0030 (Issue #130): the DM frequently omits the mandatory [SCENE:] line in
+// live play, leaving the moment with no caption and silently falling back to the
+// raw narration slab. When that happens the server makes ONE follow-up request
+// to the SAME DM session — same engine, same subscription, no new API/key — that
+// asks only for the caption for the turn just narrated. The prompt is a plain
+// user message; it forbids any narration or file/session-log writes so the
+// throwaway exchange stays clean (and the server discards its session id, so it
+// never enters the ongoing narrative thread).
+export const SCENE_CAPTION_RETRY_PROMPT =
+  "Output only the [SCENE: ...] line for the scene you just narrated — one short " +
+  "third-person, present-tense visual sentence covering the main subject(s), the " +
+  "setting, the action, and the lighting/mood. No other text, no second person, " +
+  "no dialogue, no art-style or medium words. Do not read or write any files and " +
+  "do not append anything to the session log.";
+
+/** Parse a caption out of the retry response. The retry is asked for a proper
+ * `[SCENE: ...]` line (handled by extractSceneCaption), but a model that ignores
+ * the wrapper and replies with just the bare sentence is tolerated too: fall
+ * back to the last non-empty line, stripping any leading `[SCENE:` / `SCENE:`
+ * label and trailing `]`. Returns undefined on empty/blank input. Never throws. */
+export function parseRetryCaption(text: string): string | undefined {
+  if (!text || !text.trim()) return undefined;
+  const { sceneCaption } = extractSceneCaption(text);
+  if (sceneCaption) return sceneCaption;
+  // No marker — accept a bare line. Last non-empty line wins, mirroring
+  // extractSceneCaption's "last caption wins" rule.
+  const line = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .pop();
+  if (!line) return undefined;
+  const cleaned = line
+    .replace(/^\[?\s*scene:\s*/i, "")
+    .replace(/\]\s*$/, "")
+    .trim();
+  return cleaned || undefined;
+}
+
+/** ADR-0030 retry (Issue #130): given a turn that produced no scene caption,
+ * obtain one via a single follow-up request. `runRetry` is injected (so this is
+ * unit-testable with a mock and imports no backend — no dependency cycle) and is
+ * invoked EXACTLY ONCE (no loop). Returns undefined if the retry errors, throws,
+ * or yields nothing — the caller then falls back to today's narration behavior,
+ * so a turn never hangs or breaks over a missing caption. */
+export async function retrySceneCaption(
+  runRetry: () => Promise<{ text: string; isError: boolean }>
+): Promise<string | undefined> {
+  let reply: { text: string; isError: boolean };
+  try {
+    reply = await runRetry();
+  } catch {
+    return undefined;
+  }
+  if (reply.isError) return undefined;
+  return parseRetryCaption(reply.text);
+}
