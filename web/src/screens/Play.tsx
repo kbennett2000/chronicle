@@ -6,11 +6,13 @@ import {
   editTurn,
   generateOpening,
   illustrateMoment,
+  animateMoment,
   getCampaignSettings,
   type CharacterSheet,
   type StateSnapshot,
 } from "../lib/campaign";
 import { useAuthedImage } from "../lib/useAuthedImage";
+import { useAuthedVideo } from "../lib/useAuthedVideo";
 import { parseChapterHeadings } from "../lib/session-log";
 import { BottomSheet } from "../components/BottomSheet";
 import { SelfPanel } from "../panels/SelfPanel";
@@ -44,6 +46,8 @@ interface DisplayTurn {
   isError?: boolean;
   /** ADR-0009: the scene image a user illustrated for this moment, if any. */
   image?: string;
+  /** Issue #118: the clip a user animated for this moment, if any. */
+  video?: string;
 }
 
 const TABS = ["Self", "Folk", "Quest", "Views"] as const;
@@ -135,6 +139,33 @@ function MomentImage({ connection, campaignId, filename, cacheBust }: { connecti
   );
 }
 
+/** Issue #118: a moment's animated clip. Loop + muted + inline so it behaves
+ * like an ambient motion still rather than a video the player must manage;
+ * controls are available for scrubbing. Nothing renders until it resolves. */
+function MomentVideo({ connection, campaignId, filename, cacheBust }: { connection: Connection; campaignId: string; filename: string; cacheBust?: number }) {
+  const { url } = useAuthedVideo(connection, campaignId, filename, cacheBust);
+  if (!url) return null;
+  return (
+    <video
+      src={url}
+      data-testid="moment-video"
+      controls
+      loop
+      muted
+      playsInline
+      style={{
+        display: "block",
+        width: "auto",
+        maxWidth: "100%",
+        maxHeight: 340,
+        borderRadius: 3,
+        margin: "0 0 16px",
+        boxShadow: "0 6px 16px rgba(0,0,0,.5), 0 0 0 1px rgba(184,150,90,.4)",
+      }}
+    />
+  );
+}
+
 function TurnView({
   turn,
   connection,
@@ -143,6 +174,11 @@ function TurnView({
   drawing,
   drawError,
   imageNonce,
+  generateVideos,
+  onAnimate,
+  animating,
+  animateError,
+  videoNonce,
   onEdit,
   canEdit,
   editing,
@@ -157,6 +193,12 @@ function TurnView({
   drawing: boolean;
   drawError: string | null;
   imageNonce?: number;
+  // Issue #118: on-demand "Animate" state, parallel to the illustrate props.
+  generateVideos?: boolean;
+  onAnimate: (description?: string) => void;
+  animating: boolean;
+  animateError: string | null;
+  videoNonce?: number;
   // Issue #68: edit this player message and re-run from here.
   onEdit: (newMessage: string) => void;
   canEdit: boolean;
@@ -290,6 +332,7 @@ function TurnView({
         </div>
       )}
       {turn.image && <MomentImage connection={connection} campaignId={campaignId} filename={turn.image} cacheBust={imageNonce} />}
+      {turn.video && <MomentVideo connection={connection} campaignId={campaignId} filename={turn.video} cacheBust={videoNonce} />}
       {canIllustrate && !turn.image && (
         <div style={{ margin: "-6px 0 18px" }}>
           <button
@@ -383,6 +426,35 @@ function TurnView({
           {drawError && (
             <div data-testid="illustrate-error" style={{ fontSize: 11, color: "var(--ember)", marginTop: 4 }}>
               {drawError}
+            </div>
+          )}
+        </div>
+      )}
+      {/* Issue #118: animate this moment into a clip (opt-in). The server feeds
+          the moment's own still to /imagine-video for continuity, so this reads
+          best after illustrating — but works without a still too. */}
+      {generateVideos && canIllustrate && (
+        <div style={{ margin: "-6px 0 18px" }}>
+          <button
+            data-testid="animate-moment"
+            onClick={() => onAnimate()}
+            disabled={animating}
+            style={{
+              cursor: animating ? "default" : "pointer",
+              background: "none",
+              border: "none",
+              padding: 0,
+              color: animating ? "var(--ink-faint)" : "var(--arcane)",
+              fontFamily: "var(--font-display)",
+              fontSize: 11,
+              letterSpacing: 0.5,
+            }}
+          >
+            {animating ? "Animating…" : turn.video ? "🎬 Re-animate this moment" : "🎬 Animate this moment"}
+          </button>
+          {animateError && (
+            <div data-testid="animate-error" style={{ fontSize: 11, color: "var(--arcane)", marginTop: 4 }}>
+              {animateError}
             </div>
           )}
         </div>
@@ -522,6 +594,12 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
   // deterministic filename, so bumping this forces useAuthedImage (and the
   // browser's HTTP cache) to fetch the freshly-drawn picture instead of the old.
   const [imageNonces, setImageNonces] = useState<Record<number, number>>({});
+  // Issue #118: per-turn "Animate" state, mirroring the illustrate state above.
+  const [animatingTurn, setAnimatingTurn] = useState<number | null>(null);
+  const [animateErrors, setAnimateErrors] = useState<Record<number, string>>({});
+  const [videoNonces, setVideoNonces] = useState<Record<number, number>>({});
+  // Issue #118: opt-in toggle that reveals the "Animate" affordances (needs Grok).
+  const [generateVideos, setGenerateVideos] = useState(false);
   // Issue #68: which turn is being edited+re-run (null when none), and any error
   // (tagged with its turn index so it survives editingTurn resetting to null).
   const [editingTurn, setEditingTurn] = useState<number | null>(null);
@@ -565,6 +643,7 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
       .then((s) => {
         if (cancelled) return;
         autoIllustrateRef.current = Boolean(s.autoIllustrateTurns && s.generateImages);
+        setGenerateVideos(Boolean(s.generateVideos));
       })
       .catch(() => {});
     return () => {
@@ -587,6 +666,7 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
               playerMessage: record.playerMessage,
               narration: record.narration,
               image: record.image,
+              video: record.video,
             }))
           );
         } else {
@@ -738,6 +818,31 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
     }
   }
 
+  // Issue #118: animate a moment into a clip. Mirrors handleIllustrateMoment;
+  // the server feeds the moment's own still (if any) to /imagine-video.
+  async function handleAnimateMoment(index: number, description?: string) {
+    if (animatingTurn !== null) return;
+    setAnimatingTurn(index);
+    setAnimateErrors((prev) => {
+      const { [index]: _removed, ...rest } = prev;
+      return rest;
+    });
+    try {
+      const result = await animateMoment(connection, campaignId, index, description);
+      if (result.ok && result.relPath) {
+        const relPath = result.relPath;
+        setTurns((prev) => prev.map((t, i) => (i === index ? { ...t, video: relPath } : t)));
+        setVideoNonces((prev) => ({ ...prev, [index]: (prev[index] ?? 0) + 1 }));
+      } else {
+        setAnimateErrors((prev) => ({ ...prev, [index]: result.error || "Grok Build couldn't animate this." }));
+      }
+    } catch (err) {
+      setAnimateErrors((prev) => ({ ...prev, [index]: err instanceof Error ? err.message : String(err) }));
+    } finally {
+      setAnimatingTurn(null);
+    }
+  }
+
   // Re-fetch state after a gallery illustration so the newly-recorded portrait
   // reaches the panels that read it.
   function refreshPanels() {
@@ -757,6 +862,7 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
           playerMessage: record.playerMessage,
           narration: record.narration,
           image: record.image,
+          video: record.video,
         }))
       );
     } else {
@@ -819,6 +925,7 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
           characterSheet={characterSheet}
           npcRoster={npcRoster}
           worldState={worldState}
+          generateVideos={generateVideos}
           onIllustrated={refreshPanels}
         />
       ) : (
@@ -871,6 +978,11 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
               drawing={illustratingTurn === i}
               drawError={illustrateErrors[i] ?? null}
               imageNonce={imageNonces[i]}
+              generateVideos={generateVideos}
+              onAnimate={(description) => handleAnimateMoment(i, description)}
+              animating={animatingTurn === i}
+              animateError={animateErrors[i] ?? null}
+              videoNonce={videoNonces[i]}
               onEdit={(newMessage) => handleEditTurn(i, newMessage)}
               canEdit={!sending && !openingScene && editingTurn === null && turn.narration !== null}
               editing={editingTurn === i}

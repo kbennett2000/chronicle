@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseMusicBlock, type UserMusic } from "./music-store.js";
+import { parseVideoBlock, type UserVideo } from "./video-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const CAMPAIGNS_ROOT = path.resolve(__dirname, "../campaigns");
@@ -476,6 +477,16 @@ export interface CampaignSettings {
    * present fields win over the user default via resolveMusicConfig. Credentials
    * are never stored here — only enabled/source/URL/playlist. */
   music?: UserMusic;
+  /** Issue #118: when on (opt-in, default absent/false — like generateImages,
+   * it needs Grok Build configured), the app offers on-demand "Animate" actions
+   * that turn a still into a short clip. Video is never auto-generated. */
+  generateVideos?: boolean;
+  /** Issue #118: an optional per-game override of the video params
+   * (duration/resolution/aspectRatio). Absent means the game tracks the user's
+   * account default (which itself falls back to `.env`, then code defaults);
+   * present fields win over the user default via resolveVideoConfig — same
+   * two-level model as `music`. */
+  video?: UserVideo;
 }
 
 export function readCampaignSettings(campaignDir: string): CampaignSettings {
@@ -514,12 +525,23 @@ export function readCampaignSettings(campaignDir: string): CampaignSettings {
   if (typeof raw.autoIllustrateTurns === "boolean") {
     settings.autoIllustrateTurns = raw.autoIllustrateTurns;
   }
+  if (typeof raw.generateVideos === "boolean") {
+    settings.generateVideos = raw.generateVideos;
+  }
   // #109: only attach a music override when the stored block has at least one
   // valid field — an absent/empty override falls back to user default → .env.
   if (raw.music !== undefined) {
     const parsed = parseMusicBlock(raw.music);
     if ("value" in parsed && Object.keys(parsed.value).length > 0) {
       settings.music = parsed.value;
+    }
+  }
+  // #118: same rule as music — attach a video-params override only when the
+  // stored block has at least one valid field, else fall back to user → .env.
+  if (raw.video !== undefined) {
+    const parsed = parseVideoBlock(raw.video);
+    if ("value" in parsed && Object.keys(parsed.value).length > 0) {
+      settings.video = parsed.value;
     }
   }
   return settings;
@@ -533,7 +555,12 @@ export function persistCampaignSettings(
   // #109: `music: null` is an explicit "reset to account default" — it drops the
   // whole per-game override (the only way to clear a stored boolean `enabled`,
   // which can't be cleared via the empty-string path below).
-  updates: Partial<Omit<CampaignSettings, "model" | "provider" | "music">> & { music?: UserMusic | null }
+  updates: Partial<Omit<CampaignSettings, "model" | "provider" | "music" | "video">> & {
+    music?: UserMusic | null;
+    // #118: `video: null` is an explicit "reset to account default" — it drops
+    // the whole per-game params override (mirrors `music`).
+    video?: UserVideo | null;
+  }
 ): CampaignSettings {
   const raw = readRawSettings(campaignDir);
   const merged: Record<string, unknown> = { ...raw, ...updates };
@@ -554,6 +581,17 @@ export function persistCampaignSettings(
     }
     if (Object.keys(mergedMusic).length > 0) merged.music = mergedMusic;
     else delete merged.music;
+  }
+  // #118: the video params override mirrors music exactly — `null` drops the
+  // whole override (reset to account default); otherwise a one-level-deep merge
+  // so patching one param doesn't wipe its siblings, dropping the block if empty.
+  if (updates.video === null) {
+    delete merged.video;
+  } else if (updates.video !== undefined) {
+    const prev = raw.video && typeof raw.video === "object" ? (raw.video as Record<string, unknown>) : {};
+    const mergedVideo: Record<string, unknown> = { ...prev, ...updates.video };
+    if (Object.keys(mergedVideo).length > 0) merged.video = mergedVideo;
+    else delete merged.video;
   }
   writeRawSettings(campaignDir, merged);
   return readCampaignSettings(campaignDir);
@@ -710,6 +748,10 @@ export interface TurnTranscriptRecord {
    * being missing means exactly "no image," same as an entity with no
    * portrait. */
   image?: string;
+  /** Issue #118 (additive, same shape as `image`): a user-triggered "animate
+   * this moment" records the generated clip's relative path here. Absent means
+   * "no video," identical to the image field's absent semantics. */
+  video?: string;
 }
 
 /** session-log/session-<ts>.md -> session-log/session-<ts>.transcript.jsonl */
@@ -765,6 +807,26 @@ export function setTranscriptRecordImage(
     throw new Error(`no transcript record at turn ${turnIndex} for ${sessionLogRelPath}`);
   }
   record.image = image;
+  const abs = path.join(campaignDir, transcriptPathFor(sessionLogRelPath));
+  fs.writeFileSync(abs, records.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  return record;
+}
+
+/** Issue #118: attach a generated clip to one already-recorded turn. Exact
+ * analog of setTranscriptRecordImage (rewrites the JSONL to mutate the record's
+ * `video` field). Throws if the turn isn't found. */
+export function setTranscriptRecordVideo(
+  campaignDir: string,
+  sessionLogRelPath: string,
+  turnIndex: number,
+  video: string
+): TurnTranscriptRecord {
+  const records = readTurnTranscript(campaignDir, sessionLogRelPath);
+  const record = records.find((r) => r.turnIndex === turnIndex);
+  if (!record) {
+    throw new Error(`no transcript record at turn ${turnIndex} for ${sessionLogRelPath}`);
+  }
+  record.video = video;
   const abs = path.join(campaignDir, transcriptPathFor(sessionLogRelPath));
   fs.writeFileSync(abs, records.map((r) => JSON.stringify(r)).join("\n") + "\n");
   return record;
@@ -905,6 +967,9 @@ export function pruneSnapshotsAfter(
 // web/tests/heading-consistency.spec.ts). A server-side image write must
 // produce exactly these so buildGallery/parseNpcRoster pick it up.
 const NPC_PORTRAIT_FIELD = "Portrait asset ID";
+/** Issue #118: the video analog of the portrait bullet. A distinct field so a
+ * clip never overwrites the still — the gallery can show both. */
+const NPC_PORTRAIT_VIDEO_FIELD = "Portrait video ID";
 const LOCATIONS_VISITED_HEADING = "Locations Visited";
 const HEADING_LINE_RE = /^(#{1,6})\s+(.*\S)\s*$/;
 
@@ -912,7 +977,19 @@ const HEADING_LINE_RE = /^(#{1,6})\s+(.*\S)\s*$/;
  * given NPC's `## <name>` heading in npc-roster.md — the same bullet the model
  * is told to write (image-generator.ts). Pure string transform; unit-tested. */
 export function withNpcPortrait(rosterMd: string, npcName: string, relPath: string): string {
-  const bullet = `- **${NPC_PORTRAIT_FIELD}:** ${relPath}`;
+  return withNpcField(rosterMd, npcName, NPC_PORTRAIT_FIELD, relPath);
+}
+
+/** Issue #118: the `- **Portrait video ID:** <relPath>` analog of
+ * withNpcPortrait — same section logic, different field label. */
+export function withNpcPortraitVideo(rosterMd: string, npcName: string, relPath: string): string {
+  return withNpcField(rosterMd, npcName, NPC_PORTRAIT_VIDEO_FIELD, relPath);
+}
+
+/** Shared body for withNpcPortrait/withNpcPortraitVideo: insert or replace a
+ * `- **<field>:** <relPath>` bullet under the given NPC's `## <name>` heading. */
+function withNpcField(rosterMd: string, npcName: string, field: string, relPath: string): string {
+  const bullet = `- **${field}:** ${relPath}`;
   const lines = rosterMd.split(/\r?\n/);
   const target = npcName.trim().toLowerCase();
 
@@ -937,7 +1014,7 @@ export function withNpcPortrait(rosterMd: string, npcName: string, relPath: stri
       break;
     }
   }
-  const portraitRe = new RegExp(`^-\\s*\\*\\*${NPC_PORTRAIT_FIELD}:\\*\\*`, "i");
+  const portraitRe = new RegExp(`^-\\s*\\*\\*${field}:\\*\\*`, "i");
   for (let i = headingIdx + 1; i < sectionEnd; i++) {
     if (portraitRe.test(lines[i].trim())) {
       lines[i] = bullet;
@@ -952,7 +1029,19 @@ export function withNpcPortrait(rosterMd: string, npcName: string, relPath: stri
  * location's bullet in world-state.md's "## Locations Visited" section —
  * matching gallery.ts's IMAGE_LINE_RE. Pure string transform; unit-tested. */
 export function withLocationImage(worldStateMd: string, locationName: string, relPath: string): string {
-  const imageLine = `  - Image: ${relPath}`;
+  return withLocationAsset(worldStateMd, locationName, "Image", relPath);
+}
+
+/** Issue #118: the `  - Video: <relPath>` analog of withLocationImage — same
+ * section logic, different label so a clip never overwrites the still. */
+export function withLocationVideo(worldStateMd: string, locationName: string, relPath: string): string {
+  return withLocationAsset(worldStateMd, locationName, "Video", relPath);
+}
+
+/** Shared body for withLocationImage/withLocationVideo: insert or replace an
+ * indented `  - <label>: <relPath>` line under the named location's bullet. */
+function withLocationAsset(worldStateMd: string, locationName: string, label: string, relPath: string): string {
+  const imageLine = `  - ${label}: ${relPath}`;
   const lines = worldStateMd.split(/\r?\n/);
   const target = locationName.trim().toLowerCase();
 
@@ -1005,7 +1094,7 @@ export function withLocationImage(worldStateMd: string, locationName: string, re
       break;
     }
   }
-  const imageRe = /^-?\s*\*{0,2}Image\*{0,2}:\s*(.+)$/i;
+  const imageRe = new RegExp(`^-?\\s*\\*{0,2}${label}\\*{0,2}:\\s*(.+)$`, "i");
   for (let i = bulletIdx + 1; i < blockEnd; i++) {
     if (imageRe.test(lines[i].trim())) {
       lines[i] = imageLine;
@@ -1037,6 +1126,30 @@ export function recordEntityImage(
   } else if (entityType === "location") {
     const p = path.join(campaignDir, "world-state.md");
     fs.writeFileSync(p, withLocationImage(fs.readFileSync(p, "utf8"), name, relPath));
+  }
+}
+
+/** Issue #118: record an on-demand entity clip into its state file, alongside
+ * (never replacing) the still. Exact analog of recordEntityImage —
+ * `portraitVideo` on character-sheet.json, a "Portrait video ID" bullet for
+ * NPCs/bosses, a "Video" line for locations. */
+export function recordEntityVideo(
+  campaignDir: string,
+  entityType: "character" | "npc" | "boss" | "location",
+  name: string,
+  relPath: string
+): void {
+  if (entityType === "character") {
+    const p = path.join(campaignDir, "character-sheet.json");
+    const sheet = JSON.parse(fs.readFileSync(p, "utf8"));
+    sheet.portraitVideo = relPath;
+    fs.writeFileSync(p, JSON.stringify(sheet, null, 2) + "\n");
+  } else if (entityType === "npc" || entityType === "boss") {
+    const p = path.join(campaignDir, "npc-roster.md");
+    fs.writeFileSync(p, withNpcPortraitVideo(fs.readFileSync(p, "utf8"), name, relPath));
+  } else if (entityType === "location") {
+    const p = path.join(campaignDir, "world-state.md");
+    fs.writeFileSync(p, withLocationVideo(fs.readFileSync(p, "utf8"), name, relPath));
   }
 }
 

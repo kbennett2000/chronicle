@@ -13,8 +13,10 @@ import { EnginePicker } from "../components/EnginePicker";
 import { LookSettingsEditor } from "../components/LookSettingsEditor";
 import { WorldSettingsEditor } from "../components/WorldSettingsEditor";
 import { MusicOverrideEditor } from "../components/MusicOverrideEditor";
+import { VideoSettingsEditor } from "../components/VideoSettingsEditor";
 import { useIsDesktop } from "../lib/useIsDesktop";
 import { getMusicConfig, saveCampaignMusicSettings, resetCampaignMusicSettings, type MusicConfig, type MusicOverride } from "../lib/music";
+import { getVideoConfig, type VideoConfig } from "../lib/video";
 
 interface GameSettingsProps {
   connection: Connection;
@@ -48,9 +50,11 @@ export function GameSettings({ connection, campaignId, onBack }: GameSettingsPro
   const [settings, setSettings] = useState<CampaignSettings | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [gameMusic, setGameMusic] = useState<MusicConfig | null>(null);
+  const [gameVideo, setGameVideo] = useState<VideoConfig | null>(null);
 
   const [lookSave, setLookSave] = useState<SaveState>("idle");
   const [worldSave, setWorldSave] = useState<SaveState>("idle");
+  const [videoSave, setVideoSave] = useState<SaveState>("idle");
 
   useEffect(() => {
     let cancelled = false;
@@ -63,6 +67,9 @@ export function GameSettings({ connection, campaignId, onBack }: GameSettingsPro
       .catch(() => {});
     getMusicConfig(connection, campaignId)
       .then((cfg) => !cancelled && setGameMusic(cfg))
+      .catch(() => {});
+    getVideoConfig(connection, campaignId)
+      .then((cfg) => !cancelled && setGameVideo(cfg))
       .catch(() => {});
     setStatus("loading");
     getCampaignSettings(connection, campaignId)
@@ -115,6 +122,22 @@ export function GameSettings({ connection, campaignId, onBack }: GameSettingsPro
       setSettings(s);
     } catch {
       // best-effort
+    }
+  }
+
+  /** #118: a per-game video patch (generateVideos and/or a video params
+   * override). Persist, then refresh the effective config + settings so the
+   * chips reflect what a clip will actually use. */
+  async function patchGameVideo(patch: CampaignSettingsPatch) {
+    setVideoSave("saving");
+    try {
+      const next = await updateCampaignSettings(connection, campaignId, patch);
+      setSettings(next);
+      const cfg = await getVideoConfig(connection, campaignId);
+      setGameVideo(cfg);
+      setVideoSave("saved");
+    } catch {
+      setVideoSave("error");
     }
   }
 
@@ -183,6 +206,15 @@ export function GameSettings({ connection, campaignId, onBack }: GameSettingsPro
                 {lookSave === "saving" && "Saving…"}
                 {lookSave === "saved" && "Saved for this game."}
                 {lookSave === "error" && "Couldn't save — try again."}
+              </div>
+
+              {/* THE MOTION — this game (#118) */}
+              <div style={sectionHeadingStyle}>VIDEO CLIPS</div>
+              <VideoSettingsEditor value={settings} effective={gameVideo ?? undefined} onPatch={patchGameVideo} />
+              <div data-testid="video-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 6 }}>
+                {videoSave === "saving" && "Saving…"}
+                {videoSave === "saved" && "Saved for this game."}
+                {videoSave === "error" && "Couldn't save — try again."}
               </div>
 
               {/* THE WORLD — this game */}

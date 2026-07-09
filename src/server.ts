@@ -21,6 +21,8 @@ import {
   readTurnTranscript,
   setTranscriptRecordImage,
   recordEntityImage,
+  setTranscriptRecordVideo,
+  recordEntityVideo,
   setCharacterAppearance,
   writePreTurnSnapshot,
   hasPreTurnSnapshot,
@@ -60,6 +62,8 @@ import {
   type ModelId,
 } from "./campaign-store.js";
 import { generateImage } from "./image-generator.js";
+import { generateVideo } from "./video-generator.js";
+import { parseVideoBlock, resolveVideoConfig, type UserVideo } from "./video-store.js";
 import {
   buildCharacterSheet,
   deriveCampaignId,
@@ -150,6 +154,11 @@ function newUserDefaultSettings(): Record<string, unknown> {
   if (autoRoll !== undefined) out.autoRollDice = autoRoll;
   const autoIllustrate = boolEnv(process.env.DEFAULT_AUTO_ILLUSTRATE);
   if (autoIllustrate !== undefined) out.autoIllustrateTurns = autoIllustrate;
+  // #118: generateVideos is a copy-on-create boolean like generateImages. The
+  // video *params* (duration/resolution/aspect) are not seeded here — like
+  // music, they resolve from DEFAULT_VIDEO_* env at read time (resolveVideoConfig).
+  const genVideos = boolEnv(process.env.DEFAULT_GENERATE_VIDEOS);
+  if (genVideos !== undefined) out.generateVideos = genVideos;
   return out;
 }
 
@@ -273,7 +282,7 @@ function parseDefaultSettings(
     }
     out.responseLength = body.responseLength;
   }
-  for (const key of ["generateImages", "autoRollDice", "autoIllustrateTurns"] as const) {
+  for (const key of ["generateImages", "autoRollDice", "autoIllustrateTurns", "generateVideos"] as const) {
     if (body[key] !== undefined) {
       if (typeof body[key] !== "boolean") return { error: `${key} must be a boolean` };
       out[key] = body[key];
@@ -288,6 +297,13 @@ function parseDefaultSettings(
     if ("error" in parsed) return { error: parsed.error };
     out.music = parsed.value;
   }
+  // #118: video params override, stored under a `video` key (validated by
+  // parseVideoBlock, shared with the per-campaign settings route).
+  if (body.video !== undefined) {
+    const parsed = parseVideoBlock(body.video);
+    if ("error" in parsed) return { error: parsed.error };
+    out.video = parsed.value;
+  }
   return { value: out };
 }
 
@@ -295,6 +311,24 @@ function parseDefaultSettings(
 function userMusic(userId: string): UserMusic {
   const m = readUserSettings(userId).music;
   return m && typeof m === "object" ? (m as UserMusic) : {};
+}
+
+/** #118: read a user's stored video-params override off their account settings,
+ * validated (parseVideoBlock drops any bad field) — mirrors userMusic. */
+function userVideo(userId: string): UserVideo {
+  const parsed = parseVideoBlock(readUserSettings(userId).video ?? {});
+  return "value" in parsed ? parsed.value : {};
+}
+
+/** #118: read a campaign's per-game video-params override, or {} when there's
+ * no campaign in scope / it's invalid — mirrors campaignMusic. */
+function campaignVideo(userId: string, campaignId: string | null): UserVideo {
+  if (!campaignId) return {};
+  try {
+    return readCampaignSettings(resolveCampaignDir(userId, campaignId)).video ?? {};
+  } catch {
+    return {};
+  }
 }
 
 /** #109: read a campaign's per-game music override, or {} when there's no
@@ -448,6 +482,15 @@ const ROUTES: Array<{
     async handler(req, res, _params, userId) {
       const config = resolveMusicConfig(userMusic(userId), campaignMusic(userId, musicCampaignId(req)));
       sendJson(res, 200, { ...config, localTrackCount: listLocalTracks().length });
+    },
+  },
+  {
+    // #118: the effective video params (campaign → user → .env → default), so
+    // the settings UI can show what a clip will actually use. Mirrors /music/config.
+    method: "GET",
+    pattern: /^\/video\/config$/,
+    async handler(req, res, _params, userId) {
+      sendJson(res, 200, resolveVideoConfig(userVideo(userId), campaignVideo(userId, musicCampaignId(req))));
     },
   },
   {
@@ -717,6 +760,14 @@ const ROUTES: Array<{
         }
         creationSettings.autoRollDice = creation.autoRollDice;
       }
+      // #118: generateVideos is a copy-on-create boolean like generateImages.
+      if (creation.generateVideos !== undefined) {
+        if (typeof creation.generateVideos !== "boolean") {
+          sendJson(res, 400, { error: "generateVideos must be a boolean" });
+          return;
+        }
+        creationSettings.generateVideos = creation.generateVideos;
+      }
 
       const campaignId = deriveCampaignId(String(sheet.name), (id) =>
         fs.existsSync(path.join(userCampaignsRoot(userId), id))
@@ -729,7 +780,10 @@ const ROUTES: Array<{
       // music override and so tracks the user's *live* account default until the
       // player explicitly overrides it for that game (ADR-0020 amended). This
       // diverges from the copy-on-create the other settings use, by design.
-      const { music: _seedMusic, ...userDefaults } = readUserSettings(userId);
+      // #118: `video` (the params override) follows the same live-tracking model
+      // as `music`, so exclude it here too. `generateVideos` is NOT excluded — it
+      // is a copy-on-create boolean like generateImages.
+      const { music: _seedMusic, video: _seedVideo, ...userDefaults } = readUserSettings(userId);
       const dir = scaffoldCampaign(userId, campaignId, sheet, {
         model: DEFAULT_MODEL,
         autoRollDice: true,
@@ -1182,7 +1236,9 @@ const ROUTES: Array<{
         generateImages?: boolean;
         autoRollDice?: boolean;
         autoIllustrateTurns?: boolean;
+        generateVideos?: boolean;
         music?: UserMusic | null;
+        video?: UserVideo | null;
       } = {};
 
       if (body.artStyle !== undefined) {
@@ -1251,6 +1307,13 @@ const ROUTES: Array<{
         }
         updates.autoIllustrateTurns = body.autoIllustrateTurns;
       }
+      if (body.generateVideos !== undefined) {
+        if (typeof body.generateVideos !== "boolean") {
+          sendJson(res, 400, { error: "generateVideos must be a boolean" });
+          return;
+        }
+        updates.generateVideos = body.generateVideos;
+      }
       // #109: an optional per-game music override (same shape/validation as the
       // user default). Empty subfields clear that field back to the user default;
       // an explicit `null` drops the whole override (reset to account default).
@@ -1263,6 +1326,18 @@ const ROUTES: Array<{
           return;
         }
         updates.music = parsed.value;
+      }
+      // #118: an optional per-game video-params override, same two-level model
+      // as music — `null` resets to the account default, else validate the block.
+      if (body.video === null) {
+        updates.video = null;
+      } else if (body.video !== undefined) {
+        const parsed = parseVideoBlock(body.video);
+        if ("error" in parsed) {
+          sendJson(res, 400, { error: parsed.error });
+          return;
+        }
+        updates.video = parsed.value;
       }
 
       sendJson(res, 200, persistCampaignSettings(campaignDir, updates));
@@ -1362,6 +1437,113 @@ const ROUTES: Array<{
     },
   },
   {
+    // Issue #118 (ADR-0026): user-triggered on-demand video generation — the
+    // "Animate" action. Analog of /illustrate: never on the turn path, returns
+    // generateVideo's { ok, relPath?, error? } verbatim at HTTP 200. Params are
+    // resolved campaign → user → .env → default; when the still exists it's fed
+    // to /imagine-video as the base image (two-step workflow) for consistency.
+    method: "POST",
+    pattern: /^\/campaigns\/([^/]+)\/animate$/,
+    async handler(req, res, [campaignId], userId) {
+      const campaignDir = resolveCampaignDir(userId, campaignId);
+      const body = (await readJsonBody(req)) as Record<string, unknown>;
+      const settings = readCampaignSettings(campaignDir);
+      const video = resolveVideoConfig(userVideo(userId), settings.video);
+
+      // A client-supplied base still (from the gallery/moment it already knows)
+      // must resolve to a plain file under this campaign's own images/ dir — the
+      // same traversal guard as the images route, since generateVideo stages it.
+      const safeBaseImage = (rel: unknown): string | undefined => {
+        if (typeof rel !== "string" || !rel.trim()) return undefined;
+        const basename = rel.split("/").pop() || rel;
+        const resolved = path.resolve(path.join(campaignDir, "images"), basename);
+        if (path.dirname(resolved) !== path.join(campaignDir, "images") || !fs.existsSync(resolved)) {
+          return undefined;
+        }
+        return path.join("images", basename);
+      };
+
+      if (body.kind === "entity") {
+        const entityType = body.entityType;
+        if (entityType !== "character" && entityType !== "npc" && entityType !== "location") {
+          sendJson(res, 400, { error: "entityType must be one of character, npc, location" });
+          return;
+        }
+        if (typeof body.name !== "string" || body.name.trim() === "") {
+          sendJson(res, 400, { error: "name must be a non-empty string" });
+          return;
+        }
+        const description =
+          typeof body.description === "string" && body.description.trim() ? body.description.trim() : body.name.trim();
+        const result = await generateVideo(campaignDir, entityType, body.name.trim(), description, settings, video, {
+          baseImageRelPath: safeBaseImage(body.baseImage),
+        });
+        if (result.ok && result.relPath) {
+          recordEntityVideo(campaignDir, entityType, body.name.trim(), result.relPath);
+        }
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (body.kind === "moment") {
+        const active = activeSessions.get(sessionKey(userId, campaignId));
+        if (!active) {
+          sendJson(res, 409, {
+            error: `no active session for campaign '${campaignId}' — start one before animating a moment`,
+          });
+          return;
+        }
+        if (typeof body.turnIndex !== "number" || !Number.isInteger(body.turnIndex) || body.turnIndex < 0) {
+          sendJson(res, 400, { error: "turnIndex must be a non-negative integer" });
+          return;
+        }
+        const record = readTurnTranscript(campaignDir, active.sessionLogPath).find(
+          (r) => r.turnIndex === body.turnIndex
+        );
+        if (!record) {
+          sendJson(res, 404, { error: `no turn ${body.turnIndex} in the active session` });
+          return;
+        }
+        const override = typeof body.description === "string" && body.description.trim() ? body.description.trim() : "";
+        const description = (override || record.narration.trim()).slice(0, 500) || "a scene from the story";
+        const sessionBase = path.basename(active.sessionLogPath).replace(/\.md$/, "");
+        const name = `${sessionBase}-turn-${body.turnIndex}`;
+        // Animate the moment's own still if it has one (recorded via /illustrate).
+        const result = await generateVideo(campaignDir, "scene", name, description, settings, video, {
+          baseImageRelPath: safeBaseImage(record.image),
+        });
+        if (result.ok && result.relPath) {
+          setTranscriptRecordVideo(campaignDir, active.sessionLogPath, body.turnIndex, result.relPath);
+        }
+        sendJson(res, 200, { ...result, turnIndex: body.turnIndex });
+        return;
+      }
+
+      sendJson(res, 400, { error: "body.kind must be 'entity' or 'moment'" });
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/campaigns\/([^/]+)\/videos\/([^/]+)$/,
+    async handler(_req, res, [campaignId, filename], userId) {
+      const campaignDir = resolveCampaignDir(userId, campaignId);
+      const videosDir = path.join(campaignDir, "videos");
+      const resolved = path.resolve(videosDir, filename);
+      // Same traversal guard as the images route.
+      if (
+        path.dirname(resolved) !== videosDir ||
+        !fs.existsSync(resolved) ||
+        !fs.statSync(resolved).isFile()
+      ) {
+        sendJson(res, 404, { error: "video not found" });
+        return;
+      }
+      const ext = path.extname(resolved).toLowerCase();
+      res.writeHead(200, { "Content-Type": VIDEO_CONTENT_TYPES[ext] ?? "application/octet-stream" });
+      res.end(fs.readFileSync(resolved));
+    },
+  },
+  {
     method: "GET",
     pattern: /^\/campaigns\/([^/]+)\/images\/([^/]+)$/,
     async handler(_req, res, [campaignId, filename], userId) {
@@ -1395,6 +1577,12 @@ const IMAGE_CONTENT_TYPES: Record<string, string> = {
   ".jpeg": "image/jpeg",
   ".png": "image/png",
   ".webp": "image/webp",
+};
+
+const VIDEO_CONTENT_TYPES: Record<string, string> = {
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
 };
 
 const STATIC_CONTENT_TYPES: Record<string, string> = {

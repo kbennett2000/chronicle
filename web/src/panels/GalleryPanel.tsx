@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Connection } from "../lib/connection";
 import { useAuthedImage } from "../lib/useAuthedImage";
+import { useAuthedVideo } from "../lib/useAuthedVideo";
 import { buildGallery, type GalleryItem } from "../lib/gallery";
-import { illustrateEntity, type CharacterSheet } from "../lib/campaign";
+import { illustrateEntity, animateEntity, type CharacterSheet } from "../lib/campaign";
 
 interface GalleryPanelProps {
   connection: Connection;
@@ -10,6 +11,8 @@ interface GalleryPanelProps {
   characterSheet: CharacterSheet;
   npcRoster: string;
   worldState: string;
+  /** Issue #118: gates the on-demand "Animate" affordance (opt-in, needs Grok). */
+  generateVideos?: boolean;
   /** Called after a successful on-demand illustration so Play can re-fetch
    * state and the newly-recorded image shows up (ADR-0009). */
   onIllustrated: () => void;
@@ -18,12 +21,15 @@ interface GalleryPanelProps {
 interface LightboxState {
   item: GalleryItem;
   url: string;
+  /** Issue #118: when set, the lightbox plays this clip instead of the still. */
+  videoUrl?: string;
 }
 
 function GalleryTile({
   connection,
   campaignId,
   item,
+  generateVideos,
   onOpen,
   onLoadedChange,
   onIllustrated,
@@ -31,7 +37,8 @@ function GalleryTile({
   connection: Connection;
   campaignId: string;
   item: GalleryItem;
-  onOpen: (item: GalleryItem, url: string) => void;
+  generateVideos?: boolean;
+  onOpen: (item: GalleryItem, url: string, videoUrl?: string) => void;
   onLoadedChange: (loaded: boolean) => void;
   onIllustrated: () => void;
 }) {
@@ -39,8 +46,31 @@ function GalleryTile({
   // deterministic filename) actually refreshes in the tile and lightbox.
   const [nonce, setNonce] = useState(0);
   const { url, status } = useAuthedImage(connection, campaignId, item.image, nonce);
+  // Issue #118: load the entity's clip (if any) so the lightbox can play it.
+  const [videoNonce, setVideoNonce] = useState(0);
+  const { url: videoUrl } = useAuthedVideo(connection, campaignId, item.video, videoNonce);
   const [drawing, setDrawing] = useState(false);
   const [drawError, setDrawError] = useState<string | null>(null);
+  const [animating, setAnimating] = useState(false);
+  const [animateError, setAnimateError] = useState<string | null>(null);
+
+  async function animate() {
+    setAnimating(true);
+    setAnimateError(null);
+    try {
+      const result = await animateEntity(connection, campaignId, item.type, item.name, item.description || item.name, item.image);
+      if (result.ok) {
+        setVideoNonce((n) => n + 1);
+        onIllustrated();
+      } else {
+        setAnimateError(result.error || "Grok Build couldn't animate this.");
+      }
+    } catch (err) {
+      setAnimateError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAnimating(false);
+    }
+  }
   // Issue #66: regenerate affordance for an already-drawn entity, optionally
   // with a refined prompt appended to the entity's base description.
   const [regenOpen, setRegenOpen] = useState(false);
@@ -80,7 +110,7 @@ function GalleryTile({
       <div style={{ position: "relative", borderRadius: 2, overflow: "hidden", height: 110, boxShadow: "0 4px 10px rgba(0,0,0,.5), 0 0 0 1px rgba(184,150,90,.4)" }}>
         <button
           data-testid="gallery-tile"
-          onClick={() => onOpen(item, url)}
+          onClick={() => onOpen(item, url, videoUrl ?? undefined)}
           style={{ padding: 0, border: "none", cursor: "pointer", background: "none", textAlign: "left", display: "block", width: "100%", height: "100%" }}
         >
           <img
@@ -123,6 +153,60 @@ function GalleryTile({
         >
           {drawing ? "…" : "↻"}
         </button>
+        {/* Issue #118: animate this still into a clip (opt-in). */}
+        {generateVideos && (
+          <button
+            data-testid="gallery-animate"
+            title={item.video ? "Re-animate this clip" : "Animate this image"}
+            onClick={() => animate()}
+            disabled={animating}
+            style={{
+              position: "absolute",
+              top: 5,
+              right: 33,
+              width: 24,
+              height: 24,
+              borderRadius: "50%",
+              border: "1px solid rgba(120,150,211,.6)",
+              background: "rgba(8,5,3,.6)",
+              color: animating ? "var(--ink-faint)" : "var(--arcane)",
+              cursor: animating ? "default" : "pointer",
+              fontSize: 12,
+              lineHeight: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            {animating ? "…" : "🎬"}
+          </button>
+        )}
+        {/* A clip exists — badge it; tapping the tile opens it in the lightbox. */}
+        {item.video && videoUrl && (
+          <div
+            data-testid="gallery-clip-badge"
+            style={{
+              position: "absolute",
+              top: 5,
+              left: 5,
+              padding: "2px 6px",
+              borderRadius: 10,
+              background: "rgba(8,5,3,.7)",
+              border: "1px solid rgba(120,150,211,.5)",
+              color: "var(--arcane)",
+              fontSize: 9,
+              fontFamily: "var(--font-display)",
+              letterSpacing: 0.5,
+            }}
+          >
+            ▶ CLIP
+          </div>
+        )}
+        {animateError && (
+          <div data-testid="gallery-animate-error" style={{ position: "absolute", left: 6, right: 6, top: 34, fontSize: 9.5, color: "var(--arcane)", background: "rgba(8,5,3,.85)", borderRadius: 3, padding: "3px 5px", lineHeight: 1.3 }}>
+            {animateError}
+          </div>
+        )}
         {regenOpen && (
           <div style={{ position: "absolute", inset: 0, background: "rgba(8,5,3,.9)", padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
             <textarea
@@ -216,7 +300,7 @@ function GalleryTile({
  * always renders one tile per known entity (character/NPC/location)
  * rather than collapsing down to a single "nothing here" message the way
  * Folk/Quest do when they have zero entries at all. */
-export function GalleryPanel({ connection, campaignId, characterSheet, npcRoster, worldState, onIllustrated }: GalleryPanelProps) {
+export function GalleryPanel({ connection, campaignId, characterSheet, npcRoster, worldState, generateVideos, onIllustrated }: GalleryPanelProps) {
   const items = useMemo(
     () => buildGallery(characterSheet, npcRoster, worldState),
     [characterSheet, npcRoster, worldState]
@@ -238,7 +322,8 @@ export function GalleryPanel({ connection, campaignId, characterSheet, npcRoster
             connection={connection}
             campaignId={campaignId}
             item={item}
-            onOpen={(openedItem, url) => setLightbox({ item: openedItem, url })}
+            generateVideos={generateVideos}
+            onOpen={(openedItem, url, videoUrl) => setLightbox({ item: openedItem, url, videoUrl })}
             onLoadedChange={(loaded) =>
               setLoadedFlags((prev) => (prev[i] === loaded ? prev : { ...prev, [i]: loaded }))
             }
@@ -278,7 +363,20 @@ export function GalleryPanel({ connection, campaignId, characterSheet, npcRoster
               boxShadow: "0 20px 50px rgba(0,0,0,.7), 0 0 0 1px rgba(184,150,90,.5)",
             }}
           >
-            <img src={lightbox.url} alt="" data-testid="lightbox-image" style={{ width: "100%", display: "block" }} />
+            {lightbox.videoUrl ? (
+              <video
+                src={lightbox.videoUrl}
+                data-testid="lightbox-video"
+                controls
+                autoPlay
+                loop
+                playsInline
+                onClick={(e) => e.stopPropagation()}
+                style={{ width: "100%", display: "block" }}
+              />
+            ) : (
+              <img src={lightbox.url} alt="" data-testid="lightbox-image" style={{ width: "100%", display: "block" }} />
+            )}
           </div>
           <div style={{ textAlign: "center", marginTop: 14 }}>
             <div style={{ fontFamily: "var(--font-display)", fontSize: 10, letterSpacing: 2, color: "var(--arcane)" }}>

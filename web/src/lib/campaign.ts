@@ -1,6 +1,7 @@
 import { ApiError, apiFetch, apiFetchRaw } from "./api";
 import type { Connection } from "./connection";
 import type { MusicOverride } from "./music";
+import type { VideoOverride } from "./video";
 
 /** The active campaign id from a ?campaign= query param (kept for shareable
  * links and the e2e harness), or `null` when absent. Issue #97: this used to
@@ -35,6 +36,9 @@ export interface CharacterSheet {
   spellSlots?: Record<string, { total: number; used: number }>;
   currency?: { cp: number; sp: number; ep: number; gp: number; pp: number };
   portraitImage?: string;
+  /** Issue #118: an on-demand "Animate" clip of the portrait. Distinct from
+   * portraitImage so a clip never replaces the still. */
+  portraitVideo?: string;
   /** Issue #71: free-text physical description (sex, build, hair, marks). Feeds
    * the character's image prompt so a portrait matches the player's intent. */
   appearance?: string;
@@ -69,6 +73,9 @@ export interface TurnTranscriptRecord {
   /** ADR-0009: a user-illustrated moment records its scene image's relative
    * path here; absent on turns never illustrated. */
   image?: string;
+  /** Issue #118: an "Animate" action records the moment's clip relative path
+   * here; absent on turns never animated. */
+  video?: string;
 }
 
 export interface StateSnapshot {
@@ -127,6 +134,12 @@ export interface CampaignSettings {
    * user's account default (which itself falls back to `.env`). Only the
    * client-safe fields are stored — never Navidrome credentials. */
   music?: MusicOverride;
+  /** Issue #118: opt-in toggle that reveals the on-demand "Animate" actions.
+   * Absent === off (needs Grok Build configured, like generateImages). */
+  generateVideos?: boolean;
+  /** Issue #118: a per-game video-params override. Absent === this game tracks
+   * the account default (→ `.env` → code default), same model as music. */
+  video?: VideoOverride;
 }
 
 export type CampaignSettingsPatch = Partial<Omit<CampaignSettings, "model" | "provider">>;
@@ -283,6 +296,9 @@ export interface CampaignCreationSettings {
   artStyle?: string;
   autoIllustrateTurns?: boolean;
   autoRollDice?: boolean;
+  /** Issue #118: copy-on-create like generateImages (the video *params* are
+   * live-tracked from account defaults, so they are not sent here). */
+  generateVideos?: boolean;
 }
 
 /** Creates a new campaign from a character-creation form (ADR-0010); the
@@ -444,5 +460,39 @@ export async function illustrateMoment(
   return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/illustrate`, {
     method: "POST",
     body: JSON.stringify(description?.trim() ? { kind: "moment", turnIndex, description: description.trim() } : { kind: "moment", turnIndex }),
+  })) as IllustrateResult;
+}
+
+/** Issue #118: animate a known entity's portrait into a clip. `baseImage` is the
+ * entity's current still (from the gallery) — the server feeds it to
+ * /imagine-video for consistency; omit for a pure text-to-video clip. */
+export async function animateEntity(
+  connection: Connection,
+  campaignId: string,
+  entityType: "character" | "npc" | "location",
+  name: string,
+  description: string,
+  baseImage?: string
+): Promise<IllustrateResult> {
+  return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/animate`, {
+    method: "POST",
+    body: JSON.stringify({ kind: "entity", entityType, name, description, baseImage }),
+  })) as IllustrateResult;
+}
+
+/** Issue #118: animate a specific DM response into a clip. The server uses the
+ * moment's own still (if illustrated) as the base; an optional `description`
+ * refines the motion prompt (e.g. "slow push in, rain falling"). */
+export async function animateMoment(
+  connection: Connection,
+  campaignId: string,
+  turnIndex: number,
+  description?: string
+): Promise<IllustrateResult> {
+  return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/animate`, {
+    method: "POST",
+    body: JSON.stringify(
+      description?.trim() ? { kind: "moment", turnIndex, description: description.trim() } : { kind: "moment", turnIndex }
+    ),
   })) as IllustrateResult;
 }

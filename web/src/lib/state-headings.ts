@@ -19,3 +19,5 @@ export const NPC_DESCRIPTION_FIELD = "Description";
 export const NPC_DISPOSITION_FIELD = "Disposition";
 export const NPC_KNOWS_FIELD = "Knows";
 export const NPC_PORTRAIT_FIELD = "Portrait asset ID";
+/** Issue #118: the video analog of NPC_PORTRAIT_FIELD (see recordEntityVideo). */
+export const NPC_PORTRAIT_VIDEO_FIELD = "Portrait video ID";
