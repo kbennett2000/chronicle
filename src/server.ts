@@ -62,7 +62,14 @@ import {
   type ModelId,
 } from "./campaign-store.js";
 import { generateImage } from "./image-generator.js";
-import { IMAGE_PROVIDERS, isValidImageProvider, type ImageProvider } from "./image-backends/types.js";
+import {
+  IMAGE_PROVIDERS,
+  isValidImageProvider,
+  IMAGE_QUALITIES,
+  isValidImageQuality,
+  type ImageProvider,
+  type ImageQuality,
+} from "./image-backends/types.js";
 import { generateVideo } from "./video-generator.js";
 import { parseVideoBlock, resolveVideoConfig, type UserVideo } from "./video-store.js";
 import {
@@ -296,6 +303,14 @@ function parseDefaultSettings(
       return { error: `imageProvider must be one of ${IMAGE_PROVIDERS.join(", ")}` };
     }
     out.imageProvider = body.imageProvider;
+  }
+  // ADR-0029: which local quality tier this account defaults to (fast|standard|high),
+  // live-resolved (never copy-on-create), same as it flows on a campaign.
+  if (body.imageQuality !== undefined) {
+    if (!isValidImageQuality(body.imageQuality)) {
+      return { error: `imageQuality must be one of ${IMAGE_QUALITIES.join(", ")}` };
+    }
+    out.imageQuality = body.imageQuality;
   }
   // ADR-0020: music is stored under a `music` key. The Navidrome credentials are
   // deliberately NOT accepted here — they stay server-side in .env; a user may
@@ -1249,6 +1264,7 @@ const ROUTES: Array<{
         music?: UserMusic | null;
         video?: UserVideo | null;
         imageProvider?: ImageProvider | null;
+        imageQuality?: ImageQuality | null;
       } = {};
 
       if (body.artStyle !== undefined) {
@@ -1335,6 +1351,17 @@ const ROUTES: Array<{
           return;
         }
         updates.imageProvider = body.imageProvider;
+      }
+      // ADR-0029: per-game quality tier override. `null` resets to the account
+      // default (freely switchable mid-campaign, like imageProvider).
+      if (body.imageQuality === null) {
+        updates.imageQuality = null;
+      } else if (body.imageQuality !== undefined) {
+        if (!isValidImageQuality(body.imageQuality)) {
+          sendJson(res, 400, { error: `imageQuality must be one of ${IMAGE_QUALITIES.join(", ")}` });
+          return;
+        }
+        updates.imageQuality = body.imageQuality;
       }
       // #109: an optional per-game music override (same shape/validation as the
       // user default). Empty subfields clear that field back to the user default;

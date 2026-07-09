@@ -9,7 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sanitizeImagePrompt, saveGeneratedImage, slugify, sceneStyleNegatives } from "../image-generator.js";
-import type { ImageBackend, ImageBackendArgs, ImageGenResult } from "./types.js";
+import type { ImageBackend, ImageBackendArgs, ImageGenResult, ImageQuality } from "./types.js";
 
 export type FetchFn = typeof fetch;
 
@@ -37,17 +37,62 @@ export function deriveCampaignSeed(campaignDir: string, name: string): number {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-/** The checked-in SDXL txt2img graph; loaded fresh per call and injected with
- * the positive prompt (node "6") and a random seed (node "3"). */
-const WORKFLOW_PATH = path.resolve(__dirname, "../workflows/sdxl-txt2img.json");
+const WORKFLOWS_DIR = path.resolve(__dirname, "../workflows");
+const BASE_WORKFLOW = "sdxl-txt2img.json";
+const REFINER_WORKFLOW = "sdxl-refiner.json";
 
-/** Total wall-clock budget for one generation (submit + polling). ComfyUI on the
- * reference RTX 5070 does SDXL in ~7.5s warm / ~10s cold; 120s leaves generous
- * headroom for a cold model load or a busy queue, after which we give up and
- * return a failure so a DM turn never hangs. */
-const GEN_TIMEOUT_MS = 120_000;
+/** ADR-0029: what a quality tier resolves to on the local backend. `workflow` is a
+ * checked-in template filename under WORKFLOWS_DIR; `steps` overrides the base
+ * sampler's step count (base workflows only — the refiner template bakes its own
+ * schedule); `timeoutMs` is the tier-aware wall-clock budget. */
+export interface TierParams {
+  workflow: string;
+  steps?: number;
+  timeoutMs: number;
+}
+
+/** ADR-0029 tiers. `standard` is byte-identical to pre-0029 (the same base template,
+ * re-set to its own 25 steps). `fast` only lowers the step count. `high` swaps in the
+ * base→refiner ensemble template and raises the budget for the extra pass + the
+ * base→refiner model swap. ComfyUI on the reference RTX 5070 does a base SDXL image in
+ * ~7.5s warm / ~10s cold; 120s leaves generous headroom for a cold load or busy queue,
+ * and 300s covers `high`'s second model load + longer schedule. */
+export const TIER_CONFIG: Record<ImageQuality, TierParams> = {
+  fast: { workflow: BASE_WORKFLOW, steps: 15, timeoutMs: 120_000 },
+  standard: { workflow: BASE_WORKFLOW, steps: 25, timeoutMs: 120_000 },
+  high: { workflow: REFINER_WORKFLOW, timeoutMs: 300_000 },
+};
+
+/** Resolve a quality tier to its params, defaulting to `standard` for an
+ * absent/unknown tier so a stale value can never leave the backend without a graph.
+ * Exported for tests. */
+export function resolveTier(quality?: ImageQuality): TierParams {
+  return TIER_CONFIG[quality ?? "standard"] ?? TIER_CONFIG.standard;
+}
+
 const POLL_INTERVAL_MS = 500;
 const REQUEST_TIMEOUT_MS = 30_000;
+
+/** Set a node's prompt text if that node exists (base and, in the refiner template,
+ * the refiner's own CLIP-encode node — ADR-0029). No-op when the node is absent. */
+function setNodeText(graph: Record<string, any>, id: string, text: string): void {
+  if (graph[id]) graph[id].inputs.text = text;
+}
+
+/** Append to a node's existing (template) negative text if the node exists. */
+function appendNodeText(graph: Record<string, any>, id: string, extra: string): void {
+  const node = graph[id];
+  if (node) node.inputs.text = `${node.inputs.text}, ${extra}`;
+}
+
+/** Write the seed into a sampler node, using whichever key it exposes — `seed` for
+ * KSampler (base template), `noise_seed` for KSamplerAdvanced (refiner template). */
+function setNodeSeed(graph: Record<string, any>, id: string, seed: number): void {
+  const node = graph[id];
+  if (!node) return;
+  if ("noise_seed" in node.inputs) node.inputs.noise_seed = seed;
+  else node.inputs.seed = seed;
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -79,17 +124,27 @@ export async function generateLocalImage(
   // ADR-0028: pass the entity type so scene/location prompts get the weighted style
   // clause; character-class prompts are built exactly as before.
   const prompt = sanitizeImagePrompt(description, settings, { entityType });
+  // ADR-0029: pick the tier's workflow + step count + timeout. Absent tier → standard.
+  const tier = resolveTier(args.imageQuality);
 
   try {
-    // Build the graph from the checked-in template (fresh clone per call).
-    const graph = JSON.parse(fs.readFileSync(WORKFLOW_PATH, "utf8")) as Record<string, any>;
-    graph["6"].inputs.text = prompt;
-    // ADR-0028: steer scenes away from SDXL's default graphite/monochrome drift by
-    // appending style-aware negatives to the template's base negative prompt.
+    // Build the graph from the tier's checked-in template (fresh clone per call).
+    const graph = JSON.parse(fs.readFileSync(path.join(WORKFLOWS_DIR, tier.workflow), "utf8")) as Record<
+      string,
+      any
+    >;
+    // ADR-0029: inject into the base nodes and, when present (the refiner template),
+    // the refiner's own encode/sample nodes — so ADR-0028's style clause, anti-drift
+    // negatives, and per-campaign seed apply IDENTICALLY at every quality tier.
     const extraNeg = sceneStyleNegatives(settings, entityType);
-    if (extraNeg) graph["7"].inputs.text = `${graph["7"].inputs.text}, ${extraNeg}`;
-    // ADR-0028: deterministic per-campaign seed lineage instead of a random roll.
-    graph["3"].inputs.seed = deriveCampaignSeed(campaignDir, name);
+    const seed = deriveCampaignSeed(campaignDir, name);
+    for (const id of ["6", "12"]) setNodeText(graph, id, prompt);
+    if (extraNeg) for (const id of ["7", "13"]) appendNodeText(graph, id, extraNeg);
+    for (const id of ["3", "14"]) setNodeSeed(graph, id, seed);
+    // Base-workflow step override (fast/standard); the refiner template bakes its own.
+    if (tier.steps != null && graph["3"]?.inputs && "steps" in graph["3"].inputs) {
+      graph["3"].inputs.steps = tier.steps;
+    }
 
     const clientId = `chronicle-${entityType}-${Date.now()}`;
     const res = await fetchFn(`${base}/prompt`, {
@@ -110,7 +165,7 @@ export async function generateLocalImage(
     const promptId = submit.prompt_id;
 
     // Poll /history until this prompt yields an output image (or we time out).
-    const deadline = Date.now() + GEN_TIMEOUT_MS;
+    const deadline = Date.now() + tier.timeoutMs;
     let image: OutImage | undefined;
     while (Date.now() < deadline) {
       await sleep(POLL_INTERVAL_MS);
@@ -133,7 +188,7 @@ export async function generateLocalImage(
       }
       if (image) break;
     }
-    if (!image) return fail(name, `ComfyUI produced no image within ${GEN_TIMEOUT_MS}ms`);
+    if (!image) return fail(name, `ComfyUI produced no image within ${tier.timeoutMs}ms`);
 
     // Fetch the PNG bytes and save into the campaign images/ dir.
     const q = new URLSearchParams({ filename: image.filename, subfolder: image.subfolder, type: image.type });

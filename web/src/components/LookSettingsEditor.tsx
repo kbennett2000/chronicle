@@ -1,5 +1,5 @@
 import type { CampaignSettings, CampaignSettingsPatch } from "../lib/campaign";
-import { ToggleRow, ArtStylePicker, ImageProviderPicker } from "./LookControls";
+import { ToggleRow, ArtStylePicker, ImageProviderPicker, ImageQualityPicker } from "./LookControls";
 
 // Shared "THE LOOK" controls, lifted out of the Settings screen (issue #114) so
 // the main Settings screen (editing account defaults) and the in-game settings
@@ -8,7 +8,10 @@ import { ToggleRow, ArtStylePicker, ImageProviderPicker } from "./LookControls";
 // immediately — the host owns the endpoint (/me/settings vs /campaigns/:id/settings).
 
 interface LookSettingsEditorProps {
-  value: Pick<CampaignSettings, "generateImages" | "autoIllustrateTurns" | "artStyle" | "imageProvider">;
+  value: Pick<
+    CampaignSettings,
+    "generateImages" | "autoIllustrateTurns" | "artStyle" | "imageProvider" | "imageQuality"
+  >;
   onPatch: (patch: CampaignSettingsPatch) => void;
 }
 
@@ -41,6 +44,14 @@ export function LookSettingsEditor({ value, onPatch }: LookSettingsEditorProps) 
         <ImageProviderPicker
           value={value.imageProvider ?? "grok"}
           onChange={(provider) => onPatch({ imageProvider: provider })}
+        />
+      )}
+
+      {/* ADR-0029: local-engine quality tier — only shown when scene art is on. */}
+      {value.generateImages && (
+        <ImageQualityPicker
+          value={value.imageQuality ?? "standard"}
+          onChange={(quality) => onPatch({ imageQuality: quality })}
         />
       )}
 

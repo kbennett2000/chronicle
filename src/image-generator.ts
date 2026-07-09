@@ -7,7 +7,11 @@ import { readCharacterIdentity } from "./campaign-store.js";
 import { buildImagePrompt, type PromptStyleOpts } from "./image-prompt.js";
 import { stripMetaChatter } from "./narration.js";
 import type { ImageEntityType, ImageGenResult } from "./image-backends/types.js";
-import { getImageBackend, resolveImageProviderForCampaign } from "./image-backends/index.js";
+import {
+  getImageBackend,
+  resolveImageProviderForCampaign,
+  resolveImageQualityForCampaign,
+} from "./image-backends/index.js";
 
 // Re-exports so existing importers keep their paths after the ADR-0027 split:
 // video-generator.ts imports the type; tests/image-salvage.test.ts imports the
@@ -106,7 +110,17 @@ export async function generateImage(
   settings: CampaignSettings
 ): Promise<ImageGenResult> {
   const provider = resolveImageProviderForCampaign(campaignDir, settings);
-  return getImageBackend(provider).generate({ campaignDir, entityType, name, description, settings });
+  // ADR-0029: resolve the local quality tier alongside the provider and pass it in.
+  // Grok ignores it; the local backend selects its workflow/steps/timeout from it.
+  const imageQuality = resolveImageQualityForCampaign(campaignDir, settings);
+  return getImageBackend(provider).generate({
+    campaignDir,
+    entityType,
+    name,
+    description,
+    settings,
+    imageQuality,
+  });
 }
 
 export const GENERATE_IMAGE_TOOL_NAME = "mcp__image-tools__generate_image";

@@ -5,7 +5,13 @@
 import { readUserSettings } from "../user-store.js";
 import { campaignDirUserId } from "../campaign-store.js";
 import type { CampaignSettings } from "../campaign-store.js";
-import { isValidImageProvider, type ImageBackend, type ImageProvider } from "./types.js";
+import {
+  isValidImageProvider,
+  isValidImageQuality,
+  type ImageBackend,
+  type ImageProvider,
+  type ImageQuality,
+} from "./types.js";
 import { grokImageBackend } from "./grok.js";
 import { localImageBackend } from "./local.js";
 
@@ -48,4 +54,28 @@ export function resolveImageProviderForCampaign(campaignDir: string, settings: C
   const userProvider =
     userId !== undefined ? (readUserSettings(userId).imageProvider as string | undefined) : undefined;
   return resolveImageProvider(userProvider, settings.imageProvider);
+}
+
+/** ADR-0029: PURE precedence for the local quality tier, mirroring
+ * resolveImageProvider: campaign override → user default → `.env`
+ * (DEFAULT_IMAGE_QUALITY) → code default "standard". A value only wins when it's a
+ * valid tier, so a bad stored/env value is ignored. Code default "standard" keeps
+ * every existing game/account byte-identical to pre-0029. */
+export function resolveImageQuality(userQuality?: string, campaignQuality?: string): ImageQuality {
+  const pick = campaignQuality ?? userQuality;
+  if (isValidImageQuality(pick)) return pick;
+  const env = process.env.DEFAULT_IMAGE_QUALITY;
+  if (isValidImageQuality(env)) return env;
+  return "standard";
+}
+
+/** Resolve the effective quality tier for a campaign at the image-generation seam.
+ * Like resolveImageProviderForCampaign, this recovers the owning user from the
+ * campaigns/<userId>/<id> nesting (ADR-0019) because the seam fires mid-turn inside
+ * the MCP tool (and in the stdio subprocess) where only `campaignDir` is in scope. */
+export function resolveImageQualityForCampaign(campaignDir: string, settings: CampaignSettings): ImageQuality {
+  const userId = campaignDirUserId(campaignDir);
+  const userQuality =
+    userId !== undefined ? (readUserSettings(userId).imageQuality as string | undefined) : undefined;
+  return resolveImageQuality(userQuality, settings.imageQuality);
 }

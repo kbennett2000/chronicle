@@ -128,6 +128,10 @@ export interface CampaignSettings {
    * === tracks the account default (→ `.env` → "grok"). Unlike `provider` (the DM
    * engine), it is freely switchable mid-game — no session reset. */
   imageProvider?: "grok" | "local";
+  /** ADR-0029: the LOCAL engine's quality tier ("fast" | "standard" | "high") —
+   * time-for-quality at a fixed resolution. Absent === tracks the account default
+   * (→ `.env` → "standard"). Freely switchable mid-game, like imageProvider. */
+  imageQuality?: "fast" | "standard" | "high";
   /** Issue #44: absent === on. When explicitly false, the player supplies
    * their own dice values instead of the engine rolling. */
   autoRollDice?: boolean;
