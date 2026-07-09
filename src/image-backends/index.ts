@@ -7,17 +7,22 @@ import { campaignDirUserId } from "../campaign-store.js";
 import type { CampaignSettings } from "../campaign-store.js";
 import { isValidImageProvider, type ImageBackend, type ImageProvider } from "./types.js";
 import { grokImageBackend } from "./grok.js";
-// COMMIT 2 (ADR-0027) registers the local ComfyUI backend here.
+import { localImageBackend } from "./local.js";
 
-const BACKENDS: Partial<Record<ImageProvider, ImageBackend>> = {
-  grok: grokImageBackend,
-};
-
-/** The backend for a resolved provider. Falls back to grok for any provider not
- * in the registry (mirrors getBackend()'s claude fallback in src/backends/), so a
- * stored/unknown value can never leave a campaign unable to illustrate. */
+/** The backend for a resolved provider. Dispatched at CALL time (a switch, not an
+ * eval-time map) so a circular import — image-generator → index → a backend →
+ * image-generator — can't hit a TDZ on the backend consts whichever module is the
+ * entry point. Falls back to grok for any unknown value (mirrors getBackend()'s
+ * claude fallback in src/backends/) so a stale/typo'd provider can never leave a
+ * campaign unable to illustrate. */
 export function getImageBackend(provider: ImageProvider): ImageBackend {
-  return BACKENDS[provider] ?? grokImageBackend;
+  switch (provider) {
+    case "local":
+      return localImageBackend;
+    case "grok":
+    default:
+      return grokImageBackend;
+  }
 }
 
 /** PURE field-by-field precedence (mirrors resolveMusicConfig / resolveVideoConfig):

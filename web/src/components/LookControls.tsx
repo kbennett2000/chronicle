@@ -80,6 +80,57 @@ export function ToggleRow({ title, description, checked, onChange, testId, conta
   );
 }
 
+interface ImageProviderPickerProps {
+  /** The effective image engine — falls back to "grok" (the code default) when
+   * this account/game hasn't set one. */
+  value: "grok" | "local";
+  onChange: (provider: "grok" | "local") => void;
+}
+
+/** ADR-0027: pick which engine draws images — the cloud Grok CLI or a self-hosted
+ * ComfyUI on your own GPU. Two-button toggle styled like the DM EnginePicker's
+ * provider row. Freely switchable (no session reset), so no read-only mode. */
+export function ImageProviderPicker({ value, onChange }: ImageProviderPickerProps) {
+  const options: { id: "grok" | "local"; label: string; hint: string }[] = [
+    { id: "grok", label: "Grok Build", hint: "cloud · the grok CLI" },
+    { id: "local", label: "Local · ComfyUI", hint: "your GPU · SDXL, no cost" },
+  ];
+  return (
+    <>
+      <div style={{ fontSize: 12, color: "var(--ink-dim)", margin: "12px 0 7px" }}>
+        Image engine <span style={{ color: "var(--ink-faint)" }}>— who draws the pictures</span>
+      </div>
+      <div style={{ display: "flex", gap: 7 }}>
+        {options.map((o) => {
+          const active = value === o.id;
+          return (
+            <button
+              key={o.id}
+              data-testid="image-provider-option"
+              data-provider={o.id}
+              data-selected={active}
+              onClick={() => onChange(o.id)}
+              style={{
+                flex: 1,
+                cursor: "pointer",
+                padding: "9px 12px",
+                borderRadius: 4,
+                textAlign: "left",
+                color: active ? "var(--ink)" : "var(--ink-faint)",
+                background: active ? "rgba(124,61,32,.24)" : "rgba(28,20,12,.5)",
+                border: `1px solid ${active ? "rgba(211,112,60,.55)" : "rgba(109,90,56,.32)"}`,
+              }}
+            >
+              <div style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 13 }}>{o.label}</div>
+              <div style={{ fontSize: 10, color: "var(--ink-faint)", marginTop: 2 }}>{o.hint}</div>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 interface ArtStylePickerProps {
   /** The effective art style (a preset name, a custom string, or ""). */
   artStyle: string;
