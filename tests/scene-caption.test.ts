@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractSceneCaption, resolveMomentDescription } from "../src/narration.js";
+import {
+  extractSceneCaption,
+  resolveMomentDescription,
+  parseRetryCaption,
+  retrySceneCaption,
+} from "../src/narration.js";
 
 // ── extractSceneCaption (ADR-0030 / #128) ───────────────────────────────────
 
@@ -77,4 +82,67 @@ test("resolveMomentDescription: falls back to narration when no caption is store
 test("resolveMomentDescription: a blank caption falls through to narration", () => {
   const record = { narration: "long prose slab", sceneCaption: "   " };
   assert.equal(resolveMomentDescription("", record), "long prose slab");
+});
+
+// ── parseRetryCaption (ADR-0030 reliability amendment / #130) ────────────────
+
+test("parseRetryCaption reads a proper [SCENE: ...] retry reply", () => {
+  assert.equal(
+    parseRetryCaption("[SCENE: a ranger crouched at the treeline watching torchlit riders pass]"),
+    "a ranger crouched at the treeline watching torchlit riders pass"
+  );
+});
+
+test("parseRetryCaption accepts a bare line with no marker", () => {
+  assert.equal(
+    parseRetryCaption("a lantern-lit dock at low tide, crates stacked on wet planks"),
+    "a lantern-lit dock at low tide, crates stacked on wet planks"
+  );
+});
+
+test("parseRetryCaption strips a bare 'SCENE:' label and takes the last non-empty line", () => {
+  assert.equal(parseRetryCaption("Sure, here it is:\nSCENE: a storm breaking over black cliffs"),
+    "a storm breaking over black cliffs");
+});
+
+test("parseRetryCaption returns undefined on empty or whitespace input", () => {
+  assert.equal(parseRetryCaption(""), undefined);
+  assert.equal(parseRetryCaption("   \n  \n"), undefined);
+});
+
+// ── retrySceneCaption: one-shot backfill, no loop (ADR-0030 / #130) ──────────
+
+test("retrySceneCaption invokes the engine exactly once and returns the caption", async () => {
+  let calls = 0;
+  const caption = await retrySceneCaption(async () => {
+    calls++;
+    return { text: "[SCENE: a caravan halted in a red-rock canyon at noon]", isError: false };
+  });
+  assert.equal(caption, "a caravan halted in a red-rock canyon at noon");
+  assert.equal(calls, 1, "retry must fire exactly once — no loop");
+});
+
+test("retrySceneCaption returns undefined when the retry yields empty text (narration fallback)", async () => {
+  let calls = 0;
+  const caption = await retrySceneCaption(async () => {
+    calls++;
+    return { text: "", isError: false };
+  });
+  assert.equal(caption, undefined);
+  assert.equal(calls, 1, "still exactly one attempt — no loop on empty");
+});
+
+test("retrySceneCaption returns undefined when the retry is an engine error", async () => {
+  const caption = await retrySceneCaption(async () => ({ text: "whatever", isError: true }));
+  assert.equal(caption, undefined);
+});
+
+test("retrySceneCaption never throws when the engine call rejects", async () => {
+  let calls = 0;
+  const caption = await retrySceneCaption(async () => {
+    calls++;
+    throw new Error("engine blew up");
+  });
+  assert.equal(caption, undefined);
+  assert.equal(calls, 1, "one attempt, swallowed error, no loop");
 });

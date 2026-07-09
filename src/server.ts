@@ -22,6 +22,7 @@ import {
   setTranscriptRecordImage,
   recordEntityImage,
   setTranscriptRecordVideo,
+  setTranscriptRecordSceneCaption,
   recordEntityVideo,
   setCharacterAppearance,
   writePreTurnSnapshot,
@@ -61,7 +62,12 @@ import {
   type ProviderId,
   type ModelId,
 } from "./campaign-store.js";
-import { extractSceneCaption, resolveMomentDescription } from "./narration.js";
+import {
+  extractSceneCaption,
+  resolveMomentDescription,
+  retrySceneCaption,
+  SCENE_CAPTION_RETRY_PROMPT,
+} from "./narration.js";
 import { generateImage } from "./image-generator.js";
 import {
   IMAGE_PROVIDERS,
@@ -209,6 +215,53 @@ const activeSessions = new Map<string, ActiveSession>();
 /** The activeSessions key for a user's campaign (ADR-0019). */
 function sessionKey(userId: string, campaignId: string): string {
   return `${userId}/${campaignId}`;
+}
+
+/** ADR-0030 (Issue #130): when a turn produced no [SCENE:] caption, backfill one
+ * via a single follow-up request to the SAME DM session — same engine, same
+ * subscription, no new API/key — and patch it onto the just-appended record.
+ *
+ * Call this AFTER the narration response is already sent, so it never blocks or
+ * gates the player seeing/storing narration; the caller still holds the `busy`
+ * single-flight lock across it, so the resume can't race a concurrent player
+ * turn. Best-effort: `retrySceneCaption` swallows any engine error/empty reply
+ * and returns undefined, leaving the record captionless so the moment seams fall
+ * back to narration (today's behavior) — a turn never hangs or breaks.
+ *
+ * Deliberately does NOT touch `active.sessionId`: the throwaway caption exchange
+ * resumes from the turn's own session but its resulting session id is discarded,
+ * so the next narrative turn resumes from the turn itself and the caption Q&A
+ * never enters the ongoing story thread. One retry only — no loop. */
+async function backfillSceneCaption(
+  active: ActiveSession,
+  campaignDir: string,
+  settings: CampaignSettings,
+  turnSessionId: string | undefined,
+  turnIndex: number
+): Promise<void> {
+  const caption = await retrySceneCaption(() =>
+    getBackend(active.provider)
+      .runTurn({
+        campaignDir,
+        sessionLogPath: active.sessionLogPath,
+        userInput: SCENE_CAPTION_RETRY_PROMPT,
+        resumeSessionId: turnSessionId,
+        model: active.model,
+        settings,
+        onText: () => {},
+      })
+      .then((r) => ({ text: r.text, isError: r.isError }))
+  );
+  if (!caption) {
+    console.error(`[dm-engine] scene caption retry yielded nothing for turn ${turnIndex} — falling back to narration`);
+    return;
+  }
+  try {
+    setTranscriptRecordSceneCaption(campaignDir, active.sessionLogPath, turnIndex, caption);
+    console.error(`[dm-engine] scene caption backfilled via retry for turn ${turnIndex}`);
+  } catch (e) {
+    console.error(`[dm-engine] scene caption backfill patch failed for turn ${turnIndex}: ${(e as Error).message}`);
+  }
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -1032,7 +1085,7 @@ const ROUTES: Array<{
         // Per ADR-0007: the deterministic speaker-attribution record, written
         // here (not inferred from prose afterward) at the one point both
         // strings are already in hand — for every turn, error or not.
-        appendTurnTranscript(campaignDir, active.sessionLogPath, message, narration, sceneCaption);
+        const record = appendTurnTranscript(campaignDir, active.sessionLogPath, message, narration, sceneCaption);
 
         sendJson(res, result.isError ? 502 : 200, {
           narration,
@@ -1040,6 +1093,15 @@ const ROUTES: Array<{
           model: result.model,
           isError: result.isError,
         });
+
+        // ADR-0030 (Issue #130): the DM often omits the [SCENE:] line in live
+        // play. When it did, backfill the caption via one same-session retry —
+        // AFTER the response above, so the player never waits on it. The `busy`
+        // lock (cleared in finally) is still held, so this can't race the next
+        // player turn.
+        if (!result.isError && !sceneCaption) {
+          await backfillSceneCaption(active, campaignDir, settings, result.sessionId, record.turnIndex);
+        }
       } finally {
         // Always clear the single-flight lock — on success, on a 502 engine
         // error, and on a thrown exception (which propagates to the top-level
@@ -1124,9 +1186,9 @@ const ROUTES: Array<{
         // Turn-zero: empty playerMessage marks a DM-initiated turn (ADR-0013).
         // On an engine error, don't persist a broken opening — leave the
         // campaign at zero turns so the next enter-Play retries it cleanly.
-        if (!result.isError) {
-          appendTurnTranscript(campaignDir, active.sessionLogPath, "", narration, sceneCaption);
-        }
+        const record = result.isError
+          ? undefined
+          : appendTurnTranscript(campaignDir, active.sessionLogPath, "", narration, sceneCaption);
 
         sendJson(res, result.isError ? 502 : 200, {
           narration,
@@ -1134,6 +1196,12 @@ const ROUTES: Array<{
           model: result.model,
           isError: result.isError,
         });
+
+        // ADR-0030 (Issue #130): backfill a missing opening caption via one
+        // same-session retry, after the response (never blocks the player).
+        if (record && !sceneCaption) {
+          await backfillSceneCaption(active, campaignDir, settings, result.sessionId, record.turnIndex);
+        }
       } finally {
         active.busy = false;
       }
@@ -1230,15 +1298,16 @@ const ROUTES: Array<{
         // Persist the re-run record at index `turnIndex` (transcript was
         // truncated to that length). Match /opening: don't persist a broken
         // opening; a broken normal turn is still recorded (as /turns does).
-        if (!result.isError || !isOpening) {
-          appendTurnTranscript(
-            campaignDir,
-            active.sessionLogPath,
-            isOpening ? "" : (message as string),
-            narration,
-            sceneCaption
-          );
-        }
+        const record =
+          !result.isError || !isOpening
+            ? appendTurnTranscript(
+                campaignDir,
+                active.sessionLogPath,
+                isOpening ? "" : (message as string),
+                narration,
+                sceneCaption
+              )
+            : undefined;
 
         sendJson(res, result.isError ? 502 : 200, {
           narration,
@@ -1248,6 +1317,12 @@ const ROUTES: Array<{
           turnIndex,
           discardedCount,
         });
+
+        // ADR-0030 (Issue #130): backfill a missing caption on the re-run via
+        // one same-session retry, after the response (never blocks the player).
+        if (record && !result.isError && !sceneCaption) {
+          await backfillSceneCaption(active, campaignDir, settings, result.sessionId, record.turnIndex);
+        }
       } finally {
         active.busy = false;
       }

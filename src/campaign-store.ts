@@ -903,6 +903,31 @@ export function setTranscriptRecordVideo(
   return record;
 }
 
+/** ADR-0030 (Issue #130): attach a scene caption to an already-recorded turn.
+ * Exact analog of setTranscriptRecordImage/Video. Unlike the caption set at
+ * append time by appendTurnTranscript, this patches a record whose turn emitted
+ * NO [SCENE:] line — the caption arrives afterward from the one-shot same-session
+ * retry (server.ts), which runs after the narration response is already sent.
+ * A blank caption is a no-op (leaves the record captionless → narration
+ * fallback). Throws if the turn isn't found. */
+export function setTranscriptRecordSceneCaption(
+  campaignDir: string,
+  sessionLogRelPath: string,
+  turnIndex: number,
+  sceneCaption: string
+): TurnTranscriptRecord {
+  const records = readTurnTranscript(campaignDir, sessionLogRelPath);
+  const record = records.find((r) => r.turnIndex === turnIndex);
+  if (!record) {
+    throw new Error(`no transcript record at turn ${turnIndex} for ${sessionLogRelPath}`);
+  }
+  if (!sceneCaption || !sceneCaption.trim()) return record;
+  record.sceneCaption = sceneCaption.trim();
+  const abs = path.join(campaignDir, transcriptPathFor(sessionLogRelPath));
+  fs.writeFileSync(abs, records.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  return record;
+}
+
 // ── Issue #68 (ADR-0016): editable history via pre-turn state snapshots ──
 // Before every turn/opening the server snapshots the campaign's mutable state
 // (the four state files + the active prose session log). Editing a past turn

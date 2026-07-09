@@ -368,16 +368,6 @@ ${lengthRule}
     momentous the moment just was, there is always a next moment: keep the
     world live and end every reply on an in-progress beat that invites the
     player's next action, exactly as rule 18 requires.
-20. After your narration is complete, output exactly one final line, and
-    nothing after it, of the form [SCENE: ...] — where the text inside is a
-    single short third-person, present-tense description of what is visually
-    happening in this moment: the main subject(s), the setting, the action,
-    the lighting and mood, and any notable objects. No second person, no
-    dialogue, no inner thoughts, no passage of time, no art-style or medium
-    words. This one line is the sole exception to rule 17: it is stripped out
-    before the player ever sees it and is used only to illustrate the scene,
-    so never reference it in your prose, and do NOT include it in the
-    session-log entry you append (rule 8).
 
 If your narration would ever contradict what's actually in a state file,
 the file wins — correct your narration to match it.`;
@@ -452,6 +442,32 @@ against the appropriate DC/AC and narrate what happens. Never phrase this as
 your own action ("let me roll…"); it is always a request to the player.`);
   }
 
+  // ADR-0030 (Issue #130): the scene caption is a REQUIRED output-format
+  // contract, not a numbered story rule and not an "exception to rule 17" — the
+  // earlier framing was too weak and the model routinely dropped the line in
+  // live play. It lives in its own OUTPUT FORMAT section pushed LAST so it is
+  // the final thing the model reads before it generates, which measurably
+  // improves compliance. A missing line is now backstopped by a one-shot
+  // same-session retry (server.ts), but reliable first-pass emission keeps that
+  // retry rare.
+  sections.push(`=== OUTPUT FORMAT (required on EVERY reply) ===
+Every reply you produce has exactly two parts, in this order:
+(1) your narration — the story the player reads; then
+(2) as the very last line, by itself and with nothing after it, a single scene
+    caption of the form:
+    [SCENE: one short third-person, present-tense sentence describing what is
+    visually happening right now — the main subject(s), the setting, the action,
+    the lighting and mood, and any notable objects]
+
+The [SCENE: ...] line is MANDATORY and a reply is INCOMPLETE without it. Emit it
+on every single turn, including the very first (opening) scene. It is machine-read
+to illustrate the moment and is stripped out before the player ever sees it, so:
+keep it to one line; write it in the third person, present tense; describe only
+what is visible; use no second person, no dialogue, no inner thoughts, no passage
+of time, and no art-style or medium words. Never refer to this line anywhere in
+your prose, and do NOT include it in the session-log entry you append (rule 8).
+Output nothing at all after it.`);
+
   return sections.join("\n\n");
 }
 
@@ -486,10 +502,10 @@ Narrate an immersive, present-tense opening that:
 
 Before or after narrating, update world-state.md's "## Current Situation"
 section so it reflects this opening. Write only the in-world scene as your
-reply — no preamble, no bookkeeping notes, no meta commentary — then end with
-the single [SCENE: ...] visual-caption line required every turn (its sole
-exception), a short third-person, present-tense description of this opening
-moment for illustration.`;
+reply — no preamble, no bookkeeping notes, no meta commentary. Then, as the
+mandatory final line required on every reply (see the OUTPUT FORMAT section),
+append the single [SCENE: ...] caption: a short third-person, present-tense
+description of this opening moment, used only to illustrate it.`;
 }
 
 export interface TurnResult {

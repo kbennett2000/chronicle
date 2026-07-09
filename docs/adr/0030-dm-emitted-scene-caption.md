@@ -1,7 +1,10 @@
 # ADR-0030: DM-emitted inline scene caption for moment images
 
 ## Status
-Accepted
+Accepted. Amended by the "Reliability amendment (Issue #130)" section below —
+the caption is reframed from a numbered "exception to rule 17" into a required
+OUTPUT FORMAT contract, and a missing caption is backstopped by one free
+same-session retry.
 
 ## Context
 Scene/moment images (the user-triggered "Illustrate this moment" and its
@@ -142,3 +145,63 @@ Nothing new can fail the illustrate/animate path.
   issue); on those turns there is simply no caption and the narration fallback
   applies. The shared prompt means both backends emit the line whenever they
   produce prose.
+
+## Reliability amendment (Issue #130)
+
+The original decision worked but leaned entirely on the model choosing to emit
+the line. In live play the DM **routinely omitted** it, so `record.sceneCaption`
+was null and scene images silently fell back to the narration slab — the very
+failure this ADR set out to fix (verified: a live turn showed `sceneCaption:
+None`). Two changes make the caption reliable, still with **no new model, API
+key, paid call, or HTTP client** — any retry reuses the same DM engine on the
+same subscription via the existing `backend.runTurn(...)`/session path.
+
+### Part A — reframe the prompt as a required output contract
+The caption is no longer a numbered story rule framed as "the sole exception to
+rule 17" (that framing was too weak — buried mid-list, it read as an aside). It
+now lives in its **own `OUTPUT FORMAT` section pushed last** onto the assembled
+system prompt in `systemPrompt()`, so it is the final thing the model reads
+before generating. It is stated as a hard contract: every reply is (1) narration
+then (2) a mandatory final `[SCENE: ...]` line, and a reply is *incomplete*
+without it. The content rules are unchanged (one line; third-person; present
+tense; visual only; no second person/dialogue/inner-thoughts/time-passage/
+art-style words; never in the session-log append). `openingDirective()` (turn 0)
+points at the same OUTPUT FORMAT contract instead of its old "sole exception"
+wording.
+
+### Part B — one free same-session retry when the line is missing
+When a turn is parsed and no `[SCENE:]` line is found, the server makes **exactly
+one** follow-up request to the **same DM session** (`resumeSessionId` = the
+turn's own session id) whose whole prompt (`SCENE_CAPTION_RETRY_PROMPT`) asks
+only for the caption line for the turn just narrated, and forbids any narration
+or file/session-log writes. Its reply is parsed by `parseRetryCaption` (which
+accepts a proper `[SCENE:]` line or a bare sentence) and patched onto the record
+via the new `setTranscriptRecordSceneCaption` setter — the post-hoc analog of
+`setTranscriptRecordImage`/`Video`, needed because the caption now arrives after
+the record was appended.
+
+Constraints that keep it safe and non-disruptive:
+- **Never blocks the player.** The retry runs *after* the narration response is
+  already sent (narration is captured, stripped, persisted, and returned first);
+  the caption is best-effort and only gates the image.
+- **At most one retry, no loop.** `retrySceneCaption` invokes the injected
+  engine call exactly once; on an engine error, an empty reply, or a throw it
+  returns `undefined` and the record stays captionless → the seams fall back to
+  narration (today's behavior). A turn never hangs or breaks over a missing
+  caption.
+- **Session single-flight preserved.** The caller still holds the `busy` lock
+  across the retry, so the resume can't race a concurrent player turn (issue
+  #31).
+- **The narrative thread stays clean.** `active.sessionId` is *not* advanced to
+  the retry's returned session id, so the throwaway caption Q&A never enters the
+  next narrative turn's resumed history.
+- **Engine-agnostic.** The retry dispatches through the same `getBackend(...).
+  runTurn(...)` seam, so it works for whichever backend ran the turn — Claude
+  (Agent SDK resume) or Grok (`--resume`). For Grok's known empty-text turns the
+  retry may also be empty, which the narration fallback already covers.
+
+`extractSceneCaption`, `resolveMomentDescription`, the two moment seams, the
+`sceneCaption` record field, and both image backends are unchanged — the
+reliability work is confined to the prompt (`dm-engine.ts`), the parse/retry
+helpers (`narration.ts`), the post-hoc setter (`campaign-store.ts`), and the
+three turn handlers (`server.ts`).
