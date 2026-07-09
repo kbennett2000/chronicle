@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { generateLocalImage } from "../src/image-backends/local.js";
+import { generateLocalImage, deriveCampaignSeed } from "../src/image-backends/local.js";
 import type { CampaignSettings } from "../src/campaign-store.js";
 
 // ADR-0027: the local ComfyUI backend talks to ComfyUI's HTTP API (POST /prompt,
@@ -67,31 +67,88 @@ test("generateLocalImage: submits the graph, polls history, fetches the PNG, and
   });
 });
 
-test("generateLocalImage: injects the sanitized prompt (art style leads) and a numeric seed into the graph", async () => {
-  await withCampaignDir(async (dir) => {
-    let submitted: any;
-    const fetchFn = (async (url: string, init?: any) => {
-      if (url.includes("/prompt")) {
-        submitted = JSON.parse(init.body);
-        return jsonRes(200, { prompt_id: PROMPT_ID });
-      }
-      if (url.includes("/history/")) {
-        return jsonRes(200, {
-          [PROMPT_ID]: { status: { status_str: "success" }, outputs: { "9": { images: [{ filename: "x.png", subfolder: "", type: "output" }] } } },
-        });
-      }
-      return bytesRes(200);
-    }) as unknown as typeof fetch;
+/** A fetchFn that captures the submitted graph body and always resolves to a saved
+ * image, so a test can inspect exactly what was posted to ComfyUI. */
+function capturingFetch(capture: { submitted?: any }): typeof fetch {
+  return (async (url: string, init?: any) => {
+    if (url.includes("/prompt")) {
+      capture.submitted = JSON.parse(init.body);
+      return jsonRes(200, { prompt_id: PROMPT_ID });
+    }
+    if (url.includes("/history/")) {
+      return jsonRes(200, {
+        [PROMPT_ID]: { status: { status_str: "success" }, outputs: { "9": { images: [{ filename: "x.png", subfolder: "", type: "output" }] } } },
+      });
+    }
+    return bytesRes(200);
+  }) as unknown as typeof fetch;
+}
 
+test("generateLocalImage: a scene weights the leading style clause and uses a deterministic seed (ADR-0028)", async () => {
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
     await generateLocalImage(
       { campaignDir: dir, entityType: "location", name: "The Forge", description: "a glowing forge", settings: SETTINGS },
-      fetchFn
+      capturingFetch(cap)
     );
-    // buildImagePrompt leads with the art style (#104), injected at node "6".
-    assert.equal(submitted.prompt["6"].inputs.text, "ink wash. a glowing forge");
-    assert.equal(typeof submitted.prompt["3"].inputs.seed, "number");
-    assert.ok(submitted.client_id.startsWith("chronicle-location-"));
+    // Scene-class prompt gets SDXL weighting on the leading style clause (#104 + ADR-0028).
+    assert.equal(cap.submitted.prompt["6"].inputs.text, "(ink wash:1.3). a glowing forge");
+    // Seed is the per-campaign derivation, not a random roll.
+    assert.equal(cap.submitted.prompt["3"].inputs.seed, deriveCampaignSeed(dir, "The Forge"));
+    // "ink wash" is itself a monochrome style, so no anti-drift negatives are added.
+    assert.equal(cap.submitted.prompt["7"].inputs.text, "blurry, lowres, deformed, text, watermark");
+    assert.ok(cap.submitted.client_id.startsWith("chronicle-location-"));
   });
+});
+
+test("generateLocalImage: a color-forward scene appends anti-drift negatives (ADR-0028)", async () => {
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
+    const lego = { model: "claude-sonnet-5", provider: "claude", artStyle: "Lego-style" } as unknown as CampaignSettings;
+    await generateLocalImage(
+      { campaignDir: dir, entityType: "scene", name: "Throne Room", description: "a vast hall", settings: lego },
+      capturingFetch(cap)
+    );
+    assert.equal(cap.submitted.prompt["6"].inputs.text, "(Lego-style:1.3). a vast hall");
+    // The template's base negative is preserved and the drift steer is appended.
+    assert.match(cap.submitted.prompt["7"].inputs.text, /^blurry, lowres, deformed, text, watermark, /);
+    assert.match(cap.submitted.prompt["7"].inputs.text, /monochrome/);
+    assert.match(cap.submitted.prompt["7"].inputs.text, /graphite/);
+  });
+});
+
+test("generateLocalImage: a character keeps the unweighted style and no extra negatives (ADR-0028)", async () => {
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
+    const lego = { model: "claude-sonnet-5", provider: "claude", artStyle: "Lego-style" } as unknown as CampaignSettings;
+    await generateLocalImage(
+      { campaignDir: dir, entityType: "npc", name: "Barrow", description: "a weathered dwarf", settings: lego },
+      capturingFetch(cap)
+    );
+    assert.equal(cap.submitted.prompt["6"].inputs.text, "Lego-style. a weathered dwarf");
+    assert.equal(cap.submitted.prompt["7"].inputs.text, "blurry, lowres, deformed, text, watermark");
+  });
+});
+
+test("deriveCampaignSeed: stable per (campaign, entity), varies by campaign, distinct per entity (ADR-0028)", () => {
+  const a = "/home/kb/campaigns/kris/emberfall";
+  const b = "/home/kb/campaigns/kris/duskwater";
+  // Deterministic: same inputs → same seed.
+  assert.equal(deriveCampaignSeed(a, "The Forge"), deriveCampaignSeed(a, "The Forge"));
+  // Trailing slash doesn't change the campaign id.
+  assert.equal(deriveCampaignSeed(a, "The Forge"), deriveCampaignSeed(a + "/", "The Forge"));
+  // Different campaign → different anchor.
+  assert.notEqual(deriveCampaignSeed(a, "The Forge"), deriveCampaignSeed(b, "The Forge"));
+  // Different entity in the same campaign → distinct seed, but within the 1024 band
+  // (measured circularly, since the uint32 add can wrap around 0xffffffff).
+  const s1 = deriveCampaignSeed(a, "The Forge");
+  const s2 = deriveCampaignSeed(a, "The Docks");
+  assert.notEqual(s1, s2);
+  const d = Math.abs(s1 - s2);
+  const circ = Math.min(d, 0x100000000 - d);
+  assert.ok(circ < 1024, `seeds should share the campaign band, got ${circ}`);
+  // A valid uint32.
+  assert.ok(Number.isInteger(s1) && s1 >= 0 && s1 <= 0xffffffff);
 });
 
 test("generateLocalImage: a non-200 from /prompt returns { ok: false } and never throws", async () => {

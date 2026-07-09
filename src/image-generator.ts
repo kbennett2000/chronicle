@@ -4,7 +4,7 @@ import { z } from "zod";
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import type { CampaignSettings } from "./campaign-store.js";
 import { readCharacterIdentity } from "./campaign-store.js";
-import { buildImagePrompt } from "./image-prompt.js";
+import { buildImagePrompt, type PromptStyleOpts } from "./image-prompt.js";
 import { stripMetaChatter } from "./narration.js";
 import type { ImageEntityType, ImageGenResult } from "./image-backends/types.js";
 import { getImageBackend, resolveImageProviderForCampaign } from "./image-backends/index.js";
@@ -14,6 +14,9 @@ import { getImageBackend, resolveImageProviderForCampaign } from "./image-backen
 // salvage helper; server.ts uses the ImageGenResult shape.
 export type { ImageEntityType, ImageGenResult } from "./image-backends/types.js";
 export { newestImageUnder } from "./image-backends/grok.js";
+// ADR-0028 scene-style helpers, surfaced here so the local backend and its tests
+// reach them through the same module they already import from.
+export { SCENE_ENTITY_TYPES, sceneStyleNegatives, type PromptStyleOpts } from "./image-prompt.js";
 
 /** Hard cap on the /imagine prompt length. A scene description is at most a few
  * sentences; anything longer is almost certainly leaked context, and a shorter
@@ -32,12 +35,16 @@ const MIN_IMAGE_BYTES = 1024;
  * Provider-agnostic — used by both backends. Note this is one layer: the grok
  * backend's temp-dir isolation + `--deny` tool restrictions are what make even an
  * imperfectly-stripped prompt harmless there. */
-export function sanitizeImagePrompt(description: string, settings: CampaignSettings): string {
+export function sanitizeImagePrompt(
+  description: string,
+  settings: CampaignSettings,
+  opts?: PromptStyleOpts
+): string {
   const cleaned =
     stripMetaChatter(description).trim().slice(0, MAX_IMAGE_PROMPT_CHARS) ||
     description.trim().slice(0, MAX_IMAGE_PROMPT_CHARS) ||
     "a scene from the story";
-  return buildImagePrompt(cleaned, settings);
+  return buildImagePrompt(cleaned, settings, opts);
 }
 
 /** Slug for an image filename. Exported so both backends build the identical
