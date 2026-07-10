@@ -158,6 +158,38 @@ test("resolveMomentDescription: a blank caption falls through to narration", () 
   assert.equal(resolveMomentDescription("", record), "long prose slab");
 });
 
+// ── resolveMomentDescription AUTO mode (ADR-0030 race amendment / #146) ───────
+// AUTO illustration is DRIVEN BY the caption: with no caption it must SKIP
+// (return undefined) rather than scavenge narration. Narration fallback survives
+// only on the manual path.
+
+test("resolveMomentDescription AUTO: a parsed caption is used, never narration", () => {
+  const record = { narration: "long prose slab", sceneCaption: "the cached caption" };
+  assert.equal(resolveMomentDescription("", record, { auto: true }), "the cached caption");
+});
+
+test("resolveMomentDescription AUTO: NO caption returns undefined (skip), not narration", () => {
+  const record = { narration: "long prose slab" };
+  assert.equal(resolveMomentDescription("", record, { auto: true }), undefined);
+});
+
+test("resolveMomentDescription AUTO: a blank caption returns undefined (skip), not narration", () => {
+  const record = { narration: "long prose slab", sceneCaption: "   " };
+  assert.equal(resolveMomentDescription("", record, { auto: true }), undefined);
+});
+
+test("resolveMomentDescription AUTO: an explicit override still wins over the skip", () => {
+  const record = { narration: "long prose slab" };
+  assert.equal(resolveMomentDescription("dusk, wider shot", record, { auto: true }), "dusk, wider shot");
+});
+
+test("resolveMomentDescription MANUAL: no caption still falls back to narration (fallback preserved)", () => {
+  const record = { narration: "long prose slab" };
+  // No opts (and explicit auto:false) — the manual path keeps narration fallback.
+  assert.equal(resolveMomentDescription("", record), "long prose slab");
+  assert.equal(resolveMomentDescription("", record, { auto: false }), "long prose slab");
+});
+
 // ── parseRetryCaption (ADR-0030 reliability amendment / #130) ────────────────
 
 test("parseRetryCaption reads a proper [SCENE: ...] retry reply", () => {

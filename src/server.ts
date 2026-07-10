@@ -1597,27 +1597,28 @@ const ROUTES: Array<{
         }
         // ADR-0030: the DM-emitted [SCENE: ...] caption for this turn is the
         // scene description — a concentrated visual of the moment, not the prose
-        // slab. Falls back to narration when a turn has no caption. Issue #66: a
-        // regenerate can pass an explicit `description` to refine the prompt
-        // (e.g. "the same scene, but at night"), which takes precedence.
-        // ADR-0031: ground KNOWN entities the DM flagged present ([PRESENT:]) in
-        // their canonical appearance before the cap, so they render on-model.
+        // slab. Issue #66: a regenerate can pass an explicit `description` to
+        // refine the prompt (e.g. "the same scene, but at night"), which takes
+        // precedence. ADR-0031: ground KNOWN entities the DM flagged present
+        // ([PRESENT:]) in their canonical appearance before the cap.
+        //
+        // ADR-0030 race amendment (#146): the reply-first AUTO trigger sends
+        // `auto: true`. In auto mode `resolveMomentDescription` returns undefined
+        // when there's no override and no cached caption — the DM omitted the
+        // [SCENE:] line inline and the post-response backfill hasn't landed yet.
+        // A caption-less auto image is always off-moment, so SKIP rather than
+        // scavenge narration; the client shows the manual "Illustrate" affordance,
+        // and by the time the user reaches for it the backfill has patched the
+        // caption in. The MANUAL path (no `auto`) keeps the narration fallback —
+        // the user explicitly asked, so draw something.
+        const auto = body.auto === true;
         const override = typeof body.description === "string" && body.description.trim() ? body.description.trim() : "";
-        // Issue #142: when the DM omitted [SCENE:], the caption is produced by
-        // the after-response backfill (ADR-0030) — the same turn response that
-        // triggers this auto-illustrate. If that turn is still settling and the
-        // record has no caption yet, wait it out and re-read, so we draw from
-        // the freshly-backfilled caption instead of racing it and falling back
-        // to narration. No wait when an override is given, the caption already
-        // landed, or no turn is in flight.
-        if (!override && active.settling && !record.sceneCaption?.trim()) {
-          await active.settling;
-          record =
-            readTurnTranscript(campaignDir, active.sessionLogPath).find(
-              (r) => r.turnIndex === body.turnIndex
-            ) ?? record;
+        const resolved = resolveMomentDescription(override, record, { auto });
+        if (resolved === undefined) {
+          sendJson(res, 200, { ok: false, skipped: true, turnIndex: body.turnIndex });
+          return;
         }
-        const base = groundSceneDescription(campaignDir, resolveMomentDescription(override, record), record.presentEntities);
+        const base = groundSceneDescription(campaignDir, resolved, record.presentEntities);
         const description = base.trim().slice(0, 500) || "a scene from the story";
         const sessionBase = path.basename(active.sessionLogPath).replace(/\.md$/, "");
         const name = `${sessionBase}-turn-${body.turnIndex}`;
@@ -1626,10 +1627,8 @@ const ROUTES: Array<{
         if (result.ok && result.relPath) {
           setTranscriptRecordImage(campaignDir, active.sessionLogPath, body.turnIndex, result.relPath);
         }
-        // Issue #142: surface the caption that made this image so the client can
-        // prefill the regenerate box on a same-session fresh turn whose original
-        // response was captionless (the caption arrived via the backfill above).
-        // Undefined when genuinely absent → the box stays blank, as before.
+        // Return the caption used (if any) so the client can prefill the
+        // regenerate box even when the turn payload predated the caption.
         sendJson(res, 200, { ...result, turnIndex: body.turnIndex, sceneCaption: record.sceneCaption });
         return;
       }
@@ -1709,8 +1708,16 @@ const ROUTES: Array<{
         // moment's still and its animation share one caption (both read
         // record.sceneCaption); explicit override still wins. ADR-0031: same
         // entity grounding as /illustrate, so the clip renders entities on-model.
+        // Animate is user-triggered only (never the reply-first auto path), so it
+        // stays on the manual seam — no `auto`, narration fallback intact. The
+        // `?? record.narration` is a type-only guard: without `auto`,
+        // resolveMomentDescription never returns undefined.
         const override = typeof body.description === "string" && body.description.trim() ? body.description.trim() : "";
-        const base = groundSceneDescription(campaignDir, resolveMomentDescription(override, record), record.presentEntities);
+        const base = groundSceneDescription(
+          campaignDir,
+          resolveMomentDescription(override, record) ?? record.narration,
+          record.presentEntities
+        );
         const description = base.trim().slice(0, 500) || "a scene from the story";
         const sessionBase = path.basename(active.sessionLogPath).replace(/\.md$/, "");
         const name = `${sessionBase}-turn-${body.turnIndex}`;
