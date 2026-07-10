@@ -71,6 +71,20 @@ Generation can take a few seconds to a minute the first time — the storyteller
 
 ---
 
+## Automatic Illustrations
+
+Once **Generate scene art** is on, a second switch appears in **Settings → The Look**: **“Auto-illustrate each turn.”**
+
+Turn it on and the storyteller draws the scene for you automatically — the picture appears a moment after each reply, so you don’t have to tap “Illustrate this moment” yourself. It’s **off by default**, so nothing changes until you choose to switch it on.
+
+**Why the pictures fit the moment.** Each auto-drawn image comes from a short visual description of that exact beat — who’s there, where you are, the action and the mood — rather than a generic guess. So the picture reflects what just happened. And anyone you’ve already met stays **on-model**: known NPCs and your own character keep their established look from scene to scene.
+
+**One thing to expect — this is normal, not a bug.** Every so often a turn won’t draw its own picture. That’s on purpose. When the storyteller isn’t confident it can picture the moment cleanly, it would rather show *no* image than a wrong or irrelevant one. When that happens you’ll just see the **“⟢ Illustrate this moment”** button under that turn — tap it and the picture appears. (And if a moment already has art but you’d like a different take, **“↻ Regenerate image”** lets you tweak the description and redraw.)
+
+So a skipped image is the game being careful, not something going wrong. You’re always one tap away from the picture you want.
+
+---
+
 ## A Note on Cost
 
 Image generation uses a small amount of your Grok usage. For normal solo play this is very modest (usually just pennies per session even with many pictures).
