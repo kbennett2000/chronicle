@@ -68,35 +68,36 @@ Max subscription** — the same login you’d use at claude.ai.
 5. You can close this window. That’s the brain sorted. 🧠
 
 **Good to know:** You do **not** need to paste any keys or codes. Chronicle uses
-the Claude subscription you just signed in with. (The `.env` file in the next
-step has an `ANTHROPIC_API_KEY` line — leave it **blank**.)
+the Claude subscription you just signed in with. (Don’t set an `ANTHROPIC_API_KEY`
+environment variable — leaving it unset keeps billing on your subscription.)
 
 ---
 
 ## Step 4: Create Your Settings File
 
-Chronicle keeps a tiny settings file called `.env`. For now we only need to tell
-it your computer’s address on your home network — we’ll fill that in a moment.
+Chronicle keeps its settings in a small file called `config.json`. For now we only
+need to tell it your computer’s address on your home network — we’ll fill that in
+a moment.
 
-1. Inside your `chronicle` folder, find the file named `.env.example`.
+1. Inside your `chronicle` folder, find the file named `config.example.json`.
 
 2. Right-click it and choose **Copy**, then right-click in the same folder and
-   choose **Paste**. You now have `.env.example - Copy`.
+   choose **Paste**. You now have `config.example.json - Copy`.
 
-3. Rename the copy to exactly `.env` (remove the “- Copy” part).  
-   *If you don’t see the `.env` file after renaming, that’s okay — Windows sometimes hides files that start with a dot. We’ll open it directly next.*
+3. Rename the copy to exactly `config.json` (remove the “ - Copy” part; the name
+   should end in `.json`).
 
-4. Right-click the new `.env` file and choose **Open with** → **Notepad**.
+4. Right-click the new `config.json` file and choose **Open with** → **Notepad**.
 
 5. Find the line that says:
 
-   ```
-   HOST=127.0.0.1
+   ```json
+       "host": "127.0.0.1",
    ```
 
-   Leave it for now — we’ll change it to your real address in the next step.
-   Everything else in the file can stay exactly as it is. (There’s no secret
-   code or key to add.)
+   (It’s inside the `"server"` section near the top.) Leave it for now — we’ll
+   change it to your real address in the next step. Everything else in the file
+   can stay exactly as it is. (There’s no secret code or key to add.)
 
 6. Save the file (File → Save) and keep Notepad handy — we’ll come right back.
 
@@ -124,15 +125,17 @@ Your phone needs to know where to find the storyteller on your Wi-Fi.
    IPv4 Address. . . . . . . . . . . : 192.168.1.42
    ```
 
-5. Go back to your `.env` file in Notepad and change the `HOST` line to your actual address:
+5. Go back to your `config.json` file in Notepad and change the value inside the
+   `"host"` line to your actual address — keep the quotes and the comma exactly as
+   they are:
 
-   ```
-   HOST=192.168.1.42
+   ```json
+       "host": "192.168.1.42",
    ```
 
 6. Save the file and close Notepad.
 
-**Tip for the future:** If your Wi-Fi ever gives your computer a different address, just repeat this step and update the `HOST` line.
+**Tip for the future:** If your Wi-Fi ever gives your computer a different address, just repeat this step and update the `"host"` line.
 
 ---
 
@@ -213,8 +216,8 @@ Head to the next guide: **[Starting Your First Adventure](../first-adventure.md)
 
 **Having trouble?**  
 The most common issues at this stage are:
-- Wrong IP address in the `HOST` line of `.env`
-- Forgot to save the `.env` file after editing
+- Wrong IP address in the `"host"` line of `config.json`
+- Forgot to save the `config.json` file after editing (or a stray missing quote/comma)
 - The black window was closed
 - Skipped the `claude` sign-in in Step 3
 

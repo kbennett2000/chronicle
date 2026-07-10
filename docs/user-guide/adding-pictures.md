@@ -45,8 +45,8 @@ terminal works.
 
 Log in to `grok` on that computer (an interactive login is easiest — it saves
 your sign-in safely under your home folder, so no keys need to go into
-Chronicle). If you prefer key-based auth instead, you can set an `XAI_API_KEY` in
-Chronicle’s `.env` file — see **Part C** of the main
+Chronicle). If you prefer key-based auth instead, you can set an `XAI_API_KEY`
+environment variable — see **Part C** of the main
 [SETUP guide](../../SETUP.md) for details.
 
 ### 4. Turn pictures on in Chronicle

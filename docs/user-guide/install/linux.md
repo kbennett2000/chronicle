@@ -78,9 +78,9 @@ Max subscription** — the same login you’d use at claude.ai.
    won’t have to do it again.
 
 **Good to know:** You do **not** need to paste any keys or codes. Chronicle uses
-the Claude subscription you just signed in with. Leave the `ANTHROPIC_API_KEY`
-line in `.env` (next step) **blank** — setting it would switch billing to the
-per-token API instead of your subscription.
+the Claude subscription you just signed in with. Don’t set an `ANTHROPIC_API_KEY`
+environment variable — leaving it unset keeps billing on your subscription
+instead of the per-token API.
 
 > On a **headless server**, the `claude` login prints a URL to open in a browser
 > on any device; paste the resulting code back into the terminal.
@@ -89,8 +89,9 @@ per-token API instead of your subscription.
 
 ## Step 4: Create Your Settings File
 
-Chronicle keeps a tiny settings file called `.env`. For now we only need to tell
-it your computer’s address on your home network — we’ll set that in the next step.
+Chronicle keeps its settings in a small file called `config.json`. For now we only
+need to tell it your computer’s address on your home network — we’ll set that in
+the next step.
 
 1. Make sure you’re inside the `chronicle` folder:
 
@@ -98,21 +99,25 @@ it your computer’s address on your home network — we’ll set that in the ne
    cd ~/chronicle
    ```
 
-2. Copy the example file:
+2. Copy the example settings file:
 
    ```bash
-   cp .env.example .env
+   cp config.example.json config.json
    ```
+
+   (Chronicle will run without this — it falls back to the built-in defaults — but
+   you’ll want your own `config.json` so you can set your network address.)
 
 3. Open it with a text editor (`nano` is easiest on servers):
 
    ```bash
-   nano .env
+   nano config.json
    ```
 
-4. Find the line that says `HOST=127.0.0.1`. Leave it for now — we’ll change it
-   to your real address in the next step. Everything else can stay exactly as it
-   is. (There’s no secret code or key to add — leave `ANTHROPIC_API_KEY` blank.)
+4. Find the line that says `"host": "127.0.0.1",` (it’s inside the `"server"`
+   section near the top). Leave it for now — we’ll change it to your real address
+   in the next step. Everything else can stay exactly as it is. (There’s no secret
+   code or key to add.)
 
 5. Save and exit for now: `Ctrl` + `O` → Enter → `Ctrl` + `X`.
 
@@ -136,16 +141,17 @@ You’ll see one or more addresses. Look for the one that starts with `192.168.`
 
 Write it down.
 
-Now edit your `.env` file again and set the correct `HOST`:
+Now edit your `config.json` file again and set the correct address:
 
 ```bash
-nano .env
+nano config.json
 ```
 
-Change the `HOST` line to your actual address, for example:
+Change the value inside the `"host"` line to your actual address, keeping the
+quotes and the comma exactly as they are — for example:
 
-```
-HOST=192.168.1.42
+```json
+    "host": "192.168.1.42",
 ```
 
 Save and exit (`Ctrl` + `O` → Enter → `Ctrl` + `X`).
@@ -257,16 +263,17 @@ By default Chronicle uses port **4317**. You can change it to anything you like 
 
 ### Steps:
 
-1. Edit your `.env` file:
+1. Edit your `config.json` file:
 
    ```bash
-   nano .env
+   nano config.json
    ```
 
-2. Change the `PORT` line to your desired number:
+2. Find the `"port"` line inside the `"server"` section and change the number
+   (keep the quotes-free number and the surrounding structure as they are):
 
-   ```
-   PORT=9876
+   ```json
+    "port": 9876
    ```
 
 3. Save and exit.
@@ -307,10 +314,10 @@ Continue to: **[Starting Your First Adventure](../first-adventure.md)**
 
 **Need help?**  
 Common things to double-check:
-- Correct `HOST` IP address in `.env`
+- Correct `host` IP address in `config.json`
 - Correct port allowed in `ufw`
 - `npm run setup` completed without red errors
 - The `claude` sign-in in Step 3 was done (as the same user that runs the server)
-- `.env` file was saved after editing
+- `config.json` was saved after editing (and is still valid JSON — commas and quotes intact)
 
 You’re very close. A screenshot of any error message makes it easy for us to help you. See also **[Help & Troubleshooting](../help-and-troubleshooting.md)**.
