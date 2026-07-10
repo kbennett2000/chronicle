@@ -4,7 +4,6 @@
  * a grounded character survives the heavy styles. NOT a unit test — needs a GPU + ComfyUI +
  * the LoRA files. Usage: npx tsx scripts/verify-lora-styles.ts <campaignDir> [styleFilter]
  */
-import "dotenv/config";
 import path from "node:path";
 import fs from "node:fs";
 import { generateLocalImage } from "../src/image-backends/local.js";

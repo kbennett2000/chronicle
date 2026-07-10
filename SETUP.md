@@ -55,30 +55,42 @@ npm run setup
 (Under the hood: `npm ci` for the backend, `npm ci` for `web/`, then the Vite
 build into `public/`, which the server serves.)
 
-### A3. Configure `.env`
+### A3. Configure `config.json` and `secrets.json`
+
+Chronicle reads settings from two JSON files at the repo root (ADR-0033). A fresh
+checkout boots from the committed `config.example.json` with no setup; copy the
+templates when you want to change something:
 
 ```
-cp .env.example .env
+cp config.example.json config.json      # non-secret settings
+cp secrets.example.json secrets.json     # passwords
 ```
 
-Edit `.env` and set at least:
+In `config.json`, set at least the server host so other devices can reach it:
 
-```
-HOST=<the host's LAN IP, e.g. 192.168.1.42, or 0.0.0.0 for all interfaces>
-# PORT=4317   # optional; the single knob for the listening port
-
-# Multi-user (ADR-0019): the "bootstrap" account that will own any campaigns
-# that already exist (test-campaign, and any you were already playing). You'll
-# log in with these; the migration in A3.5 creates the account.
-BOOTSTRAP_USERNAME=<your name, e.g. kris>
-BOOTSTRAP_PASSWORD=<pick a real password>
+```jsonc
+{
+  "server": {
+    "host": "192.168.1.42",   // the host's LAN IP, or "0.0.0.0" for all interfaces
+    "port": 4317               // optional; the listening port
+  }
+}
 ```
 
-`.env` is gitignored — it never gets committed. There is **no shared passphrase
-anymore**; each person makes their own account in the app. `HOST` defaults to
-`127.0.0.1` (this machine only); set it to the LAN IP (or `0.0.0.0`) to reach
-the host from other devices. See `.env.example` for the optional
-`DEFAULT_*` settings a brand-new account inherits.
+In `secrets.json`, set the "bootstrap" account that will own any campaigns that
+already exist (test-campaign, and any you were already playing) — you'll log in
+with these, and the migration in A3.5 creates the account:
+
+```json
+{ "bootstrap": { "username": "kris", "password": "pick-a-real-password" } }
+```
+
+`config.json` and `secrets.json` are gitignored — they never get committed. There
+is **no shared passphrase anymore**; each person makes their own account in the app.
+`server.host` defaults to `127.0.0.1` (this machine only); set it to the LAN IP (or
+`0.0.0.0`) to reach the host from other devices. See
+[`docs/configuration.md`](docs/configuration.md) for every setting, including the
+optional `defaults.*` a brand-new account inherits.
 
 ### A3.5. Migrate existing campaigns to multi-user (one-time)
 
@@ -89,7 +101,7 @@ real games), move them under your bootstrap account:
 npm run migrate:multi-user
 ```
 
-This creates the `BOOTSTRAP_USERNAME` account and nests existing campaigns under
+This creates the bootstrap-username account and nests existing campaigns under
 it (`campaigns/<user>/<campaign>/`). It's idempotent and refuses to run if the
 tracked `test-campaign` fixture has uncommitted changes. A brand-new install
 with no campaigns can skip this — just register in the app.
@@ -127,7 +139,7 @@ Devices need a consistent way to reach the host. Pick one:
 
 ### B2. Open the port in the firewall
 
-Default port is `4317` (override with `PORT` in `.env`).
+Default port is `4317` (override with `server.port` in `config.json`).
 
 - **Ubuntu (ufw):**
   ```
@@ -153,7 +165,7 @@ You'll land on the **login screen**. Set:
   address you loaded it from).
 - **Username / Password:** your account. Tap **Create account** the first time
   (or, on the host that ran the A3.5 migration, log in as your
-  `BOOTSTRAP_USERNAME`). Each person on the household gets their own account and
+  `secrets.bootstrap.username`). Each person on the household gets their own account and
   sees only their own chronicles.
 
 The app stores your session token in that device's local storage and stays
@@ -197,7 +209,7 @@ images are off by default. There are three independent optional features here:
 1. Install and authenticate `grok` on the host machine, so it's on the host
    user's `PATH` and logged in to an account with Grok Build / image access. If
    the CLI is authenticated interactively (`~/.grok`), no `XAI_API_KEY` is
-   needed in `.env`. (When running under systemd, the service `User` must be the
+   needed. (When running under systemd, the service `User` must be the
    same account that ran `grok login` — see `deploy/README.md`.)
 2. In the app, open **Settings → The Look** and turn on **Generate scene art**
    (optionally pick an art style). Grok is the default image provider, so
@@ -214,8 +226,9 @@ This needs suitable hardware (~12GB VRAM handles SDXL base+refiner by swapping).
 
 1. Run **ComfyUI** as an always-on local service on the host (bound to
    `localhost:8188`), with **SDXL base + refiner** checkpoints installed under
-   its `models/checkpoints/`. Chronicle reaches it at `COMFYUI_URL` (default
-   `http://localhost:8188`; set in `.env` only if you moved it). ComfyUI is
+   its `models/checkpoints/`. Chronicle reaches it at `comfyui.url` in
+   `config.json` (default `http://localhost:8188`; set it only if you moved it,
+   e.g. to a remote GPU host). ComfyUI is
    unauthenticated by design and must stay on `localhost` / the trusted LAN
    (ADR-0027) — never expose it.
 2. For **LoRA-backed art styles** (pixel art, claymation, ukiyo-e, etc. —
@@ -256,18 +269,20 @@ Play. Two sources:
   media. The app shuffles and plays them.
 - **Navidrome** — stream a playlist from a [Navidrome](https://navidrome.org)
   server on your LAN, proxied through this server (the browser never sees the
-  Navidrome credentials). Set in `.env`:
+  Navidrome credentials). Put the non-secret URL/playlist in `config.json`:
+  ```json
+  { "navidrome": { "url": "http://192.168.1.214:4533", "playlist": "chronicle" } }
   ```
-  NAVIDROME_URL=http://192.168.1.214:4533
-  NAVIDROME_USER=your-navidrome-username
-  NAVIDROME_PASSWORD=your-navidrome-password
-  NAVIDROME_PLAYLIST=chronicle
+  and the credentials in `secrets.json`:
+  ```json
+  { "navidrome": { "username": "your-navidrome-username", "password": "your-navidrome-password" } }
   ```
   A user can override the URL and playlist in Settings; the credentials stay on
-  the host. Restart the server after changing `.env`.
+  the host. Restart the server after changing config.
 
-You can seed a default for new accounts with `DEFAULT_MUSIC_ENABLED` /
-`DEFAULT_MUSIC_SOURCE` (see `.env.example`).
+You can seed a default for new accounts with `defaults.musicEnabled` /
+`defaults.musicSource` in `config.json` (see
+[`docs/configuration.md`](docs/configuration.md)).
 
 ---
 

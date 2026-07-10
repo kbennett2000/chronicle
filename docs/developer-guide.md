@@ -80,7 +80,7 @@ disk — never directly:
 | DM reasoning | **Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`) | Default engine. Uses the host's **Claude subscription** login under `~/.claude` (leave `ANTHROPIC_API_KEY` unset). See ADR-0017. |
 | Alternate DM | **Grok** headless CLI | Per-campaign engine choice (ADR-0018). |
 | Images | **Pluggable backend** — Grok Build `grok` CLI **or** local ComfyUI/SDXL | Provider chosen per-campaign, live-switchable (ADR-0027). Grok is the zero-infra default (auth under `~/.grok` / `XAI_API_KEY`); the local backend draws on the host's GPU with no per-image cost. Optional (ADR-0009). |
-| Local inference | **ComfyUI** + SDXL checkpoints | `COMFYUI_URL` (default `http://localhost:8188`). Per-tier quality (fast/standard/high, ADR-0029), scene-style adherence (ADR-0028), and LoRA-backed art styles (ADR-0032). Checked-in graphs in `src/workflows/*.json`. |
+| Local inference | **ComfyUI** + SDXL checkpoints | `comfyui.url` in config.json (default `http://localhost:8188`). Per-tier quality (fast/standard/high, ADR-0029), scene-style adherence (ADR-0028), and LoRA-backed art styles (ADR-0032). Checked-in graphs in `src/workflows/*.json`. |
 | Video (optional) | **Grok Imagine** `grok` CLI `/imagine-video` | On-demand "Animate" clips, never auto-generated (ADR-0026); served from `/campaigns/:id/videos/`. |
 | Rules grounding | **SRD text** in [`reference/srd/`](../reference/srd/) | SRD-grounded adjudication (ADR-0006). |
 | Music (optional) | Local files **or** a LAN **Navidrome** server | Proxied server-side so the browser never sees Navidrome creds (ADR-0020). |
@@ -124,8 +124,11 @@ short version:
 # one-time: install backend + web deps and build the UI
 npm run setup
 
-# copy config and set HOST (and the bootstrap account) — see .env.example
-cp .env.example .env
+# copy config (optional — a fresh checkout boots from config.example.json).
+# Edit config.json to set server.host / port; put the bootstrap account in
+# secrets.json. See docs/configuration.md.
+cp config.example.json config.json
+cp secrets.example.json secrets.json
 
 # make sure the DM engine can reach Claude (subscription login)
 claude            # log in once; leave ANTHROPIC_API_KEY unset

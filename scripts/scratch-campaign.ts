@@ -13,20 +13,20 @@
  * any id that doesn't start with "scratch-" — this is the actual safety rail,
  * not a confirmation prompt that could be bypassed.
  */
-import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import { scaffoldCampaign, userCampaignsRoot } from "../src/campaign-store.js";
 import { userIdForUsername } from "../src/user-store.js";
+import { secrets } from "../src/config.js";
 
 const SCRATCH_PREFIX = "scratch-";
 
 // ADR-0019: campaigns nest under a user dir. Scratch campaigns live under the
-// bootstrap user by default (BOOTSTRAP_USERNAME in .env, default "kris"),
-// overridable with `--user <name>`.
+// bootstrap user by default (secrets.bootstrap.username, default "kris", per
+// ADR-0033), overridable with `--user <name>`.
 function resolveUserId(argv: string[]): string {
   const idx = argv.indexOf("--user");
-  const name = idx !== -1 ? argv[idx + 1] : process.env.BOOTSTRAP_USERNAME ?? "kris";
+  const name = idx !== -1 ? argv[idx + 1] : secrets.bootstrap.username || "kris";
   return userIdForUsername(name);
 }
 

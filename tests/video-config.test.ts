@@ -4,10 +4,10 @@ import fs from "node:fs";
 import { resolveVideoConfig, parseVideoBlock, DEFAULT_VIDEO } from "../src/video-store.js";
 import { scaffoldCampaign, persistCampaignSettings, readCampaignSettings } from "../src/campaign-store.js";
 
-// #118: per-game video params resolve campaign → user → .env → code default,
-// field by field, and the campaign override is stored with a nested
-// (one-level-deep) merge so patching one field doesn't wipe the siblings —
-// exactly the music model.
+// #118 / ADR-0033: per-game video params resolve campaign → user → config default
+// → code default, field by field, and the campaign override is stored with a nested
+// (one-level-deep) merge so patching one field doesn't wipe the siblings — exactly
+// the music model. The config default is injectable so tests seed it directly.
 
 test("resolveVideoConfig: falls back to code defaults when nothing is set", () => {
   const cfg = resolveVideoConfig();
@@ -34,34 +34,24 @@ test("resolveVideoConfig: unset campaign fields fall through to the user default
   assert.equal(cfg.aspectRatio, "9:16"); // campaign unset → user
 });
 
-test("resolveVideoConfig: .env fills fields neither level sets", () => {
-  const prev = { ...process.env };
-  process.env.DEFAULT_VIDEO_DURATION = "12";
-  process.env.DEFAULT_VIDEO_RESOLUTION = "720p";
-  process.env.DEFAULT_VIDEO_ASPECT = "9:16";
-  try {
-    const cfg = resolveVideoConfig({}, {});
-    assert.equal(cfg.durationSeconds, 12);
-    assert.equal(cfg.resolution, "720p");
-    assert.equal(cfg.aspectRatio, "9:16");
-    // A user field still wins over .env.
-    assert.equal(resolveVideoConfig({ resolution: "480p" }, {}).resolution, "480p");
-  } finally {
-    process.env = prev;
-  }
+test("resolveVideoConfig: the config default fills fields neither level sets", () => {
+  const configDefault = { videoDuration: 12, videoResolution: "720p", videoAspect: "9:16" };
+  const cfg = resolveVideoConfig({}, {}, configDefault);
+  assert.equal(cfg.durationSeconds, 12);
+  assert.equal(cfg.resolution, "720p");
+  assert.equal(cfg.aspectRatio, "9:16");
+  // A user field still wins over the config default.
+  assert.equal(resolveVideoConfig({ resolution: "480p" }, {}, configDefault).resolution, "480p");
 });
 
-test("resolveVideoConfig: malformed .env values are ignored (fall to code default)", () => {
-  const prev = { ...process.env };
-  process.env.DEFAULT_VIDEO_DURATION = "999"; // out of 1–15 range
-  process.env.DEFAULT_VIDEO_RESOLUTION = "1080p"; // not an allowed value
-  try {
-    const cfg = resolveVideoConfig({}, {});
-    assert.equal(cfg.durationSeconds, DEFAULT_VIDEO.durationSeconds);
-    assert.equal(cfg.resolution, DEFAULT_VIDEO.resolution);
-  } finally {
-    process.env = prev;
-  }
+test("resolveVideoConfig: malformed config-default values are ignored (fall to code default)", () => {
+  const cfg = resolveVideoConfig({}, {}, {
+    videoDuration: 999, // out of 1–15 range
+    videoResolution: "1080p", // not an allowed value
+    videoAspect: "square",
+  });
+  assert.equal(cfg.durationSeconds, DEFAULT_VIDEO.durationSeconds);
+  assert.equal(cfg.resolution, DEFAULT_VIDEO.resolution);
 });
 
 test("parseVideoBlock: accepts valid fields and rejects bad ones", () => {

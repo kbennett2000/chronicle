@@ -5,11 +5,13 @@
  * script proves the HTTP API end-to-end: it POSTs a minimal SDXL txt2img graph to
  * ComfyUI's /prompt endpoint, waits for completion, and saves the resulting PNG.
  *
- * It is intentionally standalone — no Chronicle-src imports, just node's global
- * fetch (node v22) — so it exercises ONLY the ComfyUI service, nothing app-side.
+ * It exercises ONLY the ComfyUI service (node's global fetch, node v22); its one
+ * app-side import is the config loader, so it targets the SAME `comfyui.url` the
+ * app uses (ADR-0033) and can double as a check of that setting.
  *
- * Requires the `comfyui` service reachable at COMFYUI_URL (default localhost:8188)
- * with sd_xl_base_1.0.safetensors in models/checkpoints and sdxl_vae.safetensors in
+ * Requires the `comfyui` service reachable at config.comfyui.url (default
+ * localhost:8188; override inline with COMFYUI_URL=...) with
+ * sd_xl_base_1.0.safetensors in models/checkpoints and sdxl_vae.safetensors in
  * models/vae. Nothing here touches test-campaign or real games.
  *
  * Usage:
@@ -20,8 +22,9 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { config } from "../src/config.js";
 
-const BASE = process.env.COMFYUI_URL ?? "http://localhost:8188";
+const BASE = process.env.COMFYUI_URL ?? config.comfyui.url;
 const CKPT = "sd_xl_base_1.0.safetensors";
 const VAE = "sdxl_vae.safetensors";
 const POS =
