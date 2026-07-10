@@ -72,37 +72,36 @@ Max subscription** — the same login you’d use at claude.ai.
 5. That’s the brain sorted. 🧠
 
 **Good to know:** You do **not** need to paste any keys or codes. Chronicle uses
-the Claude subscription you just signed in with. (The `.env` file in the next
-step has an `ANTHROPIC_API_KEY` line — leave it **blank**.)
+the Claude subscription you just signed in with. (Don’t set an `ANTHROPIC_API_KEY`
+environment variable — leaving it unset keeps billing on your subscription.)
 
 ---
 
 ## Step 4: Create Your Settings File
 
-Chronicle keeps a tiny settings file called `.env`. For now we only need to tell
-it your Mac’s address on your home network — we’ll fill that in a moment.
+Chronicle keeps its settings in a small file called `config.json`. For now we only
+need to tell it your Mac’s address on your home network — we’ll fill that in a
+moment.
 
 1. Open your `chronicle` folder in Finder.
 
-2. Find the file named `.env.example`.
+2. Find the file named `config.example.json`.
 
 3. Press `Command + C` to copy it, then `Command + V` to paste a copy in the same folder.
 
-4. Rename the copy to exactly `.env` (it must start with a dot).
+4. Rename the copy to exactly `config.json`.
 
-   **To see hidden files:** Press `Command + Shift + .` (period) in Finder. The `.env` file should now be visible. Press the same keys again to hide them later if you want.
-
-5. Right-click the new `.env` file → **Open With** → **TextEdit**.
+5. Right-click the new `config.json` file → **Open With** → **TextEdit**.
 
 6. Find the line that says:
 
-   ```
-   HOST=127.0.0.1
+   ```json
+       "host": "127.0.0.1",
    ```
 
-   Leave it for now — we’ll change it to your real address in the next step.
-   Everything else in the file can stay exactly as it is. (There’s no secret
-   code or key to add.)
+   (It’s inside the `"server"` section near the top.) Leave it for now — we’ll
+   change it to your real address in the next step. Everything else in the file
+   can stay exactly as it is. (There’s no secret code or key to add.)
 
 7. Save the file (`Command + S`) and keep TextEdit handy — we’ll come right back.
 
@@ -121,15 +120,17 @@ Your phone needs to know where to find the storyteller.
 4. Look for **IP address** (it will look like `192.168.1.42` or similar).  
    Write it down or take a screenshot.
 
-5. Go back to your `.env` file and change the `HOST` line to your actual address:
+5. Go back to your `config.json` file in TextEdit and change the value inside the
+   `"host"` line to your actual address — keep the quotes and comma exactly as
+   they are:
 
-   ```
-   HOST=192.168.1.42
+   ```json
+       "host": "192.168.1.42",
    ```
 
 6. Save the file.
 
-**Tip:** If your IP address ever changes, just repeat this step and update the `HOST` line.
+**Tip:** If your IP address ever changes, just repeat this step and update the `"host"` line.
 
 ---
 
@@ -206,8 +207,8 @@ Continue to: **[Starting Your First Adventure](../first-adventure.md)**
 
 **Need help?**  
 The most common hiccups are:
-- Wrong IP address in the `HOST` line of `.env`
-- Forgetting to save `.env` after editing
+- Wrong IP address in the `"host"` line of `config.json`
+- Forgetting to save `config.json` after editing (or a stray missing quote/comma)
 - Closing the Terminal window too early
 - Skipping the `claude` sign-in in Step 3
 

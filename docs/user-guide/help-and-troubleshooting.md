@@ -8,7 +8,7 @@ You’re not doing anything wrong. We’ll get it sorted together.
 
 ## My phone can’t connect to the storyteller
 
-**Most common cause:** The `HOST` address in your `.env` file is wrong or your phone and computer are not on the same Wi-Fi.
+**Most common cause:** The `"host"` address in your `config.json` file is wrong or your phone and computer are not on the same Wi-Fi.
 
 **What to try:**
 
@@ -21,9 +21,9 @@ You’re not doing anything wrong. We’ll get it sorted together.
    - Mac: System Settings → Network → Details
    - Linux: `hostname -I`
 
-4. Update the `HOST=` line in your `.env` file with the correct address, save it, then restart the storyteller (`Ctrl + C` then `npm start` again).
+4. Update the `"host"` line in your `config.json` file with the correct address, save it, then restart the storyteller (`Ctrl + C` then `npm start` again).
 
-5. Still no luck? Try temporarily setting `HOST=0.0.0.0` in `.env` (this makes it listen on all interfaces). Remember to change it back to your specific IP later for better security.
+5. Still no luck? Try temporarily setting the host to `"0.0.0.0"` in `config.json` (this makes it listen on all interfaces). Remember to change it back to your specific IP later for better security.
 
 ---
 
@@ -91,7 +91,7 @@ If it still doesn’t work, check the terminal window on the computer for any er
 
 Remember to do **both** steps:
 
-1. Change `PORT=xxxx` in your `.env` file and save it.
+1. Change the `"port"` number in your `config.json` file (inside the `"server"` section) and save it.
 2. Allow the **new port** in your firewall:
 
    ```bash
@@ -110,7 +110,7 @@ Quick checklist:
 
 - Is the computer still on and connected to Wi-Fi?
 - Is the terminal window / Command Prompt still open with the storyteller running?
-- Did your computer’s IP address change? (Common on some home networks — re-run the IP check and update `.env` if needed)
+- Did your computer’s IP address change? (Common on some home networks — re-run the IP check and update `config.json` if needed)
 - Did you recently restart the computer? You’ll need to start the storyteller again.
 
 ---
