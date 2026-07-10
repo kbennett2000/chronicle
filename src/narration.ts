@@ -342,13 +342,23 @@ export function extractMomentTags(text: string): {
 /** ADR-0030: pick the description for a moment image/video. Precedence: an
  * explicit user override (the refine flow, e.g. "the same scene at night") →
  * the turn's cached scene caption → the raw narration fallback. Returns the
- * pre-cap string; callers keep the downstream 500-char clamp + default. */
+ * pre-cap string; callers keep the downstream 500-char clamp + default.
+ *
+ * ADR-0030 Race amendment (Issue #146): with `opts.auto` set (the reply-first
+ * auto-illustrate trigger), the narration fallback is DROPPED — a caption-less
+ * auto image is always off-moment, so we return `undefined` to signal the caller
+ * to SKIP generation entirely rather than scavenge the prose. Manual illustrate
+ * (no `opts.auto`) keeps the narration fallback, because the user explicitly
+ * asked for an image and something beats nothing there. An explicit override
+ * always wins in both modes (auto never sends one). */
 export function resolveMomentDescription(
   override: string,
-  record: { narration: string; sceneCaption?: string }
-): string {
+  record: { narration: string; sceneCaption?: string },
+  opts: { auto?: boolean } = {}
+): string | undefined {
   if (override) return override;
   if (record.sceneCaption && record.sceneCaption.trim()) return record.sceneCaption;
+  if (opts.auto) return undefined; // AUTO: skip — never fall back to narration
   return record.narration;
 }
 
