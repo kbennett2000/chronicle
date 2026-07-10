@@ -4,7 +4,10 @@
 Accepted. Amended by the "Reliability amendment (Issue #130)" section below —
 the caption is reframed from a numbered "exception to rule 17" into a required
 OUTPUT FORMAT contract, and a missing caption is backstopped by one free
-same-session retry.
+same-session retry. Further amended by the "Race amendment (Issue #146)" section
+— auto-illustration is now **driven by** the caption and **skips** when none is
+available at generation time, instead of racing the post-response caption
+backfill and scavenging narration.
 
 ## Context
 Scene/moment images (the user-triggered "Illustrate this moment" and its
@@ -205,3 +208,119 @@ Constraints that keep it safe and non-disruptive:
 reliability work is confined to the prompt (`dm-engine.ts`), the parse/retry
 helpers (`narration.ts`), the post-hoc setter (`campaign-store.ts`), and the
 three turn handlers (`server.ts`).
+
+## Race amendment (Issue #146)
+
+Part B's retry runs *after* the narration response is already sent, and patches
+the caption onto the record on disk. That left a window the original design did
+not close: **auto-illustration is a separate client round-trip** (the web client
+fires `POST /illustrate` the instant it receives the turn response), and that
+round-trip is genuinely concurrent with the server's post-response backfill. On
+any turn where the DM omitted the inline `[SCENE:]` line, the auto-illustrate
+call read the still-captionless record, fell through `resolveMomentDescription`,
+and **scavenged the narration** — the very failure this ADR exists to prevent —
+while the backfill landed a correct caption on the record moments later (so the
+record ends up right but the drawn image is wrong, and the regen box, prefilled
+from the caption-less turn payload, is blank). Confirmed repeatedly in live play;
+the prior reorder/timing attempt reduced but did not eliminate it. **Timing
+nudges cannot close a genuine race — the contract has to change.**
+
+### The contract: auto-illustration is DRIVEN BY the caption, and skips without one
+Auto-illustration no longer falls back to narration. The seam precedence gains an
+**auto mode**: `resolveMomentDescription(override, record, { auto })` returns
+`undefined` — a signal to **skip** — when there is no override and no cached
+caption *and* the call is auto. The `/illustrate` moment handler reads a new
+`auto` flag from the request body; when the resolved description is `undefined`
+it returns `{ ok: false, skipped: true, turnIndex }` **without generating or
+persisting anything**, and never touches narration. The web client marks its two
+auto-trigger call sites (fresh turn, opening turn) with `auto: true`; every
+user-initiated illustrate/regenerate stays `auto: false`.
+
+Rationale: **a missing-caption auto image is always wrong; better none than
+wrong.** A skipped turn simply shows the manual "⟢ Illustrate this moment"
+affordance; by the time the user reaches for it the backfill has landed, so the
+manual draw uses the caption. The regen box only renders once a moment has an
+image, so the caption-omitted case no longer produces a blank box beside a wrong
+picture — it produces no auto image at all.
+
+### What is deliberately preserved
+- **Narration fallback lives on — but only on the MANUAL path.** A user who
+  explicitly asks to illustrate a genuinely caption-less turn still gets the
+  narration-derived image (`auto` absent → the old behavior). The refine override
+  still wins in both modes.
+- **Persist-inline-caption-before-response is unchanged and load-bearing.** All
+  three turn handlers still `appendTurnTranscript(... sceneCaption ...)` before
+  `sendJson`, so a turn the DM *did* caption inline is drawable the instant the
+  client can fire — no race in the common case.
+- **The post-response backfill retry stays** (populates the record for a later
+  manual illustrate and for reload-time prefill); it simply no longer drives a
+  wrong image, because auto now skips a captionless record rather than scavenging
+  it.
+- **`/animate`, grounding (`groundSceneDescription`), the `[PRESENT:]` entity
+  path, the entity/portrait path, and both image backends are untouched.**
+  `/animate` is only ever user-triggered, so it keeps its narration fallback.
+
+The change is confined to the auto-mode branch of `resolveMomentDescription`
+(`narration.ts`), the `/illustrate` moment handler (`server.ts`), and the client
+(`illustrateMoment` + `handleIllustrateMoment`, `campaign.ts`/`Play.tsx`).
+
+## Race amendment (Issue #146)
+
+The reliability amendment fixed *coverage* (the caption now almost always exists)
+but left a *timing* race on the tail turns where the DM still omits the inline
+`[SCENE:]` line. Part B deliberately runs the caption backfill **after** the turn
+response is sent (so the player never waits). But auto-illustration is a
+**separate client round-trip** (`POST /illustrate` with no description, fired the
+instant the turn response lands — there is no server-side auto route). On a
+caption-omitted turn those two run concurrently:
+
+1. the turn response goes out with `sceneCaption` absent and the record on disk
+   captionless;
+2. the client immediately fires auto-illustrate, which reads the still-captionless
+   record and falls through `resolveMomentDescription` to the **narration
+   fallback** → an off-moment image;
+3. the backfill then patches the caption onto the record — *too late*, so the
+   record ends up "correct" while the drawn image was scavenged from prose, and
+   the client's regen box (hydrated from the caption-less payload) is blank.
+
+Timing nudges cannot close this — the two are genuinely concurrent. **The
+contract changes instead: auto-illustration is caption-DRIVEN, not
+caption-racing.**
+
+### The rule
+- **AUTO illustrate** (the reply-first trigger): the description source is the
+  turn's `sceneCaption` only. If no caption is available at generation time
+  (no override — auto never sends one — and no cached caption), **SKIP** the
+  generation entirely: no image is drawn, nothing is persisted, and narration is
+  **never** consulted. Rationale: a missing-caption auto image is always wrong;
+  better none than wrong. The turn is left un-illustrated; the player can hit
+  "Illustrate this moment"/Regenerate later, by which point the free backfill has
+  landed the caption.
+- **MANUAL illustrate** (the user explicitly clicked): unchanged. It keeps the
+  full `resolveMomentDescription` precedence — override → cached caption →
+  **narration fallback** — because the user asked for an image and a caption-less
+  narration image is better than none when they explicitly requested one.
+
+### Mechanism
+`resolveMomentDescription(override, record, { auto })` gains an `auto` flag: with
+`auto` set and no override and no caption it returns `undefined` (the SKIP
+signal) instead of the narration. The `/illustrate` moment handler reads an
+`auto` boolean from the request body, and on an `undefined` resolution returns
+`{ ok: false, skipped: true, turnIndex }` without generating or persisting
+anything. The web client sends `auto: true` from its two reply-first triggers
+(the normal-turn and opening-turn auto-illustrate) and `auto: false` (the
+default) from every user click; it treats a `skipped` result as a silent no-op
+(no error surfaced). `/animate` is always user-initiated and is untouched.
+
+The inline-caption invariant is preserved and is what makes the common case
+correct: all three turn handlers persist the parsed `sceneCaption` onto the
+record **before** the response is returned, so a client that fires auto-illustrate
+on receipt reads a record that already carries the caption — no wrong image, and
+the payload's `sceneCaption` prefills the regen box. The post-response backfill
+stays as a best-effort disk patch for the tail turns; it no longer causes a wrong
+image because auto now skips a captionless record rather than scavenging it.
+
+Confined to `resolveMomentDescription` (`narration.ts`), the `/illustrate` moment
+branch (`server.ts`), and the web client (`campaign.ts`, `Play.tsx`). The
+`[SCENE:]` prompt, the parse/retry helpers, the record field, and both image
+backends are unchanged.

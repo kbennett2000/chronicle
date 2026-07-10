@@ -454,6 +454,13 @@ export interface IllustrateResult {
   relPath?: string;
   error?: string;
   turnIndex?: number;
+  /** ADR-0030 race amendment (#146): an AUTO illustrate whose turn had no scene
+   * caption yet is skipped server-side (never scavenges narration). A skip is not
+   * a failure — the caller shows no error and simply leaves the turn un-drawn. */
+  skipped?: boolean;
+  /** ADR-0030 (#146): the caption the server drew from, echoed back so the client
+   * can prefill the regenerate box even when the turn payload predated it. */
+  sceneCaption?: string;
 }
 
 export async function illustrateEntity(
@@ -474,12 +481,19 @@ export async function illustrateMoment(
   campaignId: string,
   turnIndex: number,
   // Issue #66: an optional prompt override for regenerating a moment's image
-  // (e.g. "the same scene, but at dusk"). Omitted → the turn's narration is used.
-  description?: string
+  // (e.g. "the same scene, but at dusk"). Omitted → the turn's caption/narration.
+  description?: string,
+  // ADR-0030 race amendment (#146): the reply-first auto-illustrate trigger sets
+  // this. In auto mode the server skips (never scavenges narration) when the
+  // turn has no caption yet; user-initiated illustrate/regenerate leaves it off.
+  auto = false
 ): Promise<IllustrateResult> {
+  const base = description?.trim()
+    ? { kind: "moment", turnIndex, description: description.trim() }
+    : { kind: "moment", turnIndex };
   return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/illustrate`, {
     method: "POST",
-    body: JSON.stringify(description?.trim() ? { kind: "moment", turnIndex, description: description.trim() } : { kind: "moment", turnIndex }),
+    body: JSON.stringify(auto ? { ...base, auto: true } : base),
   })) as IllustrateResult;
 }
 

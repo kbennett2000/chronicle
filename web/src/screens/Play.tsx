@@ -719,8 +719,9 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
         // the Self/Views panels, same as after a normal turn.
         getState(connection, campaignId).then(applyPanelState).catch(() => {});
         // Issue #56: auto-illustrate the opening scene (turn 0) too, if on.
+        // #146: `auto` so a caption-less opening skips instead of scavenging prose.
         if (autoIllustrateRef.current) {
-          void handleIllustrateMoment(0);
+          void handleIllustrateMoment(0, undefined, true);
         }
       })
       .catch((err) => {
@@ -778,8 +779,9 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
         // screen; kick off the same on-demand moment illustration a player can
         // trigger by hand. It's best-effort and single-flighted by
         // handleIllustrateMoment's own `illustratingTurn` guard.
+        // #146: `auto` so a caption-less turn skips instead of scavenging prose.
         if (autoIllustrateRef.current) {
-          void handleIllustrateMoment(newTurnIndex);
+          void handleIllustrateMoment(newTurnIndex, undefined, true);
         }
       }
     } catch (err) {
@@ -801,7 +803,13 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
   // persisted the path on the transcript record; we set it on the turn so it
   // renders immediately (and survives reload via hydration). On failure we
   // show the returned Grok reason under that turn, never a silent no-op.
-  async function handleIllustrateMoment(index: number, description?: string) {
+  //
+  // ADR-0030 race amendment (#146): `auto` marks the reply-first auto-illustrate
+  // trigger. In auto mode the server SKIPS (never scavenges narration) when the
+  // turn has no caption yet — that's not an error, so we show nothing and leave
+  // the manual "Illustrate this moment" affordance for later. User-initiated
+  // illustrate/regenerate leaves `auto` off (narration fallback preserved).
+  async function handleIllustrateMoment(index: number, description?: string, auto = false) {
     if (illustratingTurn !== null) return;
     setIllustratingTurn(index);
     setIllustrateErrors((prev) => {
@@ -809,13 +817,21 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
       return rest;
     });
     try {
-      const result = await illustrateMoment(connection, campaignId, index, description);
+      const result = await illustrateMoment(connection, campaignId, index, description, auto);
       if (result.ok && result.relPath) {
         const relPath = result.relPath;
-        setTurns((prev) => prev.map((t, i) => (i === index ? { ...t, image: relPath } : t)));
+        const caption = result.sceneCaption;
+        // Set the image, and pick up the caption the server drew from so the
+        // regenerate box prefills even if the turn payload predated it.
+        setTurns((prev) =>
+          prev.map((t, i) =>
+            i === index ? { ...t, image: relPath, sceneCaption: caption ?? t.sceneCaption } : t
+          )
+        );
         // Bust the image cache so a regenerate (same filename) actually shows.
         setImageNonces((prev) => ({ ...prev, [index]: (prev[index] ?? 0) + 1 }));
-      } else {
+      } else if (!result.skipped) {
+        // A skip (auto, no caption yet) is a deliberate no-op, not a failure.
         setIllustrateErrors((prev) => ({ ...prev, [index]: result.error || "Grok Build couldn't draw this." }));
       }
     } catch (err) {
