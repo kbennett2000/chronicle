@@ -14,7 +14,6 @@
  *   npx tsx scripts/verify-video-gen.ts
  *   npx tsx scripts/verify-video-gen.ts --animate    # also test the base-image path
  */
-import "dotenv/config";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -23,8 +22,9 @@ import { userIdForUsername } from "../src/user-store.js";
 import { generateImage } from "../src/image-generator.js";
 import { generateVideo } from "../src/video-generator.js";
 import { DEFAULT_VIDEO } from "../src/video-store.js";
+import { secrets } from "../src/config.js";
 
-const userId = userIdForUsername(process.env.BOOTSTRAP_USERNAME ?? "kris");
+const userId = userIdForUsername(secrets.bootstrap.username || "kris");
 const id = `scratch-video-${process.pid}`;
 const dir = scaffoldCampaign(userId, id, { name: "Vid Test", race: "Human", class: "Fighter", level: 1 });
 const settings = readCampaignSettings(dir);

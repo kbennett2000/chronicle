@@ -24,6 +24,7 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { userIdForUsername } from "../src/user-store.js";
+import { withEphemeralConfig } from "./ephemeral-config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -201,9 +202,12 @@ async function main(): Promise<void> {
 
   const port = 4900 + Math.floor(Math.random() * 300);
   const baseURL = `http://127.0.0.1:${port}`;
+  // The server takes host/port from config.json now (ADR-0033), not env — hand it
+  // an ephemeral one on the chosen port; restoreConfig() puts back any real one.
+  const restoreConfig = withEphemeralConfig({ server: { host: "127.0.0.1", port } });
   const proc = spawn("npx", ["tsx", "src/server.ts"], {
     cwd: REPO_ROOT,
-    env: { ...process.env, PORT: String(port), HOST: "127.0.0.1" },
+    env: { ...process.env },
     stdio: "pipe",
     detached: true,
   });
@@ -295,6 +299,7 @@ async function main(): Promise<void> {
   } finally {
     step("Cleanup");
     killServerTree(proc);
+    restoreConfig();
     try {
       const del = scratch(["delete", scratchId, "--user", PARITY_USERNAME]);
       check("scratch campaign deleted", del.includes("deleted"), del);

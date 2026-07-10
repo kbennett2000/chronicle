@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { secrets } from "./config.js";
 
 // ADR-0019: per-user accounts. Users live under a gitignored `users/` root,
 // one directory per user, keyed by a slug of the username. Passwords are hashed
@@ -122,34 +123,34 @@ export type BootstrapResult =
   | { status: "exists"; username: string; userId: string }
   | { status: "skipped"; username: string; userId: string; reason: string };
 
-/** Idempotently ensure the `.env` bootstrap account (BOOTSTRAP_USERNAME, default
- * "kris"; BOOTSTRAP_PASSWORD) exists (issue #94). Shared by the server (called on
- * startup so `admin`/`password` works out of the box, honoring the `.env` promise)
- * and the one-time migration. Never overwrites or downgrades an existing account,
- * and never throws for the predictable config cases (missing/short password,
- * empty username slug) — it returns a "skipped" result so a caller can log and
- * carry on (the server) or hard-fail (the migration). */
+/** Idempotently ensure the bootstrap account (secrets.bootstrap.username, default
+ * "kris"; secrets.bootstrap.password) exists (issue #94, ADR-0033). Shared by the
+ * server (called on startup so the account works out of the box) and the one-time
+ * migration. Never overwrites or downgrades an existing account, and never throws
+ * for the predictable config cases (missing/short password, empty username slug) —
+ * it returns a "skipped" result so a caller can log and carry on (the server) or
+ * hard-fail (the migration). */
 export function ensureBootstrapUser(
   defaults: Record<string, unknown> = {}
 ): BootstrapResult {
-  const username = process.env.BOOTSTRAP_USERNAME ?? "kris";
+  const username = secrets.bootstrap.username || "kris";
   const userId = userIdForUsername(username);
   if (!USER_ID_PATTERN.test(userId)) {
     return {
       status: "skipped",
       username,
       userId,
-      reason: `BOOTSTRAP_USERNAME "${username}" has no letters or numbers`,
+      reason: `bootstrap username "${username}" has no letters or numbers`,
     };
   }
   if (userExists(userId)) return { status: "exists", username, userId };
-  const password = process.env.BOOTSTRAP_PASSWORD;
+  const password = secrets.bootstrap.password;
   if (!password || password.length < 6) {
     return {
       status: "skipped",
       username,
       userId,
-      reason: "BOOTSTRAP_PASSWORD is unset or shorter than 6 characters",
+      reason: "bootstrap password is unset or shorter than 6 characters",
     };
   }
   createUser(username, password, defaults);

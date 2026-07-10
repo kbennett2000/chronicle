@@ -18,12 +18,12 @@
  *
  * Usage:  npm run migrate:multi-user
  */
-import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { CAMPAIGNS_ROOT, userCampaignsRoot } from "../src/campaign-store.js";
 import { ensureBootstrapUser, userIdForUsername } from "../src/user-store.js";
+import { secrets } from "../src/config.js";
 
 const TEST_FIXTURE = "test-campaign";
 
@@ -55,7 +55,7 @@ function gitStatusPorcelain(relPath: string): string {
 }
 
 function main(): void {
-  const username = process.env.BOOTSTRAP_USERNAME ?? "kris";
+  const username = secrets.bootstrap.username || "kris";
   const userId = userIdForUsername(username);
 
   const flat = findFlatCampaigns();

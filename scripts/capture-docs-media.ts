@@ -16,7 +16,6 @@
  * (the send-a-turn GIF fires one real Haiku turn), ffmpeg (webm → gif), and a
  * built UI (`npm run build:web`). Run: `npx tsx scripts/capture-docs-media.ts`.
  */
-import "dotenv/config";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -26,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import { generateImage } from "../src/image-generator.js";
 import { scaffoldCampaign, userCampaignsRoot } from "../src/campaign-store.js";
 import { userIdForUsername } from "../src/user-store.js";
+import { withEphemeralConfig } from "./ephemeral-config.js";
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -353,13 +353,19 @@ async function main(): Promise<void> {
   // 3d. Now write the state files that reference the entity art
   writeStateFiles(rel);
 
-  // 4. Boot the backend against the demo campaign
+  // 4. Boot the backend against the demo campaign. The server reads host/port and
+  // music defaults from config.json now (ADR-0033), so hand it an ephemeral one on
+  // the chosen port with music on; restoreConfig() puts back any real config.json.
   const port = 4600 + Math.floor(Math.random() * 300);
   const baseURL = `http://127.0.0.1:${port}`;
+  const restoreConfig = withEphemeralConfig({
+    server: { host: "127.0.0.1", port },
+    defaults: { musicEnabled: true, musicSource: "local" },
+  });
   log(`booting server on ${baseURL}…`);
   const server = spawn("npx", ["tsx", "src/server.ts"], {
     cwd: REPO_ROOT,
-    env: { ...process.env, PORT: String(port), HOST: "127.0.0.1", DEFAULT_MUSIC_ENABLED: "true", DEFAULT_MUSIC_SOURCE: "local" },
+    env: { ...process.env },
     stdio: "pipe", detached: true,
   });
   server.stderr?.on("data", (c) => process.env.DEBUG_CAPTURE && process.stderr.write(c));
@@ -486,6 +492,7 @@ async function main(): Promise<void> {
   } finally {
     await browser.close();
     killTree(server);
+    restoreConfig();
     // hygiene: remove the disposable demo campaign
     fs.rmSync(CAMPAIGN_DIR, { recursive: true, force: true });
     log("done — assets in docs/assets/, demo campaign removed.");

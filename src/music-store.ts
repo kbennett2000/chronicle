@@ -2,11 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { config, secrets } from "./config.js";
 
 // ADR-0020: music playback. Two sources — local files under `music/`, or a
 // Navidrome playlist proxied through this server via its Subsonic API. Config
-// comes from `.env` with optional per-user overrides (never the Navidrome
-// credentials, which stay server-side).
+// comes from config.json / secrets.json (ADR-0033) with optional per-user
+// overrides (never the Navidrome credentials, which stay server-side).
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const MUSIC_ROOT = path.resolve(__dirname, "../music");
@@ -88,10 +89,6 @@ export interface MusicConfig {
   };
 }
 
-function envBool(v: string | undefined, fallback: boolean): boolean {
-  return v === "true" ? true : v === "false" ? false : fallback;
-}
-
 /** Validate/normalize a raw stored or posted music override into a UserMusic,
  * dropping the Navidrome credentials (they stay server-side) and rejecting type
  * violations. Shared by the user-defaults validator, the per-campaign settings
@@ -122,9 +119,9 @@ export function parseMusicBlock(raw: unknown): { value: UserMusic } | { error: s
 }
 
 /** Effective, client-safe music config. Precedence is field-by-field:
- * campaign override → user override → `.env` default (#109 / ADR-0020 amended).
+ * campaign override → user override → config default (#109 / ADR-0020, ADR-0033).
  * A per-game override wins where set; each unset field falls through to the
- * user's account default, then to `.env`. */
+ * user's account default, then to `config.defaults`. */
 export function resolveMusicConfig(userMusic: UserMusic = {}, campaignMusic: UserMusic = {}): MusicConfig {
   const pick = <K extends keyof UserMusic>(key: K): UserMusic[K] =>
     campaignMusic[key] ?? userMusic[key];
@@ -132,16 +129,16 @@ export function resolveMusicConfig(userMusic: UserMusic = {}, campaignMusic: Use
   const source: MusicSource =
     chosenSource === "navidrome" || chosenSource === "local"
       ? chosenSource
-      : process.env.DEFAULT_MUSIC_SOURCE === "navidrome"
+      : config.defaults.musicSource === "navidrome"
         ? "navidrome"
         : "local";
   return {
-    enabled: pick("enabled") ?? envBool(process.env.DEFAULT_MUSIC_ENABLED, false),
+    enabled: pick("enabled") ?? config.defaults.musicEnabled,
     source,
     navidrome: {
-      url: (pick("navidromeUrl") || process.env.NAVIDROME_URL || "").replace(/\/$/, ""),
-      playlist: pick("navidromePlaylist") || process.env.NAVIDROME_PLAYLIST || "",
-      configured: Boolean(process.env.NAVIDROME_USER && process.env.NAVIDROME_PASSWORD),
+      url: (pick("navidromeUrl") || config.navidrome.url || "").replace(/\/$/, ""),
+      playlist: pick("navidromePlaylist") || config.navidrome.playlist || "",
+      configured: Boolean(secrets.navidrome.username && secrets.navidrome.password),
     },
   };
 }
@@ -157,10 +154,10 @@ export interface NavidromeCreds {
 
 /** Resolve the server-side Navidrome creds for a user's effective config, or
  * null if incomplete (missing URL/user/password). The URL/playlist come from the
- * resolved (possibly user-overridden) config; user/password are env-only. */
+ * resolved (possibly user-overridden) config; user/password are secrets-only. */
 export function navidromeCreds(cfg: MusicConfig): NavidromeCreds | null {
-  const user = process.env.NAVIDROME_USER;
-  const password = process.env.NAVIDROME_PASSWORD;
+  const user = secrets.navidrome.username;
+  const password = secrets.navidrome.password;
   if (!cfg.navidrome.url || !user || !password) return null;
   return { url: cfg.navidrome.url, user, password, playlist: cfg.navidrome.playlist };
 }

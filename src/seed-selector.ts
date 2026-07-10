@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { CAMPAIGNS_ROOT } from "./campaign-store.js";
+import { config } from "./config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SEED_TABLES_PATH = path.resolve(__dirname, "../data/seed-tables.json");
@@ -37,13 +38,11 @@ function registryPathFor(campaignDir?: string, localRegistry = false): { dir: st
 
 /** Chance a roll draws from a wildcard pool instead of the conventional one,
  * per design doc §4 ("~15-20%, so strangeness punctuates rather than
- * saturates"). Overridable via env for tuning/testing, and per-campaign via
- * ADR-0004's toneWhimsy setting (see createSeedMcpServer below) — the env
- * var is the process-wide default; toneWhimsy is a per-campaign override
- * on top of it. */
-export const WILDCARD_CHANCE = process.env.SEED_WILDCARD_CHANCE
-  ? Number(process.env.SEED_WILDCARD_CHANCE)
-  : 0.175;
+ * saturates"). Overridable via config.defaults.seedWildcardChance for tuning
+ * (ADR-0033), and per-campaign via ADR-0004's toneWhimsy setting (see
+ * createSeedMcpServer below) — the config value is the process-wide default;
+ * toneWhimsy is a per-campaign override on top of it. */
+export const WILDCARD_CHANCE = config.defaults.seedWildcardChance;
 
 /** How many of the most recent combo rolls (per category) to pull
  * individual field values from when biasing away from recent reuse. */
