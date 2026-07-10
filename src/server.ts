@@ -1,10 +1,3 @@
-// Side-effecting import, deliberately first: module-graph evaluation order
-// runs an import's own top-level code before the importing module's code,
-// so this must load .env before dm-engine.js -> seed-selector.js reads
-// process.env.SEED_WILDCARD_CHANCE at its own module scope. A later
-// loadDotenv() call in this file's body would run too late for that.
-import "dotenv/config";
-import { config as loadDotenv } from "dotenv";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -112,20 +105,18 @@ import {
   MUSIC_CONTENT_TYPES,
   type UserMusic,
 } from "./music-store.js";
+import { config, configSources } from "./config.js";
 
-const dotenvResult = loadDotenv();
-if (dotenvResult.error) {
-  console.log("No .env file found — reading config from shell environment only.");
-} else {
-  console.log(`Loaded .env from ${process.cwd()} (${Object.keys(dotenvResult.parsed ?? {}).length} vars).`);
-}
+console.log(
+  `Config: settings from ${configSources.config}, secrets from ${configSources.secrets} (ADR-0033; see docs/configuration.md).`
+);
 
-const PORT = process.env.PORT ? Number(process.env.PORT) : 4317;
-// Per ADR-0003: default stays localhost-only. Set HOST to the machine's
-// LAN IP (or 0.0.0.0 to bind all interfaces) to serve other LAN devices —
-// this is a deliberate opt-in, not automatic, since it changes the trust
-// boundary from "this machine only" to "this household's network."
-const HOST = process.env.HOST ?? "127.0.0.1";
+const PORT = config.server.port;
+// Per ADR-0003: default stays localhost-only. Set server.host in config.json to
+// the machine's LAN IP (or 0.0.0.0 to bind all interfaces) to serve other LAN
+// devices — a deliberate opt-in, since it changes the trust boundary from "this
+// machine only" to "this household's network."
+const HOST = config.server.host;
 
 // ADR-0019: auth is now per-user accounts, not one household secret. The same
 // `X-Chronicle-Token` header now carries a per-user *session token* (issued by
@@ -133,47 +124,37 @@ const HOST = process.env.HOST ?? "127.0.0.1";
 // header name is unchanged so CORS and the client transport didn't have to move.
 const AUTH_HEADER = "x-chronicle-token";
 
-/** ADR-0019: the default settings a brand-new user's account inherits, read
- * from `.env` (see .env.example). Only well-formed values are included; anything
- * unset or invalid is simply omitted, so the user falls back to the same code
- * defaults an absent field always had. These seed the user's settings.json at
- * registration and, through it, every campaign they create. */
+/** ADR-0019: the default settings a brand-new user's account inherits, read from
+ * `config.defaults` (ADR-0033; see config.example.json). Only well-formed values are
+ * included; anything empty/null/invalid is omitted, so the user falls back to the
+ * same code defaults an absent field always had. These seed the user's settings.json
+ * at registration and, through it, every campaign they create. */
 function newUserDefaultSettings(): Record<string, unknown> {
+  const d = config.defaults;
   const out: Record<string, unknown> = {};
-  const model = process.env.DEFAULT_MODEL;
-  if (model && isValidModelId(model)) out.model = model;
-  const provider = process.env.DEFAULT_PROVIDER;
-  if (provider && isValidProviderId(provider)) out.provider = provider;
-  const artStyle = process.env.DEFAULT_ART_STYLE?.trim();
+  if (d.model && isValidModelId(d.model)) out.model = d.model;
+  if (d.provider && isValidProviderId(d.provider)) out.provider = d.provider;
+  const artStyle = d.artStyle?.trim();
   if (artStyle) out.artStyle = artStyle;
-  const worldSetting = process.env.DEFAULT_WORLD_SETTING?.trim();
+  const worldSetting = d.worldSetting?.trim();
   if (worldSetting) out.worldSetting = worldSetting;
-  const tone = process.env.DEFAULT_TONE_WHIMSY;
-  if (tone !== undefined && tone !== "") {
-    const n = Number(tone);
+  if (d.toneWhimsy !== null && d.toneWhimsy !== undefined) {
+    const n = Number(d.toneWhimsy);
     if (Number.isFinite(n) && n >= 0 && n <= 1) out.toneWhimsy = n;
   }
-  const intensity = process.env.DEFAULT_CONTENT_INTENSITY;
-  if (intensity && CONTENT_INTENSITIES.includes(intensity as ContentIntensity)) {
-    out.contentIntensity = intensity;
+  if (d.contentIntensity && CONTENT_INTENSITIES.includes(d.contentIntensity as ContentIntensity)) {
+    out.contentIntensity = d.contentIntensity;
   }
-  const length = process.env.DEFAULT_RESPONSE_LENGTH;
-  if (length && RESPONSE_LENGTHS.includes(length as ResponseLength)) {
-    out.responseLength = length;
+  if (d.responseLength && RESPONSE_LENGTHS.includes(d.responseLength as ResponseLength)) {
+    out.responseLength = d.responseLength;
   }
-  const boolEnv = (v: string | undefined): boolean | undefined =>
-    v === "true" ? true : v === "false" ? false : undefined;
-  const genImages = boolEnv(process.env.DEFAULT_GENERATE_IMAGES);
-  if (genImages !== undefined) out.generateImages = genImages;
-  const autoRoll = boolEnv(process.env.DEFAULT_AUTO_ROLL_DICE);
-  if (autoRoll !== undefined) out.autoRollDice = autoRoll;
-  const autoIllustrate = boolEnv(process.env.DEFAULT_AUTO_ILLUSTRATE);
-  if (autoIllustrate !== undefined) out.autoIllustrateTurns = autoIllustrate;
+  if (typeof d.generateImages === "boolean") out.generateImages = d.generateImages;
+  if (typeof d.autoRollDice === "boolean") out.autoRollDice = d.autoRollDice;
+  if (typeof d.autoIllustrate === "boolean") out.autoIllustrateTurns = d.autoIllustrate;
   // #118: generateVideos is a copy-on-create boolean like generateImages. The
-  // video *params* (duration/resolution/aspect) are not seeded here — like
-  // music, they resolve from DEFAULT_VIDEO_* env at read time (resolveVideoConfig).
-  const genVideos = boolEnv(process.env.DEFAULT_GENERATE_VIDEOS);
-  if (genVideos !== undefined) out.generateVideos = genVideos;
+  // video *params* (duration/resolution/aspect) are not seeded here — like music,
+  // they resolve from config.defaults at read time (resolveVideoConfig).
+  if (typeof d.generateVideos === "boolean") out.generateVideos = d.generateVideos;
   return out;
 }
 

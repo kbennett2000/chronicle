@@ -14,9 +14,13 @@ blob-report/
 # Never commit auth/keys
 .env
 .env.*
-!.env.example
 .grok/
 .credentials.json
+
+# File-based config (ADR-0033): real config + secrets never enter git; the
+# committed *.example.json siblings hold safe defaults / empty placeholders.
+config.json
+secrets.json
 
 # User accounts (ADR-0019): password hashes, session tokens, and per-user
 # default settings live here — never enters git.

@@ -36,9 +36,10 @@ const TSX_BIN = path.resolve(__dirname, "../../node_modules/.bin/tsx");
 /** Write the per-turn `<campaignDir>/.grok/config.toml` declaring the stdio MCP
  * servers this campaign's settings enable (ADR-0018). Because cwd is campaignDir,
  * this is grok's highest-priority config. `.grok/` is gitignored, and each server
- * gets the campaign dir via env — so there's no cross-campaign bleed (ADR-0004).
- * Only the servers the settings turn on are declared, mirroring how the Claude
- * path conditionally wires dice/image per turn. */
+ * gets the campaign dir as its first CLI argument (ADR-0033 — runtime IPC via argv,
+ * not env or file config) — so there's no cross-campaign bleed (ADR-0004). Only the
+ * servers the settings turn on are declared, mirroring how the Claude path
+ * conditionally wires dice/image per turn. */
 function writeGrokConfig(campaignDir: string, settings: CampaignSettings): void {
   const grokDir = path.join(campaignDir, ".grok");
   fs.mkdirSync(grokDir, { recursive: true });
@@ -46,11 +47,12 @@ function writeGrokConfig(campaignDir: string, settings: CampaignSettings): void 
   const blocks: string[] = [];
   const addServer = (name: string, file: string): void => {
     const serverPath = path.join(MCP_SERVERS_DIR, file);
+    // campaignDir is a discrete args element (not string-concatenated) so paths
+    // containing spaces stay a single argv entry.
     blocks.push(
       `[mcp_servers.${name}]\n` +
         `command = ${JSON.stringify(TSX_BIN)}\n` +
-        `args = [${JSON.stringify(serverPath)}]\n` +
-        `env = { CHRONICLE_CAMPAIGN_DIR = ${JSON.stringify(campaignDir)} }\n`
+        `args = [${JSON.stringify(serverPath)}, ${JSON.stringify(campaignDir)}]\n`
     );
   };
 

@@ -2,9 +2,11 @@
 // prompt-driven text (not CLI flags): duration, resolution, and aspect ratio
 // are described in the /imagine-video prompt. They are configurable at two
 // levels — account (player defaults) and per-campaign override — resolved
-// field-by-field campaign → user → `.env` → code default, exactly like the
-// music config (see resolveMusicConfig in music-store.ts). Defaults per the
+// field-by-field campaign → user → config default → code default, exactly like
+// the music config (see resolveMusicConfig in music-store.ts). Defaults per the
 // issue notes: 5-second clip, 480p, square.
+
+import { config, type ConfigDefaults } from "./config.js";
 
 export type VideoResolution = "480p" | "720p";
 export const VIDEO_RESOLUTIONS: VideoResolution[] = ["480p", "720p"];
@@ -73,35 +75,40 @@ export function parseVideoBlock(raw: unknown): { value: UserVideo } | { error: s
   return { value: video };
 }
 
-function envDuration(v: string | undefined): number | undefined {
-  if (v === undefined) return undefined;
-  const n = Number(v);
+function coerceDuration(n: number): number | undefined {
   if (!Number.isFinite(n) || !Number.isInteger(n) || n < MIN_VIDEO_SECONDS || n > MAX_VIDEO_SECONDS) {
     return undefined;
   }
   return n;
 }
 
-function envResolution(v: string | undefined): VideoResolution | undefined {
+function coerceResolution(v: string): VideoResolution | undefined {
   return VIDEO_RESOLUTIONS.includes(v as VideoResolution) ? (v as VideoResolution) : undefined;
 }
 
-function envAspect(v: string | undefined): VideoAspect | undefined {
+function coerceAspect(v: string): VideoAspect | undefined {
   return VIDEO_ASPECTS.includes(v as VideoAspect) ? (v as VideoAspect) : undefined;
 }
 
+/** The config-level video defaults (ADR-0033), injectable so tests can seed them
+ * directly instead of relying on the ambient singleton. */
+export type VideoDefaults = Pick<ConfigDefaults, "videoDuration" | "videoResolution" | "videoAspect">;
+
 /** Effective video params. Precedence is field-by-field:
- * campaign override → user override → `.env` default → code default.
+ * campaign override → user override → config default → code default.
  * A per-game override wins where set; each unset field falls through to the
- * user's account default, then `.env`, then DEFAULT_VIDEO (mirrors
+ * user's account default, then `config.defaults`, then DEFAULT_VIDEO (mirrors
  * resolveMusicConfig). */
-export function resolveVideoConfig(userVideo: UserVideo = {}, campaignVideo: UserVideo = {}): VideoConfig {
+export function resolveVideoConfig(
+  userVideo: UserVideo = {},
+  campaignVideo: UserVideo = {},
+  defaults: VideoDefaults = config.defaults
+): VideoConfig {
   const pick = <K extends keyof UserVideo>(key: K): UserVideo[K] => campaignVideo[key] ?? userVideo[key];
   return {
-    durationSeconds:
-      pick("durationSeconds") ?? envDuration(process.env.DEFAULT_VIDEO_DURATION) ?? DEFAULT_VIDEO.durationSeconds,
-    resolution: pick("resolution") ?? envResolution(process.env.DEFAULT_VIDEO_RESOLUTION) ?? DEFAULT_VIDEO.resolution,
-    aspectRatio: pick("aspectRatio") ?? envAspect(process.env.DEFAULT_VIDEO_ASPECT) ?? DEFAULT_VIDEO.aspectRatio,
+    durationSeconds: pick("durationSeconds") ?? coerceDuration(defaults.videoDuration) ?? DEFAULT_VIDEO.durationSeconds,
+    resolution: pick("resolution") ?? coerceResolution(defaults.videoResolution) ?? DEFAULT_VIDEO.resolution,
+    aspectRatio: pick("aspectRatio") ?? coerceAspect(defaults.videoAspect) ?? DEFAULT_VIDEO.aspectRatio,
   };
 }
 

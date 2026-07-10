@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { sanitizeImagePrompt, saveGeneratedImage, slugify, sceneStyleNegatives } from "../image-generator.js";
 import type { ImageBackend, ImageBackendArgs, ImageGenResult, ImageQuality } from "./types.js";
 import { lookupStyleLora, type StyleLora } from "./style-loras.js";
+import { config } from "../config.js";
 
 export type FetchFn = typeof fetch;
 
@@ -171,7 +172,7 @@ interface OutImage {
 }
 
 function comfyBase(): string {
-  return (process.env.COMFYUI_URL ?? "http://localhost:8188").replace(/\/$/, "");
+  return (config.comfyui.url || "http://localhost:8188").replace(/\/$/, "");
 }
 
 function fail(name: string, error: string): ImageGenResult {

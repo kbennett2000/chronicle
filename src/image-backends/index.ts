@@ -5,6 +5,7 @@
 import { readUserSettings } from "../user-store.js";
 import { campaignDirUserId } from "../campaign-store.js";
 import type { CampaignSettings } from "../campaign-store.js";
+import { config } from "../config.js";
 import {
   isValidImageProvider,
   isValidImageQuality,
@@ -32,14 +33,18 @@ export function getImageBackend(provider: ImageProvider): ImageBackend {
 }
 
 /** PURE field-by-field precedence (mirrors resolveMusicConfig / resolveVideoConfig):
- * campaign override → user default → `.env` (DEFAULT_IMAGE_PROVIDER) → code default
- * "grok". A value only wins when it's a valid provider, so a bad stored/env value
- * is ignored rather than breaking generation. */
-export function resolveImageProvider(userProvider?: string, campaignProvider?: string): ImageProvider {
+ * campaign override → user default → config default (config.defaults.imageProvider,
+ * ADR-0033) → code default "grok". A value only wins when it's a valid provider, so
+ * a bad stored/config value is ignored rather than breaking generation. The config
+ * default is injectable so tests can seed it without the ambient singleton. */
+export function resolveImageProvider(
+  userProvider?: string,
+  campaignProvider?: string,
+  configDefault: string = config.defaults.imageProvider
+): ImageProvider {
   const pick = campaignProvider ?? userProvider;
   if (isValidImageProvider(pick)) return pick;
-  const env = process.env.DEFAULT_IMAGE_PROVIDER;
-  if (isValidImageProvider(env)) return env;
+  if (isValidImageProvider(configDefault)) return configDefault;
   return "grok";
 }
 
@@ -57,15 +62,18 @@ export function resolveImageProviderForCampaign(campaignDir: string, settings: C
 }
 
 /** ADR-0029: PURE precedence for the local quality tier, mirroring
- * resolveImageProvider: campaign override → user default → `.env`
- * (DEFAULT_IMAGE_QUALITY) → code default "standard". A value only wins when it's a
- * valid tier, so a bad stored/env value is ignored. Code default "standard" keeps
- * every existing game/account byte-identical to pre-0029. */
-export function resolveImageQuality(userQuality?: string, campaignQuality?: string): ImageQuality {
+ * resolveImageProvider: campaign override → user default → config default
+ * (config.defaults.imageQuality, ADR-0033) → code default "standard". A value only
+ * wins when it's a valid tier, so a bad stored/config value is ignored. Code default
+ * "standard" keeps every existing game/account byte-identical to pre-0029. */
+export function resolveImageQuality(
+  userQuality?: string,
+  campaignQuality?: string,
+  configDefault: string = config.defaults.imageQuality
+): ImageQuality {
   const pick = campaignQuality ?? userQuality;
   if (isValidImageQuality(pick)) return pick;
-  const env = process.env.DEFAULT_IMAGE_QUALITY;
-  if (isValidImageQuality(env)) return env;
+  if (isValidImageQuality(configDefault)) return configDefault;
   return "standard";
 }
 

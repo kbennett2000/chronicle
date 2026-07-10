@@ -1,0 +1,43 @@
+{
+  "_comment": "Chronicle non-secret configuration. Copy this file to config.json and edit. config.json is git-ignored; this example holds the real defaults and is also the fallback when config.json is absent, so a fresh checkout runs as-is. Secrets (passwords) live in secrets.json, not here. See docs/configuration.md.",
+
+  "server": {
+    "_comment": "host: bind interface. Default 127.0.0.1 is localhost-only (ADR-0003). Set to your machine's LAN IP, or 0.0.0.0 to bind all interfaces, to serve other devices on your network. port: the HTTP/API/UI port.",
+    "host": "127.0.0.1",
+    "port": 4317
+  },
+
+  "comfyui": {
+    "_comment": "Base URL of the ComfyUI server used by the local image backend. Point this at another machine (e.g. http://192.168.1.50:8188) to run image generation on a remote GPU host.",
+    "url": "http://localhost:8188"
+  },
+
+  "navidrome": {
+    "_comment": "Non-secret Navidrome (Subsonic) settings. Leave url empty to keep the Navidrome music source unavailable. Credentials go in secrets.json.",
+    "url": "",
+    "playlist": ""
+  },
+
+  "defaults": {
+    "_comment": "Default settings a brand-new user's account inherits. Each is overridable per-user and per-campaign; these are the last-resort fallback. Empty string / null means 'no forced default' (the field stays unset for new users).",
+    "provider": "claude",
+    "model": "claude-sonnet-5",
+    "imageProvider": "grok",
+    "imageQuality": "standard",
+    "artStyle": "",
+    "worldSetting": "",
+    "contentIntensity": "",
+    "responseLength": "detailed",
+    "toneWhimsy": null,
+    "autoIllustrate": false,
+    "generateImages": false,
+    "generateVideos": false,
+    "autoRollDice": true,
+    "musicEnabled": false,
+    "musicSource": "local",
+    "videoDuration": 5,
+    "videoResolution": "480p",
+    "videoAspect": "square",
+    "seedWildcardChance": 0.175
+  }
+}

@@ -40,11 +40,27 @@ it walks you through everything, one calm step at a time.
   the guide shows you how to sign in)
 - About 20–30 minutes the first time
 
+## Configuration
+
+Chronicle reads its settings from two JSON files at the repo root — `config.json` for
+non-secret settings and `secrets.json` for passwords (both git-ignored). You don't have
+to create them to start: a fresh checkout boots from the committed defaults. To change
+anything, copy the templates and edit:
+
+```bash
+cp config.example.json config.json
+cp secrets.example.json secrets.json
+```
+
+See the **[Configuration guide](docs/configuration.md)** for every setting, the
+settings-vs-secrets split, and how to point image generation at a remote GPU host.
+
 ## Learn more
 
 - 📖 **[User Guide](docs/user-guide/index.md)** — start here
 - 🖼️ **[Adding pictures](docs/user-guide/adding-pictures.md)** — optional illustrations of your world
 - 🎨 **[Customizing your story](docs/user-guide/customizing-your-story.md)** — art styles, world flavor, tone
+- ⚙️ **[Configuration](docs/configuration.md)** — settings, secrets, and remote GPU hosts
 - 🆘 **[Help & troubleshooting](docs/user-guide/help-and-troubleshooting.md)** — calm fixes for common hiccups
 
 ---

@@ -14,23 +14,10 @@ import {
 } from "../src/campaign-store.js";
 import { writeUserSettings, USERS_ROOT } from "../src/user-store.js";
 
-// ADR-0029: the local quality tier resolves campaign → user → .env
-// (DEFAULT_IMAGE_QUALITY) → code default "standard", mirroring resolveImageProvider.
-// Code default "standard" keeps every existing game/account byte-identical to pre-0029.
-
-/** Run `fn` with DEFAULT_IMAGE_QUALITY set to `val` (or unset), restoring after so
- * env-dependent assertions don't leak into other tests. */
-function withEnv(val: string | undefined, fn: () => void): void {
-  const prev = process.env.DEFAULT_IMAGE_QUALITY;
-  if (val === undefined) delete process.env.DEFAULT_IMAGE_QUALITY;
-  else process.env.DEFAULT_IMAGE_QUALITY = val;
-  try {
-    fn();
-  } finally {
-    if (prev === undefined) delete process.env.DEFAULT_IMAGE_QUALITY;
-    else process.env.DEFAULT_IMAGE_QUALITY = prev;
-  }
-}
+// ADR-0029/0033: the local quality tier resolves campaign → user → config default
+// (config.defaults.imageQuality, injectable here) → code default "standard", mirroring
+// resolveImageProvider. Code default "standard" keeps every existing game/account
+// byte-identical to pre-0029.
 
 test("isValidImageQuality: accepts only the three tiers", () => {
   for (const good of ["fast", "standard", "high"]) assert.equal(isValidImageQuality(good), true);
@@ -40,39 +27,28 @@ test("isValidImageQuality: accepts only the three tiers", () => {
 });
 
 test("resolveImageQuality: a campaign override wins over the user default", () => {
-  withEnv(undefined, () => {
-    assert.equal(resolveImageQuality("standard", "high"), "high");
-    assert.equal(resolveImageQuality("high", "fast"), "fast");
-  });
+  assert.equal(resolveImageQuality("standard", "high"), "high");
+  assert.equal(resolveImageQuality("high", "fast"), "fast");
 });
 
 test("resolveImageQuality: an unset campaign value falls through to the user default", () => {
-  withEnv(undefined, () => {
-    assert.equal(resolveImageQuality("high", undefined), "high");
-  });
+  assert.equal(resolveImageQuality("high", undefined), "high");
 });
 
-test("resolveImageQuality: both unset → .env DEFAULT_IMAGE_QUALITY", () => {
-  withEnv("fast", () => {
-    assert.equal(resolveImageQuality(undefined, undefined), "fast");
-  });
+test("resolveImageQuality: both unset → the config default", () => {
+  assert.equal(resolveImageQuality(undefined, undefined, "fast"), "fast");
 });
 
-test("resolveImageQuality: nothing set anywhere → code default 'standard'", () => {
-  withEnv(undefined, () => {
-    assert.equal(resolveImageQuality(undefined, undefined), "standard");
-  });
+test("resolveImageQuality: nothing valid anywhere → code default 'standard'", () => {
+  // An invalid config default falls through to the ultimate code fallback.
+  assert.equal(resolveImageQuality(undefined, undefined, "nonsense"), "standard");
 });
 
-test("resolveImageQuality: an invalid campaign/user/env value is ignored", () => {
-  withEnv("nonsense", () => {
-    // invalid campaign → invalid user → invalid env → "standard"
-    assert.equal(resolveImageQuality("bogus", "garbage"), "standard");
-  });
-  withEnv("high", () => {
-    // invalid campaign & user are skipped, but valid env wins
-    assert.equal(resolveImageQuality("bogus", "garbage"), "high");
-  });
+test("resolveImageQuality: an invalid campaign/user/config value is ignored", () => {
+  // invalid campaign → invalid user → invalid config default → "standard"
+  assert.equal(resolveImageQuality("bogus", "garbage", "nonsense"), "standard");
+  // invalid campaign & user are skipped, but a valid config default wins
+  assert.equal(resolveImageQuality("bogus", "garbage", "high"), "high");
 });
 
 test("resolveImageQualityForCampaign: a per-game override wins end-to-end", () => {
@@ -80,10 +56,8 @@ test("resolveImageQualityForCampaign: a per-game override wins end-to-end", () =
   const id = `zz-imgqual-camp-${process.hrtime.bigint()}`;
   const dir = scaffoldCampaign(userId, id, { name: "I", race: "Human", class: "Wizard", level: 1 });
   try {
-    withEnv(undefined, () => {
-      persistCampaignSettings(dir, { imageQuality: "high" });
-      assert.equal(resolveImageQualityForCampaign(dir, readCampaignSettings(dir)), "high");
-    });
+    persistCampaignSettings(dir, { imageQuality: "high" });
+    assert.equal(resolveImageQualityForCampaign(dir, readCampaignSettings(dir)), "high");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -94,11 +68,9 @@ test("resolveImageQualityForCampaign: no game override → the account default (
   const id = "zz-imgqual-camp";
   const dir = scaffoldCampaign(userId, id, { name: "I", race: "Human", class: "Wizard", level: 1 });
   try {
-    withEnv(undefined, () => {
-      writeUserSettings(userId, { imageQuality: "fast" });
-      // Campaign has no imageQuality → falls to the user's account default.
-      assert.equal(resolveImageQualityForCampaign(dir, readCampaignSettings(dir)), "fast");
-    });
+    writeUserSettings(userId, { imageQuality: "fast" });
+    // Campaign has no imageQuality → falls to the user's account default.
+    assert.equal(resolveImageQualityForCampaign(dir, readCampaignSettings(dir)), "fast");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(path.join(USERS_ROOT, userId), { recursive: true, force: true });
