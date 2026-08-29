@@ -16,6 +16,10 @@ interface ImageEditorProps {
   initialDescription: string;
   /** Installed ComfyUI checkpoints (from getImageModels); [] hides the model picker. */
   imageModels: string[];
+  /** ADR-0036/0037: the campaign-relative path of the image being edited. Enables the
+   * "change amount" (img2img init) and "keep the face" (reference) controls; absent
+   * hides them. */
+  currentImageRelPath?: string;
   busy: boolean;
   error?: string | null;
   /** Redraw this image. `overrides` carries only the fields the user set. */
@@ -37,7 +41,15 @@ const fieldStyle = {
   outline: "none",
 };
 
-export function ImageEditor({ initialDescription, imageModels, busy, error, onRegenerate, onClose }: ImageEditorProps) {
+export function ImageEditor({
+  initialDescription,
+  imageModels,
+  currentImageRelPath,
+  busy,
+  error,
+  onRegenerate,
+  onClose,
+}: ImageEditorProps) {
   const [description, setDescription] = useState(initialDescription);
   const [artStyle, setArtStyle] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
@@ -45,6 +57,13 @@ export function ImageEditor({ initialDescription, imageModels, busy, error, onRe
   const [model, setModel] = useState("");
   // Tri-state: "" = keep the game's quality; otherwise the chosen tier.
   const [quality, setQuality] = useState<"" | "fast" | "standard" | "high">("");
+  // ADR-0036: img2img — tweak the current image instead of drawing fresh.
+  const [tweak, setTweak] = useState(false);
+  const [changeAmount, setChangeAmount] = useState(0.65); // ComfyUI denoise
+  // ADR-0037: IP-Adapter likeness — keep the current subject's face.
+  const [keepFace, setKeepFace] = useState(false);
+  const [likeness, setLikeness] = useState(0.5);
+  const [refPhoto, setRefPhoto] = useState<string>(""); // base64 data URL, optional override
 
   function redraw() {
     const overrides: ImageOverrides = {};
@@ -57,7 +76,28 @@ export function ImageEditor({ initialDescription, imageModels, busy, error, onRe
       const n = Number(t);
       if (Number.isFinite(n) && n >= 0) overrides.imageSeed = Math.floor(n);
     }
+    // ADR-0036: img2img needs the current image as the init frame.
+    if (tweak && currentImageRelPath) {
+      overrides.initImageRelPath = currentImageRelPath;
+      overrides.denoise = changeAmount;
+    }
+    // ADR-0037: likeness — an uploaded photo wins, else the current image is the reference.
+    if (keepFace) {
+      if (refPhoto) overrides.referencePhoto = refPhoto;
+      else if (currentImageRelPath) overrides.referenceImageRelPath = currentImageRelPath;
+      overrides.likenessStrength = likeness;
+    }
     onRegenerate(description.trim() || initialDescription, overrides);
+  }
+
+  function onPickPhoto(file: File | undefined) {
+    if (!file) {
+      setRefPhoto("");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setRefPhoto(typeof reader.result === "string" ? reader.result : "");
+    reader.readAsDataURL(file);
   }
 
   return (
@@ -193,6 +233,82 @@ export function ImageEditor({ initialDescription, imageModels, busy, error, onRe
             ))}
           </select>
         </>
+      )}
+
+      {/* ADR-0036: img2img "change amount" — tweak the current image instead of a
+          fresh draw. Only offered when there is a current image to build on, and on
+          the local engine (grok ignores it). */}
+      {currentImageRelPath && (
+        <div style={{ marginTop: 12, borderTop: "1px solid rgba(109,90,56,.3)", paddingTop: 10 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              data-testid="editor-tweak"
+              checked={tweak}
+              onChange={(e) => setTweak(e.target.checked)}
+            />
+            <span style={{ fontSize: 12.5, color: "var(--ink)" }}>Tweak this image (keep the composition)</span>
+          </label>
+          {tweak && (
+            <div style={{ marginTop: 6 }}>
+              <div style={labelStyle}>
+                Change amount <span style={{ color: "var(--ink-faint)" }}>— {changeAmount.toFixed(2)} · higher = more different · local engine</span>
+              </div>
+              <input
+                type="range"
+                data-testid="editor-change-amount"
+                min={0.2}
+                max={0.9}
+                step={0.05}
+                value={changeAmount}
+                onChange={(e) => setChangeAmount(Number(e.target.value))}
+                style={{ width: "100%" }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ADR-0037: IP-Adapter likeness — keep the current subject's face. */}
+      {currentImageRelPath && (
+        <div style={{ marginTop: 10 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              data-testid="editor-keep-face"
+              checked={keepFace}
+              onChange={(e) => setKeepFace(e.target.checked)}
+            />
+            <span style={{ fontSize: 12.5, color: "var(--ink)" }}>Keep the character's face</span>
+          </label>
+          {keepFace && (
+            <div style={{ marginTop: 6 }}>
+              <div style={labelStyle}>
+                Likeness <span style={{ color: "var(--ink-faint)" }}>— {likeness.toFixed(2)} · local engine · needs IP-Adapter</span>
+              </div>
+              <input
+                type="range"
+                data-testid="editor-likeness"
+                min={0.2}
+                max={1.0}
+                step={0.05}
+                value={likeness}
+                onChange={(e) => setLikeness(Number(e.target.value))}
+                style={{ width: "100%" }}
+              />
+              <div style={{ ...labelStyle, marginTop: 8 }}>
+                Reference photo <span style={{ color: "var(--ink-faint)" }}>— optional; blank uses this image</span>
+              </div>
+              <input
+                type="file"
+                accept="image/*"
+                data-testid="editor-ref-photo"
+                onChange={(e) => onPickPhoto(e.target.files?.[0])}
+                style={{ fontSize: 11.5, color: "var(--ink-dim)" }}
+              />
+            </div>
+          )}
+        </div>
       )}
 
       {error && (

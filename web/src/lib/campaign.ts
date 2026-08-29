@@ -509,6 +509,18 @@ export interface ImageOverrides {
   imageSeed?: number | null;
   imageModel?: string;
   imageQuality?: "fast" | "standard" | "high";
+  /** ADR-0036 img2img: a campaign-relative still to use as the init frame (usually
+   * the image being edited), plus `denoise` in (0,1] (lower = closer to it). Local only. */
+  initImageRelPath?: string;
+  denoise?: number;
+  /** ADR-0037 IP-Adapter likeness: condition on a campaign-relative portrait
+   * (referenceImageRelPath) OR an uploaded photo (referencePhoto, base64/data-URL),
+   * with `likenessStrength` (0,1.5] and `likenessStart` [0,0.5]. Local only; degrades
+   * to prompt-only if IP-Adapter isn't installed on the host. */
+  referenceImageRelPath?: string;
+  referencePhoto?: string;
+  likenessStrength?: number;
+  likenessStart?: number;
 }
 
 export async function illustrateEntity(

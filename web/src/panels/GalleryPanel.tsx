@@ -163,6 +163,7 @@ function Lightbox({
         <ImageEditor
           initialDescription={item.description || item.name}
           imageModels={imageModels}
+          currentImageRelPath={item.image}
           busy={busy}
           error={error}
           onRegenerate={redraw}

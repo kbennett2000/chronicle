@@ -216,6 +216,122 @@ function fail(name: string, error: string): ImageGenResult {
   return { ok: false, error };
 }
 
+const clampNum = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+// ADR-0036 (img2img) / ADR-0037 (IP-Adapter) constants, ported from imagegen-service.
+const DENOISE_DEFAULT = 0.65;
+const IPADAPTER_FILE = "ip-adapter-plus-face_sdxl_vit-h.safetensors";
+const CLIP_VISION_FILE = "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors";
+const REFERENCE_WEIGHT = 0.5;
+const REFERENCE_START = 0.3;
+const PREP_NODE = "PrepImageForClipVision";
+
+/** Upload a local still to ComfyUI's input/ dir; returns the stored filename for a
+ * LoadImage node. A unique name per upload avoids clobbering on overlap. Throws on
+ * failure — the caller decides whether that fails the render (img2img) or degrades
+ * to prompt-only (IP-Adapter). */
+async function uploadImageToComfy(base: string, fetchFn: FetchFn, absPath: string): Promise<string> {
+  const bytes = fs.readFileSync(absPath);
+  const ext = (path.extname(absPath) || ".png").toLowerCase();
+  const type = ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : ext === ".webp" ? "image/webp" : "image/png";
+  const filename = `chronicle-src-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 8)}${ext}`;
+  const form = new FormData();
+  form.append("image", new Blob([bytes], { type }), filename);
+  form.append("overwrite", "true");
+  const res = await fetchFn(`${base}/upload/image`, {
+    method: "POST",
+    body: form,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`ComfyUI /upload/image returned ${res.status}`);
+  const j = (await res.json().catch(() => ({}))) as { name?: string; subfolder?: string };
+  if (!j.name) throw new Error("ComfyUI /upload/image returned no name");
+  return j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
+}
+
+/** ADR-0036: rewire the base graph for img2img — add LoadImage("30") → VAEEncode("31",
+ * using the template's own VAELoader "10") and point the base sampler's `latent_image`
+ * at it, at `denoise` strength (lower = closer to the init image). Exported for tests. */
+export function applyImg2Img(graph: Record<string, any>, imageName: string, denoise: number): void {
+  graph["30"] = { class_type: "LoadImage", inputs: { image: imageName } };
+  graph["31"] = { class_type: "VAEEncode", inputs: { pixels: ["30", 0], vae: ["10", 0] } };
+  if (graph["3"]) {
+    graph["3"].inputs.latent_image = ["31", 0];
+    graph["3"].inputs.denoise = denoise;
+  }
+}
+
+/** Is a ComfyUI node class installed on the host? False on any error. */
+async function nodeAvailable(base: string, fetchFn: FetchFn, cls: string): Promise<boolean> {
+  try {
+    const res = await fetchFn(`${base}/object_info/${cls}`, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    if (!res.ok) return false;
+    const info = (await res.json().catch(() => ({}))) as Record<string, any>;
+    return Boolean(info?.[cls]);
+  } catch {
+    return false;
+  }
+}
+
+/** ADR-0037: is IP-Adapter usable — the custom node present AND the face model
+ * installed (both verified via the one /object_info combo). False on any error, so
+ * the caller degrades to prompt-only. Same `[0]` combo shape as loraAvailable. */
+async function ipAdapterAvailable(base: string, fetchFn: FetchFn): Promise<boolean> {
+  try {
+    const res = await fetchFn(`${base}/object_info/IPAdapterModelLoader`, {
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (!res.ok) return false;
+    const info = (await res.json().catch(() => ({}))) as Record<string, any>;
+    const files = info?.IPAdapterModelLoader?.input?.required?.ipadapter_file?.[0];
+    return Array.isArray(files) && files.includes(IPADAPTER_FILE);
+  } catch {
+    return false;
+  }
+}
+
+/** ADR-0037: inject the IP-Adapter chain (LoadImage "21", IPAdapterModelLoader "22",
+ * CLIPVisionLoader "23", optional PrepImageForClipVision "25", IPAdapterAdvanced "24")
+ * and repoint the base sampler's `model` through it. `modelSource` is the LoRA node
+ * ("20") when a recipe is active, else the checkpoint ("4"), so IP-Adapter composes
+ * AFTER a style LoRA. Exported for tests. */
+export function applyIPAdapter(
+  graph: Record<string, any>,
+  imageName: string,
+  weight: number,
+  startAt: number,
+  faceCrop: boolean
+): void {
+  const modelSource: [string, number] = graph["20"] ? ["20", 0] : ["4", 0];
+  graph["21"] = { class_type: "LoadImage", inputs: { image: imageName } };
+  graph["22"] = { class_type: "IPAdapterModelLoader", inputs: { ipadapter_file: IPADAPTER_FILE } };
+  graph["23"] = { class_type: "CLIPVisionLoader", inputs: { clip_name: CLIP_VISION_FILE } };
+  let imageSource: [string, number] = ["21", 0];
+  if (faceCrop) {
+    graph["25"] = {
+      class_type: PREP_NODE,
+      inputs: { image: ["21", 0], interpolation: "LANCZOS", crop_position: "top", sharpening: 0.0 },
+    };
+    imageSource = ["25", 0];
+  }
+  graph["24"] = {
+    class_type: "IPAdapterAdvanced",
+    inputs: {
+      model: modelSource,
+      ipadapter: ["22", 0],
+      image: imageSource,
+      clip_vision: ["23", 0],
+      weight,
+      weight_type: "ease in-out",
+      combine_embeds: "concat",
+      start_at: startAt,
+      end_at: 1.0,
+      embeds_scaling: "V only",
+    },
+  };
+  if (graph["3"]) graph["3"].inputs.model = ["24", 0];
+}
+
 /** Submit the SDXL graph to ComfyUI, wait for the image, and save it into the
  * campaign images/ dir. `fetchFn` is injectable (default = global fetch) so tests
  * drive the whole HTTP dance with a stub — no GPU and no running ComfyUI —
@@ -265,6 +381,15 @@ export async function generateLocalImage(
     }
   }
 
+  // ADR-0036/0037: img2img and IP-Adapter wire only the BASE chain (nodes 3/4/10/20),
+  // so — like a LoRA recipe — they must never run on the refiner template. Force a base
+  // high-steps tier when either is active and the resolved tier is the refiner.
+  const img2img = !!args.initImageAbsPath;
+  const wantsReference = !!args.referenceImageAbsPath;
+  if ((img2img || wantsReference) && tier.workflow === REFINER_WORKFLOW) {
+    tier = { workflow: BASE_WORKFLOW, steps: 40, timeoutMs: tier.timeoutMs };
+  }
+
   try {
     // Build the graph from the tier's checked-in template (fresh clone per call).
     const graph = JSON.parse(fs.readFileSync(path.join(WORKFLOWS_DIR, tier.workflow), "utf8")) as Record<
@@ -301,6 +426,46 @@ export async function generateLocalImage(
     // ADR-0032: a surviving LoRA recipe injects the LoraLoader node and rewires the
     // base chain through it. Absent recipe → today's graph, untouched.
     if (recipe) applyLora(graph, recipe);
+
+    // ADR-0036: img2img — upload the init frame and repoint the sampler's latent. A
+    // failed upload FAILS the request (the image is the whole point of img2img).
+    if (img2img) {
+      let initName: string;
+      try {
+        initName = await uploadImageToComfy(base, fetchFn, args.initImageAbsPath!);
+      } catch (err) {
+        return fail(name, `img2img init upload failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      applyImg2Img(graph, initName, clampNum(args.denoise ?? DENOISE_DEFAULT, 0.01, 1));
+    }
+
+    // ADR-0037: IP-Adapter reference likeness — DEGRADES to prompt-only when the node
+    // or model isn't installed, or on an upload error (a reference is an enhancement,
+    // never a blocker). Runs after applyLora so it reads the LoRA node as its model
+    // source. Self-contained: never reaches the outer catch.
+    if (wantsReference) {
+      try {
+        if (await ipAdapterAvailable(base, fetchFn)) {
+          const refName = await uploadImageToComfy(base, fetchFn, args.referenceImageAbsPath!);
+          const faceCrop = await nodeAvailable(base, fetchFn, PREP_NODE);
+          applyIPAdapter(
+            graph,
+            refName,
+            clampNum(args.likenessStrength ?? REFERENCE_WEIGHT, 0.01, 1.5),
+            clampNum(args.likenessStart ?? REFERENCE_START, 0, 0.5),
+            faceCrop
+          );
+        } else {
+          console.error(
+            `[image-generator] IP-Adapter not available on the ComfyUI host — rendering "${name}" without reference`
+          );
+        }
+      } catch (err) {
+        console.error(
+          `[image-generator] IP-Adapter setup failed for "${name}" — rendering without reference: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
 
     const clientId = `chronicle-${entityType}-${Date.now()}`;
     const res = await fetchFn(`${base}/prompt`, {

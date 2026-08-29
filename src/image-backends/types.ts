@@ -47,6 +47,22 @@ export interface ImageBackendArgs {
    * (`generateImage`) via resolveImageQualityForCampaign. Local-only — the grok
    * backend never reads it. Absent is treated as "standard" (today's output). */
   imageQuality?: ImageQuality;
+  /** ADR-0036: img2img — an ABSOLUTE path to a still to use as the init frame.
+   * When set, the local backend encodes it as the sampler's starting latent and
+   * renders at `denoise` strength. Editor-driven (per-call). Local-only. */
+  initImageAbsPath?: string;
+  /** ADR-0036: img2img strength in (0,1]; lower = closer to the init image. Only
+   * meaningful with `initImageAbsPath`. Default 0.65. */
+  denoise?: number;
+  /** ADR-0037: IP-Adapter reference likeness — an ABSOLUTE path to a portrait to
+   * condition on ("keep the character's face"). Editor-driven. Local-only; degrades
+   * to prompt-only if IP-Adapter isn't installed on the ComfyUI host. */
+  referenceImageAbsPath?: string;
+  /** ADR-0037: IP-Adapter weight in (0,1.5]; higher = stronger likeness. Default 0.5. */
+  likenessStrength?: number;
+  /** ADR-0037: IP-Adapter start_at in [0,0.5]; higher relaxes identity in early
+   * steps (useful for crowded scenes). Default 0.3. */
+  likenessStart?: number;
 }
 
 /** One image engine. `generate` NEVER throws — every failure mode is caught and

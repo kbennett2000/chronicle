@@ -11,6 +11,8 @@ import {
   resolveEffectiveTier,
   ensureTrigger,
   listLocalCheckpoints,
+  applyImg2Img,
+  applyIPAdapter,
   TIER_CONFIG,
 } from "../src/image-backends/local.js";
 import { STYLE_LORAS } from "../src/image-backends/style-loras.js";
@@ -582,4 +584,127 @@ test("listLocalCheckpoints: parses ComfyUI /object_info; returns [] on any failu
     throw new Error("network down");
   }) as unknown as typeof fetch;
   assert.deepEqual(await listLocalCheckpoints(threw), []);
+});
+
+// --- ADR-0036 img2img + ADR-0037 IP-Adapter (pure graph mutation) ---
+
+test("applyImg2Img: adds LoadImage(30)+VAEEncode(31) and repoints the sampler latent+denoise (#160)", () => {
+  const g: Record<string, any> = { "3": { class_type: "KSampler", inputs: { latent_image: ["5", 0], denoise: 1 } } };
+  applyImg2Img(g, "init.png", 0.55);
+  assert.equal(g["30"].class_type, "LoadImage");
+  assert.equal(g["30"].inputs.image, "init.png");
+  assert.equal(g["31"].class_type, "VAEEncode");
+  assert.deepEqual(g["31"].inputs.pixels, ["30", 0]);
+  assert.deepEqual(g["31"].inputs.vae, ["10", 0]);
+  assert.deepEqual(g["3"].inputs.latent_image, ["31", 0]);
+  assert.equal(g["3"].inputs.denoise, 0.55);
+});
+
+test("applyIPAdapter: adds 21-24 and repoints the sampler model; source is checkpoint or LoRA (#160)", () => {
+  // No LoRA node → model source is the checkpoint [4,0].
+  const g: Record<string, any> = { "3": { class_type: "KSampler", inputs: { model: ["4", 0] } } };
+  applyIPAdapter(g, "ref.png", 0.5, 0.3, true);
+  assert.equal(g["21"].inputs.image, "ref.png");
+  assert.equal(g["22"].class_type, "IPAdapterModelLoader");
+  assert.equal(g["23"].class_type, "CLIPVisionLoader");
+  assert.equal(g["25"].class_type, "PrepImageForClipVision");
+  assert.equal(g["24"].class_type, "IPAdapterAdvanced");
+  assert.deepEqual(g["24"].inputs.model, ["4", 0]);
+  assert.deepEqual(g["24"].inputs.image, ["25", 0]); // face-crop path
+  assert.equal(g["24"].inputs.weight, 0.5);
+  assert.equal(g["24"].inputs.start_at, 0.3);
+  assert.deepEqual(g["3"].inputs.model, ["24", 0]);
+
+  // With a LoRA node present, IP-Adapter composes after it ([20,0]); no face crop → raw ref.
+  const g2: Record<string, any> = { "3": { inputs: { model: ["4", 0] } }, "20": { class_type: "LoraLoader", inputs: {} } };
+  applyIPAdapter(g2, "ref.png", 0.7, 0.1, false);
+  assert.deepEqual(g2["24"].inputs.model, ["20", 0]);
+  assert.equal(g2["25"], undefined);
+  assert.deepEqual(g2["24"].inputs.image, ["21", 0]);
+});
+
+/** A capturing fetch that also answers /upload/image and the IP-Adapter /object_info
+ * probes, so the img2img/likeness paths run end-to-end against a stub. */
+function editFetch(cap: { submitted?: any }, opts: { ipAdapter?: boolean; uploadFails?: boolean } = {}): typeof fetch {
+  return (async (url: string, init?: any) => {
+    const u = String(url);
+    if (u.includes("/upload/image")) {
+      if (opts.uploadFails) return jsonRes(500, {});
+      return jsonRes(200, { name: "uploaded.png" });
+    }
+    if (u.includes("/object_info/IPAdapterModelLoader")) {
+      const files = opts.ipAdapter ? ["ip-adapter-plus-face_sdxl_vit-h.safetensors"] : [];
+      return jsonRes(200, { IPAdapterModelLoader: { input: { required: { ipadapter_file: [files] } } } });
+    }
+    if (u.includes("/object_info/PrepImageForClipVision")) {
+      return jsonRes(200, { PrepImageForClipVision: {} });
+    }
+    if (u.includes("/prompt")) {
+      cap.submitted = JSON.parse(init.body);
+      return jsonRes(200, { prompt_id: PROMPT_ID });
+    }
+    if (u.includes("/history/")) {
+      return jsonRes(200, {
+        [PROMPT_ID]: { status: { status_str: "success" }, outputs: { "9": { images: [{ filename: "x.png", subfolder: "", type: "output" }] } } },
+      });
+    }
+    return bytesRes(200);
+  }) as unknown as typeof fetch;
+}
+
+function withInitFile(fn: (dir: string, absPath: string) => Promise<void>): Promise<void> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chronicle-edit-test-"));
+  const abs = path.join(dir, "src.png");
+  fs.writeFileSync(abs, Buffer.alloc(2048, 1));
+  return fn(dir, abs).finally(() => fs.rmSync(dir, { recursive: true, force: true }));
+}
+
+test("generateLocalImage: img2img submits a graph with the init nodes and set denoise (#160)", async () => {
+  await withInitFile(async (dir, abs) => {
+    const cap: { submitted?: any } = {};
+    const r = await generateLocalImage(
+      { campaignDir: dir, entityType: "npc", name: "Barrow", description: "a dwarf", settings: INK, initImageAbsPath: abs, denoise: 0.4 },
+      editFetch(cap)
+    );
+    assert.equal(r.ok, true);
+    assert.equal(cap.submitted.prompt["30"].inputs.image, "uploaded.png");
+    assert.deepEqual(cap.submitted.prompt["3"].inputs.latent_image, ["31", 0]);
+    assert.equal(cap.submitted.prompt["3"].inputs.denoise, 0.4);
+  });
+});
+
+test("generateLocalImage: img2img upload failure fails the request (does NOT degrade) (#160)", async () => {
+  await withInitFile(async (dir, abs) => {
+    const cap: { submitted?: any } = {};
+    const r = await generateLocalImage(
+      { campaignDir: dir, entityType: "npc", name: "Barrow", description: "a dwarf", settings: INK, initImageAbsPath: abs },
+      editFetch(cap, { uploadFails: true })
+    );
+    assert.equal(r.ok, false);
+    assert.match(r.error!, /img2img init upload failed/);
+  });
+});
+
+test("generateLocalImage: IP-Adapter present → graph gets node 24; absent → degrades to prompt-only (#160)", async () => {
+  await withInitFile(async (dir, abs) => {
+    const cap: { submitted?: any } = {};
+    const r = await generateLocalImage(
+      { campaignDir: dir, entityType: "npc", name: "Barrow", description: "a dwarf", settings: INK, referenceImageAbsPath: abs, likenessStrength: 0.6 },
+      editFetch(cap, { ipAdapter: true })
+    );
+    assert.equal(r.ok, true);
+    assert.equal(cap.submitted.prompt["24"].class_type, "IPAdapterAdvanced");
+    assert.equal(cap.submitted.prompt["24"].inputs.weight, 0.6);
+    assert.deepEqual(cap.submitted.prompt["3"].inputs.model, ["24", 0]);
+  });
+  await withInitFile(async (dir, abs) => {
+    const cap: { submitted?: any } = {};
+    const r = await generateLocalImage(
+      { campaignDir: dir, entityType: "npc", name: "Barrow", description: "a dwarf", settings: INK, referenceImageAbsPath: abs },
+      editFetch(cap, { ipAdapter: false })
+    );
+    assert.equal(r.ok, true); // still renders
+    assert.equal(cap.submitted.prompt["24"], undefined); // no IP-Adapter node
+    assert.deepEqual(cap.submitted.prompt["3"].inputs.model, ["4", 0]); // untouched model chain
+  });
 });
