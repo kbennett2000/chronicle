@@ -3,7 +3,14 @@ import type { Connection } from "../lib/connection";
 import { useAuthedImage } from "../lib/useAuthedImage";
 import { useAuthedVideo } from "../lib/useAuthedVideo";
 import { buildGallery, type GalleryItem } from "../lib/gallery";
-import { illustrateEntity, animateEntity, type CharacterSheet } from "../lib/campaign";
+import {
+  illustrateEntity,
+  animateEntity,
+  getImageModels,
+  type CharacterSheet,
+  type ImageOverrides,
+} from "../lib/campaign";
+import { ImageEditor } from "../components/ImageEditor";
 
 interface GalleryPanelProps {
   connection: Connection;
@@ -23,6 +30,149 @@ interface LightboxState {
   url: string;
   /** Issue #118: when set, the lightbox plays this clip instead of the still. */
   videoUrl?: string;
+}
+
+/** #157 (Slice C): the full-screen image view, extracted so it can own a cache-bust
+ * nonce and re-fetch its own still after an in-place "Edit & redraw". Hosts the
+ * ImageEditor, which shadows the game's look for a single regenerate. */
+function Lightbox({
+  connection,
+  campaignId,
+  item,
+  initialUrl,
+  videoUrl,
+  imageModels,
+  onClose,
+  onIllustrated,
+}: {
+  connection: Connection;
+  campaignId: string;
+  item: GalleryItem;
+  initialUrl: string;
+  videoUrl?: string;
+  imageModels: string[];
+  onClose: () => void;
+  onIllustrated: () => void;
+}) {
+  const [nonce, setNonce] = useState(0);
+  // Re-fetch on redraw (nonce), falling back to the tile's already-loaded URL for
+  // the very first paint so opening the lightbox is instant.
+  const { url: refreshed } = useAuthedImage(connection, campaignId, nonce > 0 ? item.image : undefined, nonce);
+  const shownUrl = nonce > 0 && refreshed ? refreshed : initialUrl;
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function redraw(description: string, overrides: ImageOverrides) {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await illustrateEntity(connection, campaignId, item.type, item.name, description, overrides);
+      if (result.ok) {
+        setNonce((n) => n + 1);
+        setEditing(false);
+        onIllustrated();
+      } else {
+        setError(result.error || "The image engine couldn't draw this.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      data-testid="gallery-lightbox"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 50,
+        background: "rgba(4,2,1,.9)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        animation: "fadeIn 0.25s ease",
+        padding: 24,
+        overflowY: "auto",
+      }}
+    >
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          maxWidth: 480,
+          borderRadius: 2,
+          overflow: "hidden",
+          boxShadow: "0 20px 50px rgba(0,0,0,.7), 0 0 0 1px rgba(184,150,90,.5)",
+        }}
+      >
+        {videoUrl ? (
+          <video
+            src={videoUrl}
+            data-testid="lightbox-video"
+            controls
+            autoPlay
+            loop
+            playsInline
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "100%", display: "block" }}
+          />
+        ) : (
+          <img src={shownUrl} alt="" data-testid="lightbox-image" style={{ width: "100%", display: "block" }} />
+        )}
+      </div>
+      <div style={{ textAlign: "center", marginTop: 14 }}>
+        <div style={{ fontFamily: "var(--font-display)", fontSize: 10, letterSpacing: 2, color: "var(--arcane)" }}>
+          {item.type.toUpperCase()}
+        </div>
+        <div style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 18, letterSpacing: 0.6, color: "var(--ink)", marginTop: 2 }}>
+          {item.name}
+        </div>
+      </div>
+
+      {/* #157: only a still can be edited/redrawn — a clip has no prompt to tweak. */}
+      {!videoUrl && !editing && (
+        <button
+          data-testid="lightbox-edit"
+          onClick={(e) => {
+            e.stopPropagation();
+            setEditing(true);
+          }}
+          style={{
+            marginTop: 14,
+            cursor: "pointer",
+            padding: "8px 18px",
+            borderRadius: 6,
+            border: "1px solid rgba(184,150,90,.5)",
+            background: "rgba(28,20,12,.7)",
+            color: "var(--ink)",
+            fontFamily: "var(--font-display)",
+            fontSize: 12.5,
+            letterSpacing: 0.5,
+          }}
+        >
+          ✎ Edit &amp; redraw
+        </button>
+      )}
+
+      {editing && (
+        <ImageEditor
+          initialDescription={item.description || item.name}
+          imageModels={imageModels}
+          busy={busy}
+          error={error}
+          onRegenerate={redraw}
+          onClose={() => setEditing(false)}
+        />
+      )}
+
+      {!editing && <div style={{ marginTop: 16, fontSize: 11, color: "var(--ink-faint)" }}>tap anywhere to close</div>}
+    </div>
+  );
 }
 
 function GalleryTile({
@@ -307,6 +457,19 @@ export function GalleryPanel({ connection, campaignId, characterSheet, npcRoster
   );
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
   const [loadedFlags, setLoadedFlags] = useState<Record<number, boolean>>({});
+  // #157: local-engine checkpoints for the editor's model picker; [] (hidden) when
+  // ComfyUI is unreachable (e.g. the grok engine, or no local host).
+  const [imageModels, setImageModels] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getImageModels(connection)
+      .then((m) => !cancelled && setImageModels(m))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [connection]);
 
   const illustratedCount = Object.values(loadedFlags).filter(Boolean).length;
 
@@ -333,61 +496,16 @@ export function GalleryPanel({ connection, campaignId, characterSheet, npcRoster
       </div>
 
       {lightbox && (
-        <div
-          data-testid="gallery-lightbox"
-          onClick={() => setLightbox(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 50,
-            background: "rgba(4,2,1,.9)",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            // Per the handoff's motion catalog: fadeIn .25s on overlays —
-            // every other overlay (sheet-scrim, BottomSheet) already gets
-            // this via its own CSS class; the lightbox was the one overlay
-            // still snapping in with no transition at all.
-            animation: "fadeIn 0.25s ease",
-            padding: 24,
-          }}
-        >
-          <div
-            style={{
-              position: "relative",
-              width: "100%",
-              maxWidth: 480,
-              borderRadius: 2,
-              overflow: "hidden",
-              boxShadow: "0 20px 50px rgba(0,0,0,.7), 0 0 0 1px rgba(184,150,90,.5)",
-            }}
-          >
-            {lightbox.videoUrl ? (
-              <video
-                src={lightbox.videoUrl}
-                data-testid="lightbox-video"
-                controls
-                autoPlay
-                loop
-                playsInline
-                onClick={(e) => e.stopPropagation()}
-                style={{ width: "100%", display: "block" }}
-              />
-            ) : (
-              <img src={lightbox.url} alt="" data-testid="lightbox-image" style={{ width: "100%", display: "block" }} />
-            )}
-          </div>
-          <div style={{ textAlign: "center", marginTop: 14 }}>
-            <div style={{ fontFamily: "var(--font-display)", fontSize: 10, letterSpacing: 2, color: "var(--arcane)" }}>
-              {lightbox.item.type.toUpperCase()}
-            </div>
-            <div style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 18, letterSpacing: 0.6, color: "var(--ink)", marginTop: 2 }}>
-              {lightbox.item.name}
-            </div>
-          </div>
-          <div style={{ marginTop: 16, fontSize: 11, color: "var(--ink-faint)" }}>tap anywhere to close</div>
-        </div>
+        <Lightbox
+          connection={connection}
+          campaignId={campaignId}
+          item={lightbox.item}
+          initialUrl={lightbox.url}
+          videoUrl={lightbox.videoUrl}
+          imageModels={imageModels}
+          onClose={() => setLightbox(null)}
+          onIllustrated={onIllustrated}
+        />
       )}
     </div>
   );
