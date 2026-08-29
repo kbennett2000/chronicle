@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ImageOverrides } from "../lib/campaign";
 import { ART_PRESETS, PRESET_LABELS } from "./LookControls";
+import { FullPromptField } from "./FullPromptField";
 
 // #157 (Slice C): Scriptorium's "Edit picture", scoped to Chronicle. Opens over one
 // already-generated image and redraws just that image with a tweaked look. The
@@ -24,6 +25,9 @@ interface ImageEditorProps {
   error?: string | null;
   /** Redraw this image. `overrides` carries only the fields the user set. */
   onRegenerate: (description: string, overrides: ImageOverrides) => void;
+  /** ADR-0038: fetch the fully-assembled positive prompt for this image (a no-render
+   * server "preview") so the user can edit it verbatim. Absent hides the control. */
+  onRequestFullPrompt?: (description: string) => Promise<string | null>;
   onClose: () => void;
 }
 
@@ -48,6 +52,7 @@ export function ImageEditor({
   busy,
   error,
   onRegenerate,
+  onRequestFullPrompt,
   onClose,
 }: ImageEditorProps) {
   const [description, setDescription] = useState(initialDescription);
@@ -64,6 +69,10 @@ export function ImageEditor({
   const [keepFace, setKeepFace] = useState(false);
   const [likeness, setLikeness] = useState(0.5);
   const [refPhoto, setRefPhoto] = useState<string>(""); // base64 data URL, optional override
+  // ADR-0038: "edit the full prompt" — take over the entire assembled positive prompt
+  // (style clause + character look + scene) instead of just the scene caption.
+  const [advanced, setAdvanced] = useState(false);
+  const [fullPrompt, setFullPrompt] = useState("");
 
   function redraw() {
     const overrides: ImageOverrides = {};
@@ -94,6 +103,9 @@ export function ImageEditor({
       else if (currentImageRelPath) overrides.referenceImageRelPath = currentImageRelPath;
       overrides.likenessStrength = likeness;
     }
+    // ADR-0038: a filled full-prompt box replaces the ENTIRE assembled positive prompt
+    // (the plain caption above is then ignored server-side).
+    if (advanced && fullPrompt.trim()) overrides.promptOverride = fullPrompt.trim();
     onRegenerate(description.trim() || initialDescription, overrides);
   }
 
@@ -316,6 +328,19 @@ export function ImageEditor({
             </div>
           )}
         </div>
+      )}
+
+      {/* ADR-0038: edit the FULL prompt — everything actually sent to the model, not
+          just the scene caption. Only offered when the parent can fetch it (local engine). */}
+      {onRequestFullPrompt && (
+        <FullPromptField
+          onRequestFullPrompt={onRequestFullPrompt}
+          description={description.trim() || initialDescription}
+          enabled={advanced}
+          onEnabledChange={setAdvanced}
+          value={fullPrompt}
+          onChange={setFullPrompt}
+        />
       )}
 
       {error && (

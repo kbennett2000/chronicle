@@ -708,3 +708,92 @@ test("generateLocalImage: IP-Adapter present → graph gets node 24; absent → 
     assert.deepEqual(cap.submitted.prompt["3"].inputs.model, ["4", 0]); // untouched model chain
   });
 });
+
+// ADR-0038: full positive-prompt override + a no-render prompt preview.
+
+test("generateLocalImage: promptOverride replaces the positive prompt VERBATIM (no style clause) (ADR-0038)", async () => {
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
+    await generateLocalImage(
+      {
+        campaignDir: dir,
+        entityType: "scene",
+        name: "Throne Room",
+        description: "a vast hall",
+        settings: INK,
+        promptOverride: "cyberpunk alley, neon rain, cinematic",
+      },
+      capturingFetch(cap)
+    );
+    // Both encode nodes carry the override verbatim — NOT the "(ink wash:1.3). …" clause.
+    assert.equal(cap.submitted.prompt["6"].inputs.text, "cyberpunk alley, neon rain, cinematic");
+    assert.equal(cap.submitted.prompt["12"]?.inputs?.text ?? cap.submitted.prompt["6"].inputs.text, "cyberpunk alley, neon rain, cinematic");
+    // The negative pipeline is untouched — the template's base negative still present.
+    assert.match(cap.submitted.prompt["7"].inputs.text, /blurry, lowres, deformed/);
+  });
+});
+
+test("generateLocalImage: promptOverride still wires the LoRA node + trigger is NOT re-added (ADR-0038)", async () => {
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
+    await generateLocalImage(
+      {
+        campaignDir: dir,
+        entityType: "npc",
+        name: "Barrow",
+        description: "a weathered dwarf",
+        settings: PIXEL,
+        promptOverride: "a knight in gold armor, painterly",
+      },
+      capturingFetchLoras(cap, { loraNames: ["pixel-art-xl.safetensors"] })
+    );
+    const g = cap.submitted.prompt;
+    // The style recipe still resolves: the LoRA node is injected and the base chain rewired.
+    assert.equal(g["20"].class_type, "LoraLoader");
+    assert.deepEqual(g["3"].inputs.model, ["20", 0]);
+    // But the positive text is the user's verbatim — the "pixel art." trigger is NOT prepended.
+    assert.equal(g["6"].inputs.text, "a knight in gold armor, painterly");
+  });
+});
+
+test("generateLocalImage: preview returns the assembled prompt and makes NO /prompt submit (ADR-0038)", async () => {
+  await withCampaignDir(async (dir) => {
+    let submitted = false;
+    const previewFetch = (async (url: string) => {
+      if (url.includes("/prompt")) {
+        submitted = true;
+        return jsonRes(200, { prompt_id: PROMPT_ID });
+      }
+      throw new Error(`preview must not fetch ${url}`);
+    }) as unknown as typeof fetch;
+    const r = await generateLocalImage(
+      { campaignDir: dir, entityType: "scene", name: "Throne Room", description: "a vast hall", settings: INK, preview: true },
+      previewFetch
+    );
+    assert.equal(r.ok, true);
+    assert.equal(r.previewPrompt, "(ink wash:1.3). a vast hall");
+    assert.equal(r.relPath, undefined); // nothing saved
+    assert.equal(submitted, false); // ComfyUI never called
+  });
+});
+
+test("generateLocalImage: preview reflects a promptOverride without rendering (ADR-0038)", async () => {
+  await withCampaignDir(async (dir) => {
+    const r = await generateLocalImage(
+      {
+        campaignDir: dir,
+        entityType: "scene",
+        name: "Throne Room",
+        description: "a vast hall",
+        settings: INK,
+        preview: true,
+        promptOverride: "storm over a black sea",
+      },
+      (async () => {
+        throw new Error("preview must not fetch anything");
+      }) as unknown as typeof fetch
+    );
+    assert.equal(r.ok, true);
+    assert.equal(r.previewPrompt, "storm over a black sea");
+  });
+});

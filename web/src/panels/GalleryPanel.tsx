@@ -63,6 +63,14 @@ function Lightbox({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ADR-0038: fetch the fully-assembled positive prompt (no render) so the editor's
+  // "edit the full prompt" box can prefill it. Works on both engines — the server
+  // short-circuits the preview without generating an image.
+  async function requestFullPrompt(description: string): Promise<string | null> {
+    const result = await illustrateEntity(connection, campaignId, item.type, item.name, description, undefined, true);
+    return result.previewPrompt ?? null;
+  }
+
   async function redraw(description: string, overrides: ImageOverrides) {
     setBusy(true);
     setError(null);
@@ -167,6 +175,7 @@ function Lightbox({
           busy={busy}
           error={error}
           onRegenerate={redraw}
+          onRequestFullPrompt={requestFullPrompt}
           onClose={() => setEditing(false)}
         />
       )}

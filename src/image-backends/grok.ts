@@ -152,6 +152,16 @@ export async function generateGrokImage(
   if (settings.negativePrompt?.trim()) {
     prompt = `${prompt} Avoid: ${settings.negativePrompt.trim()}.`;
   }
+  // ADR-0038: a full-prompt override from the editor replaces the prose grok renders.
+  if (args.promptOverride?.trim()) {
+    prompt = args.promptOverride.trim();
+  }
+  // ADR-0038: preview — return the prompt WITHOUT shelling out to grok (no render, no
+  // file). Keeps the preview contract uniform across backends so a preview request can
+  // never accidentally trigger a real grok generation.
+  if (args.preview) {
+    return { ok: true, previewPrompt: prompt };
+  }
 
   // Isolated, empty, non-repo working directory: Grok is keyed to this cwd for
   // both its tool sandbox and where it records the session/image, so locating

@@ -497,6 +497,9 @@ export interface IllustrateResult {
   /** ADR-0030 (#146): the caption the server drew from, echoed back so the client
    * can prefill the regenerate box even when the turn payload predated it. */
   sceneCaption?: string;
+  /** ADR-0038: on a `preview: true` call, the fully-assembled positive prompt (no
+   * render happened) so the editor can prefill its "edit the full prompt" box. */
+  previewPrompt?: string;
 }
 
 /** #157 (Slice C): optional per-call image overrides for a single regenerate —
@@ -521,6 +524,9 @@ export interface ImageOverrides {
   referencePhoto?: string;
   likenessStrength?: number;
   likenessStart?: number;
+  /** ADR-0038: the editor's "edit the full prompt" — replaces the assembled positive
+   * prompt verbatim (skips the art-style clause and LoRA trigger). Local only. */
+  promptOverride?: string;
 }
 
 export async function illustrateEntity(
@@ -529,11 +535,14 @@ export async function illustrateEntity(
   entityType: "character" | "npc" | "location",
   name: string,
   description: string,
-  overrides?: ImageOverrides
+  overrides?: ImageOverrides,
+  // ADR-0038: when true, the server assembles and returns the effective prompt
+  // (previewPrompt) WITHOUT rendering — used to prefill the "edit the full prompt" box.
+  preview = false
 ): Promise<IllustrateResult> {
   return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/illustrate`, {
     method: "POST",
-    body: JSON.stringify({ kind: "entity", entityType, name, description, ...(overrides ?? {}) }),
+    body: JSON.stringify({ kind: "entity", entityType, name, description, ...(overrides ?? {}), ...(preview ? { preview: true } : {}) }),
   })) as IllustrateResult;
 }
 
@@ -549,7 +558,9 @@ export async function illustrateMoment(
   // turn has no caption yet; user-initiated illustrate/regenerate leaves it off.
   auto = false,
   // #157 (Slice C): per-call look overrides for a moment regenerate.
-  overrides?: ImageOverrides
+  overrides?: ImageOverrides,
+  // ADR-0038: preview — return the assembled prompt (previewPrompt) without rendering.
+  preview = false
 ): Promise<IllustrateResult> {
   const base = description?.trim()
     ? { kind: "moment", turnIndex, description: description.trim() }
@@ -557,7 +568,7 @@ export async function illustrateMoment(
   const withAuto = auto ? { ...base, auto: true } : base;
   return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/illustrate`, {
     method: "POST",
-    body: JSON.stringify({ ...withAuto, ...(overrides ?? {}) }),
+    body: JSON.stringify({ ...withAuto, ...(overrides ?? {}), ...(preview ? { preview: true } : {}) }),
   })) as IllustrateResult;
 }
 

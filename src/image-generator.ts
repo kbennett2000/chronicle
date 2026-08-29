@@ -111,6 +111,10 @@ export interface GenerateImageOptions {
   referenceImageAbsPath?: string;
   likenessStrength?: number;
   likenessStart?: number;
+  /** ADR-0038: full positive-prompt override (verbatim) from the editor. Local-only. */
+  promptOverride?: string;
+  /** ADR-0038: assemble + return the effective positive prompt without rendering. */
+  preview?: boolean;
 }
 
 export async function generateImage(
