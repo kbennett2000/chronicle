@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ImageOverrides } from "../lib/campaign";
-import { ART_PRESETS, PRESET_LABELS } from "./LookControls";
+import { ART_PRESETS, PRESET_LABELS, OPTION_STYLE, checkpointLabel } from "./LookControls";
 import { FullPromptField } from "./FullPromptField";
 
 // #157 (Slice C): Scriptorium's "Edit picture", scoped to Chronicle. Opens over one
@@ -242,12 +242,12 @@ export function ImageEditor({
             value={model}
             onChange={(e) => setModel(e.target.value)}
             data-testid="editor-model"
-            style={fieldStyle}
+            style={{ ...fieldStyle, colorScheme: "dark" }}
           >
-            <option value="">Keep the game's model</option>
+            <option value="" style={OPTION_STYLE}>Keep the game's model</option>
             {imageModels.map((m) => (
-              <option key={m} value={m}>
-                {m}
+              <option key={m} value={m} style={OPTION_STYLE}>
+                {checkpointLabel(m)}
               </option>
             ))}
           </select>
