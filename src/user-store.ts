@@ -272,6 +272,10 @@ export function writeUserSettings(
   }
   if (merged.artStyle === "") delete merged.artStyle;
   if (merged.worldSetting === "") delete merged.worldSetting;
+  // #154: empty-string clears the avoid clause / checkpoint; null clears the seed pin.
+  if (merged.negativePrompt === "") delete merged.negativePrompt;
+  if (merged.imageModel === "") delete merged.imageModel;
+  if (merged.imageSeed === null) delete merged.imageSeed;
   fs.mkdirSync(userDir(userId), { recursive: true });
   fs.writeFileSync(userSettingsFile(userId), JSON.stringify(merged, null, 2) + "\n");
   return merged;

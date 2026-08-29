@@ -143,7 +143,15 @@ export async function generateGrokImage(
   execFn: GrokExec = execFileAsync
 ): Promise<ImageGenResult> {
   const { campaignDir, entityType, name, description, settings } = args;
-  const prompt = sanitizeImagePrompt(description, settings);
+  let prompt = sanitizeImagePrompt(description, settings);
+  // #154: grok's /imagine has no separate negative field, so fold the user's
+  // "things to avoid" into the prose. Appended AFTER sanitizeImagePrompt's char cap
+  // — like the LoRA trigger on the local backend — so it only lengthens the prompt
+  // and never displaces the scene-grounding budget (ADR-0031). Seed/model overrides
+  // are local-only and have no grok analog, so they're ignored here.
+  if (settings.negativePrompt?.trim()) {
+    prompt = `${prompt} Avoid: ${settings.negativePrompt.trim()}.`;
+  }
 
   // Isolated, empty, non-repo working directory: Grok is keyed to this cwd for
   // both its tool sandbox and where it records the session/image, so locating

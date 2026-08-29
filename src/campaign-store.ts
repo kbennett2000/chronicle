@@ -497,6 +497,19 @@ export interface CampaignSettings {
    * switchable mid-campaign — it only affects the NEXT image. Local-only; grok
    * ignores it. */
   imageQuality?: ImageQuality;
+  /** Issue #154: a user-supplied "things to avoid" clause appended to the image
+   * backend's own negatives (nodes 7/13 on the local backend; folded into the
+   * prose on grok). Absent/empty means only the built-in anti-drift negatives
+   * apply. Empty-string clears it back to absent. */
+  negativePrompt?: string;
+  /** Issue #154: override the deterministic per-entity SDXL seed
+   * (deriveCampaignSeed). A finite non-negative integer pins the seed; absent or
+   * `null` keeps today's deterministic derivation. Local-only; grok ignores it. */
+  imageSeed?: number | null;
+  /** Issue #154: the ComfyUI checkpoint (`ckpt_name`) the local backend should
+   * load, chosen from GET /image-models. Absent/empty means the workflow
+   * template's baked-in checkpoint. Local-only; grok ignores it. */
+  imageModel?: string;
   /** Issue #44: when on (the default — treat absent as ON), the engine rolls
    * dice itself via the roll_dice tool and narrates the result. When
    * explicitly false, it reverts to asking the player to supply the value. */
@@ -563,6 +576,19 @@ export function readCampaignSettings(campaignDir: string): CampaignSettings {
   if (isValidImageQuality(raw.imageQuality)) {
     settings.imageQuality = raw.imageQuality;
   }
+  // #154: a non-empty avoid clause; trimmed, else fall through to built-in negatives only.
+  if (typeof raw.negativePrompt === "string" && raw.negativePrompt.trim()) {
+    settings.negativePrompt = raw.negativePrompt.trim();
+  }
+  // #154: only attach a finite, non-negative seed override; anything else keeps the
+  // deterministic per-entity seed at generation time.
+  if (typeof raw.imageSeed === "number" && Number.isFinite(raw.imageSeed) && raw.imageSeed >= 0) {
+    settings.imageSeed = Math.floor(raw.imageSeed);
+  }
+  // #154: a non-empty checkpoint name; absent falls through to the workflow default.
+  if (typeof raw.imageModel === "string" && raw.imageModel.trim()) {
+    settings.imageModel = raw.imageModel.trim();
+  }
   if (typeof raw.autoRollDice === "boolean") {
     settings.autoRollDice = raw.autoRollDice;
   }
@@ -618,6 +644,12 @@ export function persistCampaignSettings(
   const merged: Record<string, unknown> = { ...raw, ...updates };
   if (merged.artStyle === "") delete merged.artStyle;
   if (merged.worldSetting === "") delete merged.worldSetting;
+  // #154: empty-string clears the avoid clause / checkpoint back to absent (default).
+  if (merged.negativePrompt === "") delete merged.negativePrompt;
+  if (merged.imageModel === "") delete merged.imageModel;
+  // #154: `imageSeed: null` un-pins the seed so the game reverts to the deterministic
+  // per-entity derivation (a number has no empty-string path).
+  if (updates.imageSeed === null) delete merged.imageSeed;
   // ADR-0027: `imageProvider: null` drops the per-game override so the game
   // tracks the account default again; a valid value pins it.
   if (updates.imageProvider === null) delete merged.imageProvider;

@@ -137,6 +137,15 @@ export interface CampaignSettings {
    * time-for-quality at a fixed resolution. Absent === tracks the account default
    * (→ `.env` → "standard"). Freely switchable mid-game, like imageProvider. */
   imageQuality?: "fast" | "standard" | "high";
+  /** #154: user "things to avoid", appended to the backend's own negatives.
+   * Absent/"" === built-in negatives only. Empty-string clears it. */
+  negativePrompt?: string;
+  /** #154: override the deterministic per-entity SDXL seed. A number pins it;
+   * null/absent keeps the deterministic derivation. Local engine only. */
+  imageSeed?: number | null;
+  /** #154: the local ComfyUI checkpoint (ckpt_name) to load, from
+   * getImageModels(). Absent/"" === the workflow template default. Local only. */
+  imageModel?: string;
   /** Issue #44: absent === on. When explicitly false, the player supplies
    * their own dice values instead of the engine rolling. */
   autoRollDice?: boolean;
@@ -209,6 +218,13 @@ export async function getModels(
     providers: ProviderOption[];
     defaultProvider: string;
   };
+}
+
+/** #154: the SDXL checkpoints the local ComfyUI backend can load, for the model
+ * picker. Empty (or ComfyUI unreachable) → [] so the picker is hidden. */
+export async function getImageModels(connection: Connection): Promise<string[]> {
+  const result = (await apiFetch(connection, "/image-models")) as { models: string[] };
+  return result.models ?? [];
 }
 
 /** Issue #64: the look/play/model settings a new game should pre-fill from —

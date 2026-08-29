@@ -1,5 +1,13 @@
 import type { CampaignSettings, CampaignSettingsPatch } from "../lib/campaign";
-import { ToggleRow, ArtStylePicker, ImageProviderPicker, ImageQualityPicker } from "./LookControls";
+import {
+  ToggleRow,
+  ArtStylePicker,
+  ImageProviderPicker,
+  ImageQualityPicker,
+  NegativePromptField,
+  SeedField,
+  ModelPicker,
+} from "./LookControls";
 
 // Shared "THE LOOK" controls, lifted out of the Settings screen (issue #114) so
 // the main Settings screen (editing account defaults) and the in-game settings
@@ -10,12 +18,23 @@ import { ToggleRow, ArtStylePicker, ImageProviderPicker, ImageQualityPicker } fr
 interface LookSettingsEditorProps {
   value: Pick<
     CampaignSettings,
-    "generateImages" | "autoIllustrateTurns" | "artStyle" | "imageProvider" | "imageQuality"
+    | "generateImages"
+    | "autoIllustrateTurns"
+    | "artStyle"
+    | "imageProvider"
+    | "imageQuality"
+    | "negativePrompt"
+    | "imageSeed"
+    | "imageModel"
   >;
   onPatch: (patch: CampaignSettingsPatch) => void;
+  /** #154: installed ComfyUI checkpoints (from getImageModels). The model picker
+   * shows only when this is non-empty and the engine is local. Defaults to []. */
+  imageModels?: string[];
 }
 
-export function LookSettingsEditor({ value, onPatch }: LookSettingsEditorProps) {
+export function LookSettingsEditor({ value, onPatch, imageModels = [] }: LookSettingsEditorProps) {
+  const isLocal = (value.imageProvider ?? "grok") === "local";
   return (
     <>
       <ToggleRow
@@ -56,6 +75,29 @@ export function LookSettingsEditor({ value, onPatch }: LookSettingsEditorProps) 
       )}
 
       <ArtStylePicker artStyle={value.artStyle ?? ""} onChange={(style) => onPatch({ artStyle: style })} />
+
+      {/* #154: user negative prompt — applies to both engines, shown whenever scene art is on. */}
+      {value.generateImages && (
+        <NegativePromptField
+          value={value.negativePrompt ?? ""}
+          onChange={(negativePrompt) => onPatch({ negativePrompt })}
+        />
+      )}
+
+      {/* #154: seed override — local engine only (grok ignores it). */}
+      {value.generateImages && isLocal && (
+        <SeedField value={value.imageSeed} onChange={(imageSeed) => onPatch({ imageSeed })} />
+      )}
+
+      {/* #154: base-checkpoint picker — local engine only, and only when ComfyUI
+          actually reports installed checkpoints. */}
+      {value.generateImages && isLocal && imageModels.length > 0 && (
+        <ModelPicker
+          value={value.imageModel ?? ""}
+          models={imageModels}
+          onChange={(imageModel) => onPatch({ imageModel })}
+        />
+      )}
     </>
   );
 }

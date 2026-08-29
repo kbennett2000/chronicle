@@ -23,6 +23,12 @@ export interface ConfigDefaults {
   imageProvider: string;
   imageQuality: string;
   artStyle: string;
+  /** #154: a default "things to avoid" clause; "" for none. */
+  negativePrompt: string;
+  /** #154: a default ComfyUI checkpoint (`ckpt_name`) for the local backend; "" = template default. */
+  imageModel: string;
+  /** #154: a default SDXL seed override, or null for the deterministic per-entity seed. */
+  imageSeed: number | null;
   worldSetting: string;
   contentIntensity: string;
   responseLength: string;
@@ -65,6 +71,9 @@ export const CONFIG_DEFAULTS: ChronicleConfig = {
     imageProvider: "grok",
     imageQuality: "standard",
     artStyle: "",
+    negativePrompt: "",
+    imageModel: "",
+    imageSeed: null,
     worldSetting: "",
     contentIntensity: "",
     responseLength: "detailed",

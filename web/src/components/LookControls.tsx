@@ -201,6 +201,157 @@ export function ImageQualityPicker({ value, onChange }: ImageQualityPickerProps)
   );
 }
 
+interface NegativePromptFieldProps {
+  /** The committed negative prompt (a string, or ""). */
+  value: string;
+  /** Called with the trimmed value on blur — "" clears it. */
+  onChange: (next: string) => void;
+}
+
+/** #154: a free-text "things to avoid" field, appended to the backend's own
+ * negatives (local: the negative encoders; grok: folded into the prose). Owns a
+ * local typing buffer so the parent only tracks the committed value, mirroring
+ * ArtStylePicker's custom input. */
+export function NegativePromptField({ value, onChange }: NegativePromptFieldProps) {
+  const [buffer, setBuffer] = useState(value);
+  useEffect(() => setBuffer(value), [value]);
+  return (
+    <>
+      <div style={{ fontSize: 12, color: "var(--ink-dim)", margin: "12px 0 7px" }}>
+        Negative prompt <span style={{ color: "var(--ink-faint)" }}>— things to keep out of every image</span>
+      </div>
+      <textarea
+        value={buffer}
+        onChange={(e) => setBuffer(e.target.value)}
+        onBlur={() => {
+          const next = buffer.trim();
+          if (next !== value) onChange(next);
+        }}
+        placeholder="blurry, extra fingers, text, watermark…"
+        data-testid="negative-prompt-input"
+        rows={2}
+        style={{
+          width: "100%",
+          boxSizing: "border-box",
+          background: buffer ? "rgba(124,61,32,.2)" : "rgba(12,8,5,.5)",
+          border: `1px solid ${buffer ? "rgba(211,112,60,.7)" : "rgba(109,90,56,.4)"}`,
+          borderRadius: 8,
+          padding: "8px 12px",
+          color: "var(--ink)",
+          fontFamily: "var(--font-body)",
+          fontSize: 13,
+          resize: "vertical",
+          outline: "none",
+        }}
+      />
+    </>
+  );
+}
+
+interface SeedFieldProps {
+  /** The committed seed override (a number, or null/undefined for "auto"). */
+  value: number | null | undefined;
+  /** Called on blur — a non-negative integer pins the seed; null clears it (→ auto). */
+  onChange: (next: number | null) => void;
+}
+
+/** #154: override the deterministic per-entity seed. Blank means "automatic" (the
+ * campaign's deterministic seed). Owns a text buffer; commits a parsed value on
+ * blur and reverts unparseable input. */
+export function SeedField({ value, onChange }: SeedFieldProps) {
+  const asText = (v: number | null | undefined) => (typeof v === "number" ? String(v) : "");
+  const [buffer, setBuffer] = useState(asText(value));
+  useEffect(() => setBuffer(asText(value)), [value]);
+  return (
+    <>
+      <div style={{ fontSize: 12, color: "var(--ink-dim)", margin: "12px 0 7px" }}>
+        Seed <span style={{ color: "var(--ink-faint)" }}>— blank = automatic · a number reproduces the same image · local engine</span>
+      </div>
+      <input
+        value={buffer}
+        inputMode="numeric"
+        onChange={(e) => setBuffer(e.target.value)}
+        onBlur={() => {
+          const t = buffer.trim();
+          if (t === "") {
+            if (value != null) onChange(null);
+            return;
+          }
+          const n = Number(t);
+          if (Number.isFinite(n) && n >= 0) {
+            const floored = Math.floor(n);
+            if (floored !== value) onChange(floored);
+            setBuffer(String(floored));
+          } else {
+            // Unparseable — revert the buffer to the committed value.
+            setBuffer(asText(value));
+          }
+        }}
+        placeholder="automatic"
+        data-testid="seed-input"
+        style={{
+          width: "100%",
+          boxSizing: "border-box",
+          background: buffer ? "rgba(124,61,32,.2)" : "rgba(12,8,5,.5)",
+          border: `1px solid ${buffer ? "rgba(211,112,60,.7)" : "rgba(109,90,56,.4)"}`,
+          borderRadius: 8,
+          padding: "8px 12px",
+          color: "var(--ink)",
+          fontFamily: "var(--font-body)",
+          fontSize: 13,
+          outline: "none",
+        }}
+      />
+    </>
+  );
+}
+
+interface ModelPickerProps {
+  /** The committed checkpoint name, or "" for the template default. */
+  value: string;
+  /** Installed ComfyUI checkpoints (from getImageModels). */
+  models: string[];
+  /** Called with the chosen ckpt_name, or "" to clear back to the default. */
+  onChange: (next: string) => void;
+}
+
+/** #154: choose the local ComfyUI SDXL checkpoint. Rendered only by the composer
+ * when the list is non-empty and the engine is local. "Automatic" clears the
+ * override so the workflow template's own checkpoint is used. */
+export function ModelPicker({ value, models, onChange }: ModelPickerProps) {
+  return (
+    <>
+      <div style={{ fontSize: 12, color: "var(--ink-dim)", margin: "12px 0 7px" }}>
+        Base model <span style={{ color: "var(--ink-faint)" }}>— which SDXL checkpoint draws · local engine</span>
+      </div>
+      <select
+        value={models.includes(value) ? value : ""}
+        onChange={(e) => onChange(e.target.value)}
+        data-testid="image-model-select"
+        style={{
+          width: "100%",
+          boxSizing: "border-box",
+          background: value ? "rgba(124,61,32,.2)" : "rgba(12,8,5,.5)",
+          border: `1px solid ${value ? "rgba(211,112,60,.7)" : "rgba(109,90,56,.4)"}`,
+          borderRadius: 8,
+          padding: "8px 12px",
+          color: "var(--ink)",
+          fontFamily: "var(--font-body)",
+          fontSize: 13,
+          outline: "none",
+        }}
+      >
+        <option value="">Automatic (service default)</option>
+        {models.map((m) => (
+          <option key={m} value={m}>
+            {m}
+          </option>
+        ))}
+      </select>
+    </>
+  );
+}
+
 interface ArtStylePickerProps {
   /** The effective art style (a preset name, a custom string, or ""). */
   artStyle: string;
