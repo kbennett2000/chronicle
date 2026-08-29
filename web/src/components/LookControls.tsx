@@ -315,6 +315,18 @@ interface ModelPickerProps {
   onChange: (next: string) => void;
 }
 
+/** A checkpoint's display label: drop the ComfyUI subfolder prefix (e.g. "ns/") and
+ * the ".safetensors" suffix so the dropdown is readable. The full name is kept as the
+ * option VALUE — it's what ComfyUI needs as ckpt_name. */
+export function checkpointLabel(name: string): string {
+  return name.replace(/^.*\//, "").replace(/\.safetensors$/i, "");
+}
+
+/** The native <option> popup is drawn by the OS, which ignores the <select>'s dark
+ * theme and renders light-on-light (near-invisible). Painting each option dark fixes
+ * the contrast; `colorScheme: "dark"` on the select nudges the popup dark too. */
+export const OPTION_STYLE = { background: "#1a120c", color: "#f0e6d6" } as const;
+
 /** #154: choose the local ComfyUI SDXL checkpoint. Rendered only by the composer
  * when the list is non-empty and the engine is local. "Automatic" clears the
  * override so the workflow template's own checkpoint is used. */
@@ -336,15 +348,16 @@ export function ModelPicker({ value, models, onChange }: ModelPickerProps) {
           borderRadius: 8,
           padding: "8px 12px",
           color: "var(--ink)",
+          colorScheme: "dark",
           fontFamily: "var(--font-body)",
           fontSize: 13,
           outline: "none",
         }}
       >
-        <option value="">Automatic (service default)</option>
+        <option value="" style={OPTION_STYLE}>Automatic (service default)</option>
         {models.map((m) => (
-          <option key={m} value={m}>
-            {m}
+          <option key={m} value={m} style={OPTION_STYLE}>
+            {checkpointLabel(m)}
           </option>
         ))}
       </select>

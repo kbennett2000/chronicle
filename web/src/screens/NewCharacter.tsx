@@ -85,10 +85,17 @@ const inputStyle = {
   borderRadius: 4,
   padding: "10px 13px",
   color: "var(--ink)",
+  // A native <select>'s option popup is OS-drawn and ignores our dark theme, rendering
+  // light-on-light. `color-scheme: dark` makes the browser draw it dark instead.
+  colorScheme: "dark" as const,
   fontFamily: "var(--font-body)",
   fontSize: 14,
   outline: "none",
 };
+
+/** Dark background + light text for a native <option>, so the OS popup is readable
+ * even where `color-scheme` alone isn't honored. */
+const OPTION_STYLE = { background: "#1a120c", color: "#f0e6d6" } as const;
 
 const labelStyle = { fontSize: 11, color: "var(--ink-dim)", margin: "16px 0 4px", letterSpacing: 0.5 } as const;
 
@@ -385,14 +392,14 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
         <div style={labelStyle}>Ancestry</div>
         <select value={race} onChange={(e) => setRace(e.target.value)} data-testid="newchar-race" style={inputStyle}>
           {RACES.map((r) => (
-            <option key={r} value={r}>{r}</option>
+            <option key={r} value={r} style={OPTION_STYLE}>{r}</option>
           ))}
         </select>
 
         <div style={labelStyle}>Calling</div>
         <select value={klass} onChange={(e) => selectClass(e.target.value)} data-testid="newchar-class" style={inputStyle}>
           {CLASSES.map((c) => (
-            <option key={c} value={c}>{c}</option>
+            <option key={c} value={c} style={OPTION_STYLE}>{c}</option>
           ))}
         </select>
 
