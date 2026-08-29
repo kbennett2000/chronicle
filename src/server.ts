@@ -404,6 +404,46 @@ function parseDefaultSettings(
   return { value: out };
 }
 
+/** #157 (Slice C): parse the OPTIONAL per-call image overrides from an /illustrate
+ * body. Each shadows the campaign setting for THIS one generation (Scriptorium's
+ * "Edit picture"). An empty-string (artStyle/negativePrompt/imageModel) or a null
+ * imageSeed clears that field for this call (→ the backend default). Returns a
+ * settings overlay to spread onto the resolved CampaignSettings, or an error. The
+ * `description` (prompt) override is handled inline in the route, as before. */
+function parseImageOverrides(
+  body: Record<string, unknown>
+): { value: Partial<CampaignSettings> } | { error: string } {
+  const out: Partial<CampaignSettings> = {};
+  if (body.artStyle !== undefined) {
+    if (typeof body.artStyle !== "string") return { error: "artStyle must be a string" };
+    out.artStyle = body.artStyle.trim() || undefined;
+  }
+  if (body.negativePrompt !== undefined) {
+    if (typeof body.negativePrompt !== "string") return { error: "negativePrompt must be a string" };
+    out.negativePrompt = body.negativePrompt.trim() || undefined;
+  }
+  if (body.imageModel !== undefined) {
+    if (typeof body.imageModel !== "string") return { error: "imageModel must be a string" };
+    out.imageModel = body.imageModel.trim() || undefined;
+  }
+  if (body.imageSeed !== undefined) {
+    if (body.imageSeed === null) {
+      out.imageSeed = undefined;
+    } else if (typeof body.imageSeed !== "number" || !Number.isFinite(body.imageSeed) || body.imageSeed < 0) {
+      return { error: "imageSeed must be a non-negative number or null" };
+    } else {
+      out.imageSeed = Math.floor(body.imageSeed);
+    }
+  }
+  if (body.imageQuality !== undefined) {
+    if (!isValidImageQuality(body.imageQuality)) {
+      return { error: `imageQuality must be one of ${IMAGE_QUALITIES.join(", ")}` };
+    }
+    out.imageQuality = body.imageQuality;
+  }
+  return { value: out };
+}
+
 /** Read a user's stored music override off their account settings. */
 function userMusic(userId: string): UserMusic {
   const m = readUserSettings(userId).music;
@@ -1621,7 +1661,16 @@ const ROUTES: Array<{
     async handler(req, res, [campaignId], userId) {
       const campaignDir = resolveCampaignDir(userId, campaignId);
       const body = (await readJsonBody(req)) as Record<string, unknown>;
-      const settings = readCampaignSettings(campaignDir);
+      const baseSettings = readCampaignSettings(campaignDir);
+      // #157 (Slice C): fold in any per-call overrides (negative/style/seed/model/
+      // quality) so a single regenerate can tweak the look without touching the game's
+      // saved settings. Absent overrides leave `settings` byte-identical to before.
+      const overrides = parseImageOverrides(body);
+      if ("error" in overrides) {
+        sendJson(res, 400, { error: overrides.error });
+        return;
+      }
+      const settings = { ...baseSettings, ...overrides.value };
 
       if (body.kind === "entity") {
         const entityType = body.entityType;

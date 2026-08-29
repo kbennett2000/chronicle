@@ -479,16 +479,29 @@ export interface IllustrateResult {
   sceneCaption?: string;
 }
 
+/** #157 (Slice C): optional per-call image overrides for a single regenerate —
+ * Scriptorium's "Edit picture". Each shadows the campaign setting for THIS call
+ * only. Empty-string (artStyle/negativePrompt/imageModel) or null imageSeed clears
+ * that field for this generation; omit a field to keep the game's saved setting. */
+export interface ImageOverrides {
+  artStyle?: string;
+  negativePrompt?: string;
+  imageSeed?: number | null;
+  imageModel?: string;
+  imageQuality?: "fast" | "standard" | "high";
+}
+
 export async function illustrateEntity(
   connection: Connection,
   campaignId: string,
   entityType: "character" | "npc" | "location",
   name: string,
-  description: string
+  description: string,
+  overrides?: ImageOverrides
 ): Promise<IllustrateResult> {
   return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/illustrate`, {
     method: "POST",
-    body: JSON.stringify({ kind: "entity", entityType, name, description }),
+    body: JSON.stringify({ kind: "entity", entityType, name, description, ...(overrides ?? {}) }),
   })) as IllustrateResult;
 }
 
@@ -502,14 +515,17 @@ export async function illustrateMoment(
   // ADR-0030 race amendment (#146): the reply-first auto-illustrate trigger sets
   // this. In auto mode the server skips (never scavenges narration) when the
   // turn has no caption yet; user-initiated illustrate/regenerate leaves it off.
-  auto = false
+  auto = false,
+  // #157 (Slice C): per-call look overrides for a moment regenerate.
+  overrides?: ImageOverrides
 ): Promise<IllustrateResult> {
   const base = description?.trim()
     ? { kind: "moment", turnIndex, description: description.trim() }
     : { kind: "moment", turnIndex };
+  const withAuto = auto ? { ...base, auto: true } : base;
   return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/illustrate`, {
     method: "POST",
-    body: JSON.stringify(auto ? { ...base, auto: true } : base),
+    body: JSON.stringify({ ...withAuto, ...(overrides ?? {}) }),
   })) as IllustrateResult;
 }
 
