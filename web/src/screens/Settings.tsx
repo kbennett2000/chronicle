@@ -3,6 +3,7 @@ import type { Connection } from "../lib/connection";
 import { type ConnectionStatus } from "../lib/api";
 import {
   getModels,
+  getImageModels,
   getUserDefaults,
   saveUserDefaults,
   type CampaignSettings,
@@ -100,6 +101,7 @@ export function Settings({
   const [worldSave, setWorldSave] = useState<SaveState>("idle");
   const [videoSave, setVideoSave] = useState<SaveState>("idle");
   const [videoConfig, setVideoConfig] = useState<VideoConfig | null>(null);
+  const [imageModels, setImageModels] = useState<string[]>([]);
   const [music, setMusic] = useState<MusicConfig | null>(null);
   const [navUrl, setNavUrl] = useState("");
 
@@ -114,6 +116,10 @@ export function Settings({
       .catch(() => {});
     getVideoConfig(connection)
       .then((cfg) => !cancelled && setVideoConfig(cfg))
+      .catch(() => {});
+    // #154: local-engine checkpoints for the model picker; [] (hidden) if unreachable.
+    getImageModels(connection)
+      .then((m) => !cancelled && setImageModels(m))
       .catch(() => {});
     // Fetch the engine catalog and the account defaults independently.
     getModels(connection)
@@ -274,7 +280,11 @@ export function Settings({
 
               {/* THE LOOK — account default */}
               <div style={sectionHeadingStyle}>THE LOOK</div>
-              <LookSettingsEditor value={defaults} onPatch={(patch) => saveDefaults(patch, setLookSave)} />
+              <LookSettingsEditor
+                value={defaults}
+                onPatch={(patch) => saveDefaults(patch, setLookSave)}
+                imageModels={imageModels}
+              />
               <div data-testid="look-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 6 }}>
                 {lookSave === "saving" && "Saving…"}
                 {lookSave === "saved" && "Saved as your default."}

@@ -3,6 +3,7 @@ import type { Connection } from "../lib/connection";
 import {
   getCampaignSettings,
   getModels,
+  getImageModels,
   updateCampaignSettings,
   type CampaignSettings,
   type CampaignSettingsPatch,
@@ -51,6 +52,7 @@ export function GameSettings({ connection, campaignId, onBack }: GameSettingsPro
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [gameMusic, setGameMusic] = useState<MusicConfig | null>(null);
   const [gameVideo, setGameVideo] = useState<VideoConfig | null>(null);
+  const [imageModels, setImageModels] = useState<string[]>([]);
 
   const [lookSave, setLookSave] = useState<SaveState>("idle");
   const [worldSave, setWorldSave] = useState<SaveState>("idle");
@@ -70,6 +72,10 @@ export function GameSettings({ connection, campaignId, onBack }: GameSettingsPro
       .catch(() => {});
     getVideoConfig(connection, campaignId)
       .then((cfg) => !cancelled && setGameVideo(cfg))
+      .catch(() => {});
+    // #154: for the local-engine model picker; [] (hidden) if ComfyUI is unreachable.
+    getImageModels(connection)
+      .then((models) => !cancelled && setImageModels(models))
       .catch(() => {});
     setStatus("loading");
     getCampaignSettings(connection, campaignId)
@@ -201,7 +207,11 @@ export function GameSettings({ connection, campaignId, onBack }: GameSettingsPro
 
               {/* THE LOOK — this game */}
               <div style={sectionHeadingStyle}>THE LOOK</div>
-              <LookSettingsEditor value={settings} onPatch={(patch) => patchSettings(patch, setLookSave)} />
+              <LookSettingsEditor
+                value={settings}
+                onPatch={(patch) => patchSettings(patch, setLookSave)}
+                imageModels={imageModels}
+              />
               <div data-testid="look-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 6 }}>
                 {lookSave === "saving" && "Saving…"}
                 {lookSave === "saved" && "Saved for this game."}
