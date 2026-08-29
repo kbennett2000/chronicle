@@ -1,6 +1,7 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { openingDirective, modelsMatch } from "./dm-engine.js";
 import { getBackend } from "./backends/index.js";
@@ -61,7 +62,7 @@ import {
   retrySceneCaption,
   SCENE_CAPTION_RETRY_PROMPT,
 } from "./narration.js";
-import { generateImage, groundSceneDescription } from "./image-generator.js";
+import { generateImage, groundSceneDescription, type GenerateImageOptions } from "./image-generator.js";
 import { listLocalCheckpoints } from "./image-backends/local.js";
 import {
   IMAGE_PROVIDERS,
@@ -460,6 +461,89 @@ function parseImageOverrides(
     out.imageQuality = body.imageQuality;
   }
   return { value: out };
+}
+
+/** Path-guard a campaign-relative image reference to its ABSOLUTE path, or undefined.
+ * Same basename-only, must-exist, must-stay-under-images/ guard as /animate's
+ * safeBaseImage (ADR-0036/0037), but returns the absolute path the local backend reads. */
+function resolveCampaignImageAbs(campaignDir: string, rel: unknown): string | undefined {
+  if (typeof rel !== "string" || !rel.trim()) return undefined;
+  const basename = rel.split("/").pop() || rel;
+  const imagesDir = path.join(campaignDir, "images");
+  const resolved = path.resolve(imagesDir, basename);
+  if (path.dirname(resolved) !== imagesDir || !fs.existsSync(resolved)) return undefined;
+  return resolved;
+}
+
+/** ADR-0036/0037: parse the OPTIONAL per-call img2img + IP-Adapter-likeness inputs from
+ * an /illustrate body into GenerateImageOptions (absolute paths). `initImageRelPath` and
+ * `referenceImageRelPath` are campaign-relative, path-guarded to absolute; an uploaded
+ * `referencePhoto` (base64, optional data: URL) is written to a temp file whose path is
+ * returned in `tempFile` for the caller to clean up. Ranges match imagegen-service. */
+function parseImageGenOpts(
+  body: Record<string, unknown>,
+  campaignDir: string
+): { value: GenerateImageOptions; tempFile?: string } | { error: string } {
+  const out: GenerateImageOptions = {};
+  let tempFile: string | undefined;
+
+  // img2img "change amount"
+  if (body.initImageRelPath !== undefined) {
+    const abs = resolveCampaignImageAbs(campaignDir, body.initImageRelPath);
+    if (!abs) return { error: "initImageRelPath must reference an existing campaign image" };
+    out.initImageAbsPath = abs;
+    if (body.denoise !== undefined) {
+      if (typeof body.denoise !== "number" || !Number.isFinite(body.denoise) || body.denoise <= 0 || body.denoise > 1) {
+        return { error: "denoise must be a number in (0, 1]" };
+      }
+      out.denoise = body.denoise;
+    }
+  }
+
+  // Reference likeness — an uploaded photo wins over the campaign-image reference.
+  if (typeof body.referencePhoto === "string" && body.referencePhoto.trim()) {
+    try {
+      const b64 = body.referencePhoto.replace(/^data:[^;]+;base64,/, "");
+      const buf = Buffer.from(b64, "base64");
+      if (buf.length < 100) return { error: "referencePhoto is not valid image data" };
+      tempFile = path.join(os.tmpdir(), `chronicle-ref-${Date.now().toString(16)}-${process.pid}.png`);
+      fs.writeFileSync(tempFile, buf);
+      out.referenceImageAbsPath = tempFile;
+    } catch {
+      return { error: "referencePhoto is not valid base64 image data" };
+    }
+  } else if (body.referenceImageRelPath !== undefined) {
+    const abs = resolveCampaignImageAbs(campaignDir, body.referenceImageRelPath);
+    if (!abs) return { error: "referenceImageRelPath must reference an existing campaign image" };
+    out.referenceImageAbsPath = abs;
+  }
+
+  if (out.referenceImageAbsPath) {
+    if (body.likenessStrength !== undefined) {
+      if (
+        typeof body.likenessStrength !== "number" ||
+        !Number.isFinite(body.likenessStrength) ||
+        body.likenessStrength <= 0 ||
+        body.likenessStrength > 1.5
+      ) {
+        return { error: "likenessStrength must be a number in (0, 1.5]" };
+      }
+      out.likenessStrength = body.likenessStrength;
+    }
+    if (body.likenessStart !== undefined) {
+      if (
+        typeof body.likenessStart !== "number" ||
+        !Number.isFinite(body.likenessStart) ||
+        body.likenessStart < 0 ||
+        body.likenessStart > 0.5
+      ) {
+        return { error: "likenessStart must be a number in [0, 0.5]" };
+      }
+      out.likenessStart = body.likenessStart;
+    }
+  }
+
+  return { value: out, tempFile };
 }
 
 /** Read a user's stored music override off their account settings. */
@@ -1720,7 +1804,14 @@ const ROUTES: Array<{
         return;
       }
       const settings = { ...baseSettings, ...overrides.value };
-
+      // ADR-0036/0037: per-call img2img + IP-Adapter-likeness inputs (editor-driven).
+      const gen = parseImageGenOpts(body, campaignDir);
+      if ("error" in gen) {
+        sendJson(res, 400, { error: gen.error });
+        return;
+      }
+      const genOpts = gen.value;
+      try {
       if (body.kind === "entity") {
         const entityType = body.entityType;
         if (entityType !== "character" && entityType !== "npc" && entityType !== "location") {
@@ -1734,7 +1825,7 @@ const ROUTES: Array<{
         const description =
           typeof body.description === "string" && body.description.trim() ? body.description.trim() : body.name.trim();
 
-        const result = await generateImage(campaignDir, entityType, body.name.trim(), description, settings);
+        const result = await generateImage(campaignDir, entityType, body.name.trim(), description, settings, genOpts);
         if (result.ok && result.relPath) {
           recordEntityImage(campaignDir, entityType, body.name.trim(), result.relPath);
         }
@@ -1789,7 +1880,7 @@ const ROUTES: Array<{
         const sessionBase = path.basename(active.sessionLogPath).replace(/\.md$/, "");
         const name = `${sessionBase}-turn-${body.turnIndex}`;
 
-        const result = await generateImage(campaignDir, "scene", name, description, settings);
+        const result = await generateImage(campaignDir, "scene", name, description, settings, genOpts);
         if (result.ok && result.relPath) {
           setTranscriptRecordImage(campaignDir, active.sessionLogPath, body.turnIndex, result.relPath);
         }
@@ -1800,6 +1891,16 @@ const ROUTES: Array<{
       }
 
       sendJson(res, 400, { error: "body.kind must be 'entity' or 'moment'" });
+      } finally {
+        // ADR-0037: clean up a base64 referencePhoto's temp file, if any.
+        if (gen.tempFile) {
+          try {
+            fs.rmSync(gen.tempFile, { force: true });
+          } catch {
+            /* best-effort */
+          }
+        }
+      }
     },
   },
   {

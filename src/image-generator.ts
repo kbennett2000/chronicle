@@ -102,12 +102,24 @@ export function saveGeneratedImage(
  * server, and both /illustrate branches) is untouched. Never throws — the backends
  * catch every failure and return `{ ok: false, error }`, since an image is
  * best-effort per §8 and must never block a turn. */
+/** ADR-0036/0037: per-call editor overrides (img2img + IP-Adapter likeness) that
+ * aren't campaign settings. Paths are ABSOLUTE — the caller (the /illustrate route)
+ * resolves + path-guards campaign-relative inputs before passing them here. */
+export interface GenerateImageOptions {
+  initImageAbsPath?: string;
+  denoise?: number;
+  referenceImageAbsPath?: string;
+  likenessStrength?: number;
+  likenessStart?: number;
+}
+
 export async function generateImage(
   campaignDir: string,
   entityType: ImageEntityType,
   name: string,
   description: string,
-  settings: CampaignSettings
+  settings: CampaignSettings,
+  opts: GenerateImageOptions = {}
 ): Promise<ImageGenResult> {
   const provider = resolveImageProviderForCampaign(campaignDir, settings);
   // ADR-0029: resolve the local quality tier alongside the provider and pass it in.
@@ -120,6 +132,7 @@ export async function generateImage(
     description,
     settings,
     imageQuality,
+    ...opts,
   });
 }
 
