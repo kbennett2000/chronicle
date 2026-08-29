@@ -162,6 +162,12 @@ export interface CampaignSettings {
   /** Issue #118: a per-game video-params override. Absent === this game tracks
    * the account default (→ `.env` → code default), same model as music. */
   video?: VideoOverride;
+  /** ADR-0034: which engine animates this game's stills ("grok" | "local"). Absent
+   * === tracks the account default (→ config → "grok"). Freely switchable mid-game. */
+  videoProvider?: "grok" | "local";
+  /** ADR-0035: the local video model ("wan-5b" | "ltxv"). Absent === tracks the
+   * account default (→ config → "ltxv"). Local-only; grok ignores it. */
+  videoModel?: "wan-5b" | "ltxv";
 }
 
 export type CampaignSettingsPatch = Partial<Omit<CampaignSettings, "model" | "provider">>;
@@ -224,6 +230,20 @@ export async function getModels(
  * picker. Empty (or ComfyUI unreachable) → [] so the picker is hidden. */
 export async function getImageModels(connection: Connection): Promise<string[]> {
   const result = (await apiFetch(connection, "/image-models")) as { models: string[] };
+  return result.models ?? [];
+}
+
+/** ADR-0035: one local video model's readiness on the ComfyUI host. */
+export interface VideoModelInfo {
+  model: "wan-5b" | "ltxv";
+  label: string;
+  ready: boolean;
+}
+
+/** ADR-0035: which local video models the ComfyUI host can run right now (files
+ * installed). Every model `ready: false` when ComfyUI is unreachable. */
+export async function getVideoModels(connection: Connection): Promise<VideoModelInfo[]> {
+  const result = (await apiFetch(connection, "/video-models")) as { models: VideoModelInfo[] };
   return result.models ?? [];
 }
 

@@ -35,6 +35,8 @@
     "autoIllustrate": false,
     "generateImages": false,
     "generateVideos": false,
+    "videoProvider": "grok",
+    "videoModel": "ltxv",
     "autoRollDice": true,
     "musicEnabled": false,
     "musicSource": "local",

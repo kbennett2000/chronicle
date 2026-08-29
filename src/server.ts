@@ -72,6 +72,9 @@ import {
   type ImageQuality,
 } from "./image-backends/types.js";
 import { generateVideo } from "./video-generator.js";
+import { VIDEO_PROVIDERS, isValidVideoProvider, type VideoProvider } from "./video-backends/types.js";
+import { ANIMATE_MODELS, isAnimateModel, type AnimateModel } from "./video-backends/video-models.js";
+import { videoModelsAvailability } from "./video-backends/local.js";
 import { parseVideoBlock, resolveVideoConfig, type UserVideo } from "./video-store.js";
 import {
   buildCharacterSheet,
@@ -385,6 +388,21 @@ function parseDefaultSettings(
     }
     out.imageQuality = body.imageQuality;
   }
+  // ADR-0034: which video engine this account defaults to (grok | local),
+  // live-resolved (never copy-on-create), same as it flows on a campaign.
+  if (body.videoProvider !== undefined) {
+    if (!isValidVideoProvider(body.videoProvider)) {
+      return { error: `videoProvider must be one of ${VIDEO_PROVIDERS.join(", ")}` };
+    }
+    out.videoProvider = body.videoProvider;
+  }
+  // ADR-0035: which local video model this account defaults to (wan-5b | ltxv).
+  if (body.videoModel !== undefined) {
+    if (!isAnimateModel(body.videoModel)) {
+      return { error: `videoModel must be one of ${ANIMATE_MODELS.join(", ")}` };
+    }
+    out.videoModel = body.videoModel;
+  }
   // ADR-0020: music is stored under a `music` key. The Navidrome credentials are
   // deliberately NOT accepted here — they stay server-side in .env; a user may
   // only override enabled/source/URL/playlist (validated by parseMusicBlock,
@@ -637,6 +655,15 @@ const ROUTES: Array<{
     pattern: /^\/image-models$/,
     async handler(_req, res) {
       sendJson(res, 200, { models: await listLocalCheckpoints() });
+    },
+  },
+  {
+    // ADR-0035: which local video models the ComfyUI host can run right now (files
+    // installed), for the model picker. Every model `ready: false` when unreachable.
+    method: "GET",
+    pattern: /^\/video-models$/,
+    async handler(_req, res) {
+      sendJson(res, 200, { models: await videoModelsAvailability() });
     },
   },
   {
@@ -1477,6 +1504,8 @@ const ROUTES: Array<{
         negativePrompt?: string;
         imageModel?: string;
         imageSeed?: number | null;
+        videoProvider?: VideoProvider | null;
+        videoModel?: AnimateModel | null;
       } = {};
 
       if (body.artStyle !== undefined) {
@@ -1599,6 +1628,26 @@ const ROUTES: Array<{
           return;
         }
         updates.imageQuality = body.imageQuality;
+      }
+      // ADR-0034: per-game video engine override. `null` resets to the account default.
+      if (body.videoProvider === null) {
+        updates.videoProvider = null;
+      } else if (body.videoProvider !== undefined) {
+        if (!isValidVideoProvider(body.videoProvider)) {
+          sendJson(res, 400, { error: `videoProvider must be one of ${VIDEO_PROVIDERS.join(", ")}` });
+          return;
+        }
+        updates.videoProvider = body.videoProvider;
+      }
+      // ADR-0035: per-game local video model override. `null` resets to the account default.
+      if (body.videoModel === null) {
+        updates.videoModel = null;
+      } else if (body.videoModel !== undefined) {
+        if (!isAnimateModel(body.videoModel)) {
+          sendJson(res, 400, { error: `videoModel must be one of ${ANIMATE_MODELS.join(", ")}` });
+          return;
+        }
+        updates.videoModel = body.videoModel;
       }
       // #109: an optional per-game music override (same shape/validation as the
       // user default). Empty subfields clear that field back to the user default;
