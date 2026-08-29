@@ -3,11 +3,13 @@ import type { Connection } from "../lib/connection";
 import {
   getCampaignSettings,
   getModels,
+  getVideoModels,
   updateCampaignSettings,
   type CampaignSettings,
   type CampaignSettingsPatch,
   type ModelOption,
   type ProviderOption,
+  type VideoModelInfo,
 } from "../lib/campaign";
 import { EnginePicker } from "../components/EnginePicker";
 import { LookSettingsEditor } from "../components/LookSettingsEditor";
@@ -51,6 +53,7 @@ export function GameSettings({ connection, campaignId, onBack }: GameSettingsPro
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [gameMusic, setGameMusic] = useState<MusicConfig | null>(null);
   const [gameVideo, setGameVideo] = useState<VideoConfig | null>(null);
+  const [videoModels, setVideoModels] = useState<VideoModelInfo[]>([]);
 
   const [lookSave, setLookSave] = useState<SaveState>("idle");
   const [worldSave, setWorldSave] = useState<SaveState>("idle");
@@ -70,6 +73,10 @@ export function GameSettings({ connection, campaignId, onBack }: GameSettingsPro
       .catch(() => {});
     getVideoConfig(connection, campaignId)
       .then((cfg) => !cancelled && setGameVideo(cfg))
+      .catch(() => {});
+    // ADR-0035: local video models + readiness for the model picker.
+    getVideoModels(connection)
+      .then((m) => !cancelled && setVideoModels(m))
       .catch(() => {});
     setStatus("loading");
     getCampaignSettings(connection, campaignId)
@@ -210,7 +217,12 @@ export function GameSettings({ connection, campaignId, onBack }: GameSettingsPro
 
               {/* THE MOTION — this game (#118) */}
               <div style={sectionHeadingStyle}>VIDEO CLIPS</div>
-              <VideoSettingsEditor value={settings} effective={gameVideo ?? undefined} onPatch={patchGameVideo} />
+              <VideoSettingsEditor
+                value={settings}
+                effective={gameVideo ?? undefined}
+                videoModels={videoModels}
+                onPatch={patchGameVideo}
+              />
               <div data-testid="video-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 6 }}>
                 {videoSave === "saving" && "Saving…"}
                 {videoSave === "saved" && "Saved for this game."}

@@ -9,6 +9,8 @@ import {
   type ImageProvider,
   type ImageQuality,
 } from "./image-backends/types.js";
+import { isValidVideoProvider, type VideoProvider } from "./video-backends/types.js";
+import { isAnimateModel, type AnimateModel } from "./video-backends/video-models.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const CAMPAIGNS_ROOT = path.resolve(__dirname, "../campaigns");
@@ -521,6 +523,15 @@ export interface CampaignSettings {
    * present fields win over the user default via resolveVideoConfig — same
    * two-level model as `music`. */
   video?: UserVideo;
+  /** ADR-0034: which engine animates this game's stills ("grok" | "local").
+   * Absent === tracks the account default (→ config.defaults.videoProvider → "grok"),
+   * resolved live via resolveVideoProvider. Freely switchable mid-game like
+   * imageProvider — it only affects the NEXT clip. */
+  videoProvider?: VideoProvider;
+  /** ADR-0035: the local video model ("wan-5b" | "ltxv"). Absent === tracks the
+   * account default (→ config.defaults.videoModel → "ltxv"), resolved live via
+   * resolveVideoModel. Local-only; grok ignores it. */
+  videoModel?: AnimateModel;
 }
 
 export function readCampaignSettings(campaignDir: string): CampaignSettings {
@@ -572,6 +583,14 @@ export function readCampaignSettings(campaignDir: string): CampaignSettings {
   if (typeof raw.generateVideos === "boolean") {
     settings.generateVideos = raw.generateVideos;
   }
+  // ADR-0034/0035: only attach a valid video provider/model; a bad/absent value falls
+  // through to the user default → config default at resolve time.
+  if (isValidVideoProvider(raw.videoProvider)) {
+    settings.videoProvider = raw.videoProvider;
+  }
+  if (isAnimateModel(raw.videoModel)) {
+    settings.videoModel = raw.videoModel;
+  }
   // #109: only attach a music override when the stored block has at least one
   // valid field — an absent/empty override falls back to user default → .env.
   if (raw.music !== undefined) {
@@ -600,7 +619,10 @@ export function persistCampaignSettings(
   // whole per-game override (the only way to clear a stored boolean `enabled`,
   // which can't be cleared via the empty-string path below).
   updates: Partial<
-    Omit<CampaignSettings, "model" | "provider" | "music" | "video" | "imageProvider" | "imageQuality">
+    Omit<
+      CampaignSettings,
+      "model" | "provider" | "music" | "video" | "imageProvider" | "imageQuality" | "videoProvider" | "videoModel"
+    >
   > & {
     music?: UserMusic | null;
     // #118: `video: null` is an explicit "reset to account default" — it drops
@@ -612,6 +634,10 @@ export function persistCampaignSettings(
     // ADR-0029: `imageQuality: null` resets the tier to the account default, mirroring
     // imageProvider (a flat enum has no empty-string path).
     imageQuality?: ImageQuality | null;
+    // ADR-0034/0035: `null` resets the video provider/model to the account default,
+    // mirroring imageProvider.
+    videoProvider?: VideoProvider | null;
+    videoModel?: AnimateModel | null;
   }
 ): CampaignSettings {
   const raw = readRawSettings(campaignDir);
@@ -624,6 +650,9 @@ export function persistCampaignSettings(
   // ADR-0029: `imageQuality: null` drops the per-game override so the game tracks the
   // account default again; a valid value pins it.
   if (updates.imageQuality === null) delete merged.imageQuality;
+  // ADR-0034/0035: `null` drops the per-game video provider/model override.
+  if (updates.videoProvider === null) delete merged.videoProvider;
+  if (updates.videoModel === null) delete merged.videoModel;
   // #109: music is a nested object — one-level-deep merge (mirrors the #95 fix in
   // writeUserSettings) so patching one field (e.g. just the playlist) doesn't
   // wipe the siblings. Empty-string subfields clear that override back to absent

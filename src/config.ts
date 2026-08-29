@@ -31,6 +31,10 @@ export interface ConfigDefaults {
   autoIllustrate: boolean;
   generateImages: boolean;
   generateVideos: boolean;
+  /** ADR-0034: which engine animates stills ("grok" | "local"). */
+  videoProvider: string;
+  /** ADR-0035: the local video model ("wan-5b" | "ltxv"). */
+  videoModel: string;
   autoRollDice: boolean;
   musicEnabled: boolean;
   musicSource: string;
@@ -72,6 +76,8 @@ export const CONFIG_DEFAULTS: ChronicleConfig = {
     autoIllustrate: false,
     generateImages: false,
     generateVideos: false,
+    videoProvider: "grok",
+    videoModel: "ltxv",
     autoRollDice: true,
     musicEnabled: false,
     musicSource: "local",

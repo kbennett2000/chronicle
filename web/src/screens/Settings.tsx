@@ -3,12 +3,14 @@ import type { Connection } from "../lib/connection";
 import { type ConnectionStatus } from "../lib/api";
 import {
   getModels,
+  getVideoModels,
   getUserDefaults,
   saveUserDefaults,
   type CampaignSettings,
   type CampaignSettingsPatch,
   type ModelOption,
   type ProviderOption,
+  type VideoModelInfo,
 } from "../lib/campaign";
 import { ToggleRow } from "../components/LookControls";
 import { EnginePicker } from "../components/EnginePicker";
@@ -100,6 +102,7 @@ export function Settings({
   const [worldSave, setWorldSave] = useState<SaveState>("idle");
   const [videoSave, setVideoSave] = useState<SaveState>("idle");
   const [videoConfig, setVideoConfig] = useState<VideoConfig | null>(null);
+  const [videoModels, setVideoModels] = useState<VideoModelInfo[]>([]);
   const [music, setMusic] = useState<MusicConfig | null>(null);
   const [navUrl, setNavUrl] = useState("");
 
@@ -114,6 +117,10 @@ export function Settings({
       .catch(() => {});
     getVideoConfig(connection)
       .then((cfg) => !cancelled && setVideoConfig(cfg))
+      .catch(() => {});
+    // ADR-0035: local video models + readiness for the model picker.
+    getVideoModels(connection)
+      .then((m) => !cancelled && setVideoModels(m))
       .catch(() => {});
     // Fetch the engine catalog and the account defaults independently.
     getModels(connection)
@@ -292,7 +299,12 @@ export function Settings({
 
               {/* VIDEO CLIPS — account default (#118) */}
               <div style={sectionHeadingStyle}>VIDEO CLIPS</div>
-              <VideoSettingsEditor value={defaults} effective={videoConfig ?? undefined} onPatch={patchVideoDefaults} />
+              <VideoSettingsEditor
+                value={defaults}
+                effective={videoConfig ?? undefined}
+                videoModels={videoModels}
+                onPatch={patchVideoDefaults}
+              />
               <div data-testid="video-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 6 }}>
                 {videoSave === "saving" && "Saving…"}
                 {videoSave === "saved" && "Saved as your default."}
