@@ -75,6 +75,13 @@ export function ImageEditor({
     if (t !== "") {
       const n = Number(t);
       if (Number.isFinite(n) && n >= 0) overrides.imageSeed = Math.floor(n);
+    } else {
+      // #166: a blank seed used to fall back to the deterministic per-scene seed on the
+      // backend, so every redraw reused the identical noise field and the image barely
+      // moved. Redraw is an explicit "give me a different take", so send a fresh random
+      // seed each time; a typed seed still pins. (First-time auto-illustration is a
+      // different path and keeps its deterministic seed.)
+      overrides.imageSeed = Math.floor(Math.random() * 2 ** 31);
     }
     // ADR-0036: img2img needs the current image as the init frame.
     if (tweak && currentImageRelPath) {
@@ -206,13 +213,13 @@ export function ImageEditor({
         })}
       </div>
 
-      <div style={labelStyle}>Seed — blank keeps automatic · local engine</div>
+      <div style={labelStyle}>Seed — blank = a new image each redraw · type a number to pin it · local engine</div>
       <input
         value={seed}
         inputMode="numeric"
         onChange={(e) => setSeed(e.target.value)}
         data-testid="editor-seed"
-        placeholder="automatic"
+        placeholder="new each redraw"
         style={fieldStyle}
       />
 
