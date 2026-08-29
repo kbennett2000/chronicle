@@ -34,13 +34,12 @@ interface LookSettingsEditorProps {
 }
 
 export function LookSettingsEditor({ value, onPatch, imageModels = [] }: LookSettingsEditorProps) {
-  const isLocal = (value.imageProvider ?? "grok") === "local";
   return (
     <>
       <ToggleRow
         testId="images-toggle"
         title="Generate scene art"
-        description="Off by default · needs Grok Build configured"
+        description="Off by default · Grok Build or a local ComfyUI engine"
         checked={!!value.generateImages}
         onChange={(next) => onPatch({ generateImages: next })}
       />
@@ -84,14 +83,17 @@ export function LookSettingsEditor({ value, onPatch, imageModels = [] }: LookSet
         />
       )}
 
-      {/* #154: seed override — local engine only (grok ignores it). */}
-      {value.generateImages && isLocal && (
+      {/* #161: seed override — shown whenever scene art is on so it's always
+          discoverable (Scriptorium shows it unconditionally). Applies to the local
+          engine; the label says so, and grok ignores it. */}
+      {value.generateImages && (
         <SeedField value={value.imageSeed} onChange={(imageSeed) => onPatch({ imageSeed })} />
       )}
 
-      {/* #154: base-checkpoint picker — local engine only, and only when ComfyUI
-          actually reports installed checkpoints. */}
-      {value.generateImages && isLocal && imageModels.length > 0 && (
+      {/* #161: base-checkpoint picker — shown whenever ComfyUI reports installed
+          checkpoints, regardless of engine (matches the always-shown quality picker),
+          so it no longer vanishes on Grok Build. Local-only in effect; grok ignores it. */}
+      {value.generateImages && imageModels.length > 0 && (
         <ModelPicker
           value={value.imageModel ?? ""}
           models={imageModels}
