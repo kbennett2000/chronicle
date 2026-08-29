@@ -543,6 +543,17 @@ function parseImageGenOpts(
     }
   }
 
+  // ADR-0038: editor full positive-prompt override + a no-render preview. Both are
+  // local-engine concepts; the grok backend short-circuits preview and honors an
+  // override as its prose. `promptOverride` is capped defensively (the backend caps
+  // again); an empty/whitespace override is treated as absent.
+  if (body.promptOverride !== undefined) {
+    if (typeof body.promptOverride !== "string") return { error: "promptOverride must be a string" };
+    const trimmed = body.promptOverride.trim();
+    if (trimmed) out.promptOverride = trimmed.slice(0, 1200);
+  }
+  if (body.preview === true) out.preview = true;
+
   return { value: out, tempFile };
 }
 

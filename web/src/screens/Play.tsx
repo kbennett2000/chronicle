@@ -10,7 +10,9 @@ import {
   getCampaignSettings,
   type CharacterSheet,
   type StateSnapshot,
+  type ImageOverrides,
 } from "../lib/campaign";
+import { FullPromptField } from "../components/FullPromptField";
 import { useAuthedImage } from "../lib/useAuthedImage";
 import { useAuthedVideo } from "../lib/useAuthedVideo";
 import { parseChapterHeadings } from "../lib/session-log";
@@ -174,6 +176,7 @@ function TurnView({
   connection,
   campaignId,
   onIllustrate,
+  onRequestFullPrompt,
   drawing,
   drawError,
   imageNonce,
@@ -192,7 +195,11 @@ function TurnView({
   connection: Connection;
   campaignId: string;
   // Issue #66: an optional prompt override lets the player refine a regenerate.
-  onIllustrate: (description?: string) => void;
+  // ADR-0038: `overrides` carries the per-redraw random seed and an optional full-prompt.
+  onIllustrate: (description?: string, overrides?: ImageOverrides) => void;
+  // ADR-0038: fetch the fully-assembled prompt for this moment (a no-render preview) so
+  // the regenerate box's "edit the full prompt" can prefill it.
+  onRequestFullPrompt?: (description: string) => Promise<string | null>;
   drawing: boolean;
   drawError: string | null;
   imageNonce?: number;
@@ -220,6 +227,9 @@ function TurnView({
   // image (the turn's stored sceneCaption) so the player tweaks it (e.g.
   // "…at night") instead of retyping. Blank on old, pre-caption turns.
   const [regenDraft, setRegenDraft] = useState(turn.sceneCaption ?? "");
+  // ADR-0038: "edit the full prompt" state for this moment's regenerate box.
+  const [advanced, setAdvanced] = useState(false);
+  const [fullPrompt, setFullPrompt] = useState("");
   // Issue #68: inline edit of this turn's player message.
   const [editOpen, setEditOpen] = useState(false);
   const [editDraft, setEditDraft] = useState(turn.playerMessage);
@@ -413,20 +423,42 @@ function TurnView({
               <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
                 <button
                   data-testid="regenerate-submit"
-                  onClick={() => { onIllustrate(regenDraft); setRegenOpen(false); setRegenDraft(""); }}
+                  onClick={() => {
+                    // ADR-0038: a blank seed used to fall back to the deterministic
+                    // per-turn seed, so redraws barely changed. Send a fresh random seed
+                    // each Redraw; a filled full-prompt box replaces the whole prompt.
+                    const overrides: ImageOverrides = { imageSeed: Math.floor(Math.random() * 2 ** 31) };
+                    if (advanced && fullPrompt.trim()) overrides.promptOverride = fullPrompt.trim();
+                    onIllustrate(regenDraft, overrides);
+                    setRegenOpen(false);
+                    setRegenDraft("");
+                    setAdvanced(false);
+                    setFullPrompt("");
+                  }}
                   disabled={drawing}
                   style={{ cursor: drawing ? "default" : "pointer", padding: "6px 14px", borderRadius: 3, border: "none", background: "linear-gradient(180deg,#d8743e,#a8511f)", color: "#1c120a", fontFamily: "var(--font-display)", fontSize: 11.5, opacity: drawing ? 0.6 : 1 }}
                 >
                   Redraw
                 </button>
                 <button
-                  onClick={() => { setRegenOpen(false); setRegenDraft(""); }}
+                  onClick={() => { setRegenOpen(false); setRegenDraft(""); setAdvanced(false); setFullPrompt(""); }}
                   disabled={drawing}
                   style={{ cursor: "pointer", padding: "6px 14px", borderRadius: 3, border: "1px solid rgba(109,90,56,.4)", background: "transparent", color: "var(--ink-dim)", fontFamily: "var(--font-display)", fontSize: 11.5 }}
                 >
                   Cancel
                 </button>
               </div>
+              {/* ADR-0038: take over the entire assembled prompt for this scene. */}
+              {onRequestFullPrompt && (
+                <FullPromptField
+                  onRequestFullPrompt={onRequestFullPrompt}
+                  description={regenDraft.trim() || (turn.sceneCaption ?? "")}
+                  enabled={advanced}
+                  onEnabledChange={setAdvanced}
+                  value={fullPrompt}
+                  onChange={setFullPrompt}
+                />
+              )}
             </div>
           )}
           {drawError && (
@@ -809,7 +841,12 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
   // turn has no caption yet — that's not an error, so we show nothing and leave
   // the manual "Illustrate this moment" affordance for later. User-initiated
   // illustrate/regenerate leaves `auto` off (narration fallback preserved).
-  async function handleIllustrateMoment(index: number, description?: string, auto = false) {
+  async function handleIllustrateMoment(
+    index: number,
+    description?: string,
+    auto = false,
+    overrides?: ImageOverrides
+  ) {
     if (illustratingTurn !== null) return;
     setIllustratingTurn(index);
     setIllustrateErrors((prev) => {
@@ -817,7 +854,7 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
       return rest;
     });
     try {
-      const result = await illustrateMoment(connection, campaignId, index, description, auto);
+      const result = await illustrateMoment(connection, campaignId, index, description, auto, overrides);
       if (result.ok && result.relPath) {
         const relPath = result.relPath;
         const caption = result.sceneCaption;
@@ -998,7 +1035,12 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
               turn={turn}
               connection={connection}
               campaignId={campaignId}
-              onIllustrate={(description) => handleIllustrateMoment(i, description)}
+              onIllustrate={(description, overrides) => handleIllustrateMoment(i, description, false, overrides)}
+              onRequestFullPrompt={async (description) => {
+                // ADR-0038: no-render preview of this moment's assembled prompt.
+                const result = await illustrateMoment(connection, campaignId, i, description, false, undefined, true);
+                return result.previewPrompt ?? null;
+              }}
               drawing={illustratingTurn === i}
               drawError={illustrateErrors[i] ?? null}
               imageNonce={imageNonces[i]}

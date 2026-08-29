@@ -58,6 +58,11 @@ const WORKFLOWS_DIR = path.resolve(__dirname, "../workflows");
 const BASE_WORKFLOW = "sdxl-txt2img.json";
 const REFINER_WORKFLOW = "sdxl-refiner.json";
 
+/** ADR-0038: sanity cap on an editor full-prompt override. Far above the 500-char
+ * assembly cap (SDXL CLIP truncates around 77 tokens anyway) — this only fences off
+ * an absurd paste, it isn't a functional limit. */
+const MAX_PROMPT_OVERRIDE_CHARS = 1200;
+
 /** ADR-0029: what a quality tier resolves to on the local backend. `workflow` is a
  * checked-in template filename under WORKFLOWS_DIR; `steps` overrides the base
  * sampler's step count (base workflows only — the refiner template bakes its own
@@ -379,6 +384,22 @@ export async function generateLocalImage(
       tier = resolveTier(args.imageQuality);
       positivePrompt = prompt;
     }
+  }
+
+  // ADR-0038: the editor's "edit the full prompt" replaces the assembled positive
+  // prompt VERBATIM — after the art-style clause and LoRA trigger, so it wins outright.
+  // The recipe stays resolved above, so its LoRA node + extra negatives still wire in;
+  // only the positive TEXT is the user's. (Overriding the grounded appearance tags can
+  // reintroduce character drift — that trade-off is the user's to make here.)
+  if (args.promptOverride?.trim()) {
+    positivePrompt = args.promptOverride.trim().slice(0, MAX_PROMPT_OVERRIDE_CHARS);
+  }
+
+  // ADR-0038: preview — return the effective positive prompt WITHOUT rendering, so the
+  // editor can prefill its full-prompt box with exactly what would be used. No ComfyUI
+  // call, no file written. Placed after the override so a preview reflects it too.
+  if (args.preview) {
+    return { ok: true, previewPrompt: positivePrompt };
   }
 
   // ADR-0036/0037: img2img and IP-Adapter wire only the BASE chain (nodes 3/4/10/20),
