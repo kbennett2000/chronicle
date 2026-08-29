@@ -6,9 +6,11 @@ import path from "node:path";
 import {
   generateLocalImage,
   deriveCampaignSeed,
+  resolveImageSeed,
   resolveTier,
   resolveEffectiveTier,
   ensureTrigger,
+  listLocalCheckpoints,
   TIER_CONFIG,
 } from "../src/image-backends/local.js";
 import { STYLE_LORAS } from "../src/image-backends/style-loras.js";
@@ -475,4 +477,109 @@ test("generateLocalImage: a scene at a mapped color-forward style keeps ADR-0028
     // ADR-0032 LoRA present.
     assert.equal(g["20"].inputs.lora_name, "ClassipeintXL2.1.safetensors");
   });
+});
+
+// --- #154: user negative prompt / seed override / model (checkpoint) picker ---
+
+// "ink wash" is a monochrome style (no LoRA recipe, no anti-drift negatives), so these
+// tests exercise the new fields against today's plain base graph.
+const INK = { model: "claude-sonnet-5", provider: "claude", artStyle: "ink wash" } as unknown as CampaignSettings;
+
+test("generateLocalImage: a user negativePrompt is appended after the template negatives (#154)", async () => {
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
+    const settings = { ...INK, negativePrompt: "extra fingers, watermark" } as CampaignSettings;
+    await generateLocalImage(
+      { campaignDir: dir, entityType: "npc", name: "Barrow", description: "a dwarf", settings },
+      capturingFetch(cap)
+    );
+    // Base template negative, then the user's avoid clause (monochrome style adds no anti-drift set).
+    assert.equal(
+      cap.submitted.prompt["7"].inputs.text,
+      "blurry, lowres, deformed, text, watermark, extra fingers, watermark"
+    );
+  });
+});
+
+test("generateLocalImage: an empty/whitespace negativePrompt changes nothing (#154)", async () => {
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
+    const settings = { ...INK, negativePrompt: "   " } as CampaignSettings;
+    await generateLocalImage(
+      { campaignDir: dir, entityType: "npc", name: "Barrow", description: "a dwarf", settings },
+      capturingFetch(cap)
+    );
+    assert.equal(cap.submitted.prompt["7"].inputs.text, "blurry, lowres, deformed, text, watermark");
+  });
+});
+
+test("generateLocalImage: a finite imageSeed pins the sampler seed instead of the derived one (#154)", async () => {
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
+    const settings = { ...INK, imageSeed: 12345 } as CampaignSettings;
+    await generateLocalImage(
+      { campaignDir: dir, entityType: "npc", name: "Barrow", description: "a dwarf", settings },
+      capturingFetch(cap)
+    );
+    assert.equal(cap.submitted.prompt["3"].inputs.seed, 12345);
+  });
+});
+
+test("generateLocalImage: an absent imageSeed keeps the deterministic per-entity seed (#154)", async () => {
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
+    await generateLocalImage(
+      { campaignDir: dir, entityType: "npc", name: "Barrow", description: "a dwarf", settings: INK },
+      capturingFetch(cap)
+    );
+    assert.equal(cap.submitted.prompt["3"].inputs.seed, deriveCampaignSeed(dir, "Barrow"));
+  });
+});
+
+test("generateLocalImage: imageModel swaps the base checkpoint node; absent keeps the template default (#154)", async () => {
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
+    const settings = { ...INK, imageModel: "dreamshaperXL.safetensors" } as CampaignSettings;
+    await generateLocalImage(
+      { campaignDir: dir, entityType: "npc", name: "Barrow", description: "a dwarf", settings },
+      capturingFetch(cap)
+    );
+    assert.equal(cap.submitted.prompt["4"].inputs.ckpt_name, "dreamshaperXL.safetensors");
+  });
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
+    await generateLocalImage(
+      { campaignDir: dir, entityType: "npc", name: "Barrow", description: "a dwarf", settings: INK },
+      capturingFetch(cap)
+    );
+    assert.equal(cap.submitted.prompt["4"].inputs.ckpt_name, "sd_xl_base_1.0.safetensors");
+  });
+});
+
+test("resolveImageSeed: pins a finite non-negative (floored) seed, else derives (#154)", () => {
+  const dir = "/home/kb/campaigns/kris/emberfall";
+  assert.equal(resolveImageSeed(dir, "The Forge", 42), 42);
+  assert.equal(resolveImageSeed(dir, "The Forge", 42.9), 42);
+  assert.equal(resolveImageSeed(dir, "The Forge", undefined), deriveCampaignSeed(dir, "The Forge"));
+  assert.equal(resolveImageSeed(dir, "The Forge", null), deriveCampaignSeed(dir, "The Forge"));
+  assert.equal(resolveImageSeed(dir, "The Forge", -5), deriveCampaignSeed(dir, "The Forge"));
+  assert.equal(resolveImageSeed(dir, "The Forge", Number.NaN), deriveCampaignSeed(dir, "The Forge"));
+});
+
+test("listLocalCheckpoints: parses ComfyUI /object_info; returns [] on any failure (#154)", async () => {
+  const ok = (async (url: string) => {
+    assert.match(String(url), /\/object_info\/CheckpointLoaderSimple$/);
+    return jsonRes(200, {
+      CheckpointLoaderSimple: { input: { required: { ckpt_name: [["a.safetensors", "b.safetensors"]] } } },
+    });
+  }) as unknown as typeof fetch;
+  assert.deepEqual(await listLocalCheckpoints(ok), ["a.safetensors", "b.safetensors"]);
+
+  const notOk = (async () => jsonRes(500, {})) as unknown as typeof fetch;
+  assert.deepEqual(await listLocalCheckpoints(notOk), []);
+
+  const threw = (async () => {
+    throw new Error("network down");
+  }) as unknown as typeof fetch;
+  assert.deepEqual(await listLocalCheckpoints(threw), []);
 });

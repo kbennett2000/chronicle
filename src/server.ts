@@ -62,6 +62,7 @@ import {
   SCENE_CAPTION_RETRY_PROMPT,
 } from "./narration.js";
 import { generateImage, groundSceneDescription } from "./image-generator.js";
+import { listLocalCheckpoints } from "./image-backends/local.js";
 import {
   IMAGE_PROVIDERS,
   isValidImageProvider,
@@ -136,6 +137,16 @@ function newUserDefaultSettings(): Record<string, unknown> {
   if (d.provider && isValidProviderId(d.provider)) out.provider = d.provider;
   const artStyle = d.artStyle?.trim();
   if (artStyle) out.artStyle = artStyle;
+  // #154: image negative/model/seed defaults — seeded copy-on-create like artStyle,
+  // only when the config value is non-empty/valid (else the field stays unset).
+  const negativePrompt = d.negativePrompt?.trim();
+  if (negativePrompt) out.negativePrompt = negativePrompt;
+  const imageModel = d.imageModel?.trim();
+  if (imageModel) out.imageModel = imageModel;
+  if (d.imageSeed !== null && d.imageSeed !== undefined) {
+    const n = Number(d.imageSeed);
+    if (Number.isFinite(n) && n >= 0) out.imageSeed = Math.floor(n);
+  }
   const worldSetting = d.worldSetting?.trim();
   if (worldSetting) out.worldSetting = worldSetting;
   if (d.toneWhimsy !== null && d.toneWhimsy !== undefined) {
@@ -303,6 +314,26 @@ function parseDefaultSettings(
   if (body.artStyle !== undefined) {
     if (typeof body.artStyle !== "string") return { error: "artStyle must be a string" };
     out.artStyle = body.artStyle;
+  }
+  // #154: user-editable image negative prompt (string; "" clears it in writeUserSettings).
+  if (body.negativePrompt !== undefined) {
+    if (typeof body.negativePrompt !== "string") return { error: "negativePrompt must be a string" };
+    out.negativePrompt = body.negativePrompt;
+  }
+  // #154: default local checkpoint name (string; "" clears it).
+  if (body.imageModel !== undefined) {
+    if (typeof body.imageModel !== "string") return { error: "imageModel must be a string" };
+    out.imageModel = body.imageModel;
+  }
+  // #154: seed override — a finite non-negative number pins it; null clears it (→ deterministic).
+  if (body.imageSeed !== undefined) {
+    if (body.imageSeed === null) {
+      out.imageSeed = null;
+    } else if (typeof body.imageSeed !== "number" || !Number.isFinite(body.imageSeed) || body.imageSeed < 0) {
+      return { error: "imageSeed must be a non-negative number or null" };
+    } else {
+      out.imageSeed = Math.floor(body.imageSeed);
+    }
   }
   if (body.worldSetting !== undefined) {
     if (typeof body.worldSetting !== "string") return { error: "worldSetting must be a string" };
@@ -557,6 +588,15 @@ const ROUTES: Array<{
     pattern: /^\/video\/config$/,
     async handler(req, res, _params, userId) {
       sendJson(res, 200, resolveVideoConfig(userVideo(userId), campaignVideo(userId, musicCampaignId(req))));
+    },
+  },
+  {
+    // #154: the SDXL checkpoints the local ComfyUI backend can load, for the model
+    // picker. Empty (or ComfyUI unreachable) → [] so the UI hides the picker.
+    method: "GET",
+    pattern: /^\/image-models$/,
+    async handler(_req, res) {
+      sendJson(res, 200, { models: await listLocalCheckpoints() });
     },
   },
   {
@@ -1394,6 +1434,9 @@ const ROUTES: Array<{
         video?: UserVideo | null;
         imageProvider?: ImageProvider | null;
         imageQuality?: ImageQuality | null;
+        negativePrompt?: string;
+        imageModel?: string;
+        imageSeed?: number | null;
       } = {};
 
       if (body.artStyle !== undefined) {
@@ -1402,6 +1445,31 @@ const ROUTES: Array<{
           return;
         }
         updates.artStyle = body.artStyle;
+      }
+      // #154: per-game image negative prompt / checkpoint / seed override.
+      if (body.negativePrompt !== undefined) {
+        if (typeof body.negativePrompt !== "string") {
+          sendJson(res, 400, { error: "negativePrompt must be a string" });
+          return;
+        }
+        updates.negativePrompt = body.negativePrompt;
+      }
+      if (body.imageModel !== undefined) {
+        if (typeof body.imageModel !== "string") {
+          sendJson(res, 400, { error: "imageModel must be a string" });
+          return;
+        }
+        updates.imageModel = body.imageModel;
+      }
+      if (body.imageSeed !== undefined) {
+        if (body.imageSeed === null) {
+          updates.imageSeed = null;
+        } else if (typeof body.imageSeed !== "number" || !Number.isFinite(body.imageSeed) || body.imageSeed < 0) {
+          sendJson(res, 400, { error: "imageSeed must be a non-negative number or null" });
+          return;
+        } else {
+          updates.imageSeed = Math.floor(body.imageSeed);
+        }
       }
       if (body.worldSetting !== undefined) {
         if (typeof body.worldSetting !== "string") {

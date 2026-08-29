@@ -38,6 +38,21 @@ export function deriveCampaignSeed(campaignDir: string, name: string): number {
   return (base + offset) >>> 0;
 }
 
+/** Issue #154: the seed to actually render with. A finite, non-negative
+ * `settings.imageSeed` pins the seed (reproducible, user-chosen); otherwise fall
+ * back to the deterministic per-(campaign, entity) derivation (ADR-0028).
+ * Exported for tests. */
+export function resolveImageSeed(
+  campaignDir: string,
+  name: string,
+  imageSeed?: number | null
+): number {
+  if (typeof imageSeed === "number" && Number.isFinite(imageSeed) && imageSeed >= 0) {
+    return Math.floor(imageSeed) >>> 0;
+  }
+  return deriveCampaignSeed(campaignDir, name);
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKFLOWS_DIR = path.resolve(__dirname, "../workflows");
 const BASE_WORKFLOW = "sdxl-txt2img.json";
@@ -163,6 +178,27 @@ async function loraAvailable(base: string, fetchFn: FetchFn, loraFile: string): 
   return Array.isArray(names) && names.includes(loraFile);
 }
 
+/** Issue #154: ask ComfyUI which SDXL checkpoints IT can load (its own filesystem,
+ * which may differ from this process's when ComfyUI is remote), for the model picker.
+ * Same `/object_info` shape as loraAvailable:
+ * `{ CheckpointLoaderSimple: { input: { required: { ckpt_name: [ [file, ...], ... ] } } } }`.
+ * Returns `[]` on any non-200 / parse / network failure so the UI simply hides the
+ * picker rather than erroring. Uses the injected fetchFn (test-driven). */
+export async function listLocalCheckpoints(fetchFn: FetchFn = fetch): Promise<string[]> {
+  const base = comfyBase();
+  try {
+    const res = await fetchFn(`${base}/object_info/CheckpointLoaderSimple`, {
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (!res.ok) return [];
+    const info = (await res.json().catch(() => ({}))) as Record<string, any>;
+    const names = info?.CheckpointLoaderSimple?.input?.required?.ckpt_name?.[0];
+    return Array.isArray(names) ? names.filter((n): n is string => typeof n === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface OutImage {
@@ -239,12 +275,24 @@ export async function generateLocalImage(
     // the refiner's own encode/sample nodes — so ADR-0028's style clause, anti-drift
     // negatives, and per-campaign seed apply IDENTICALLY at every quality tier.
     const extraNeg = sceneStyleNegatives(settings, entityType);
-    const seed = deriveCampaignSeed(campaignDir, name);
+    // #154: honor a user seed override, else the deterministic per-entity seed.
+    const seed = resolveImageSeed(campaignDir, name, settings.imageSeed);
     for (const id of ["6", "12"]) setNodeText(graph, id, positivePrompt);
     if (extraNeg) for (const id of ["7", "13"]) appendNodeText(graph, id, extraNeg);
     // ADR-0032 (Slice 2): a recipe's per-style extra negatives, appended alongside the
     // ADR-0028 anti-drift set. Only when the recipe survived availability (still set).
     if (recipe?.extraNegatives) for (const id of ["7", "13"]) appendNodeText(graph, id, recipe.extraNegatives);
+    // #154: the user's own "things to avoid", appended last so it's additive to both
+    // the anti-drift and recipe negatives (never replaces them).
+    if (settings.negativePrompt?.trim()) {
+      for (const id of ["7", "13"]) appendNodeText(graph, id, settings.negativePrompt.trim());
+    }
+    // #154: swap the BASE checkpoint (node "4") when the user pinned a model. The
+    // refiner checkpoint (node "11", refiner template only) is left as-is — the picker
+    // chooses the base SDXL model. No-op when the node or the setting is absent.
+    if (settings.imageModel?.trim() && graph["4"]?.inputs) {
+      graph["4"].inputs.ckpt_name = settings.imageModel.trim();
+    }
     for (const id of ["3", "14"]) setNodeSeed(graph, id, seed);
     // Base-workflow step override (fast/standard); the refiner template bakes its own.
     if (tier.steps != null && graph["3"]?.inputs && "steps" in graph["3"].inputs) {
