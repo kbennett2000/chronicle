@@ -801,6 +801,13 @@ export function persistSessionId(campaignDir: string, sessionId: string): void {
   fs.writeFileSync(sessionIdFile(campaignDir), sessionId);
 }
 
+/** ADR-0040: drop the persisted SDK session id so the next turn starts a fresh
+ * conversation (manual session rotation). Game state is untouched — it lives in
+ * the state files, not the SDK conversation. A missing file is a no-op. */
+export function clearPersistedSessionId(campaignDir: string): void {
+  fs.rmSync(sessionIdFile(campaignDir), { force: true });
+}
+
 /** Creates a new append-only session-log file and returns its path,
  * relative to the campaign directory (this is what dm-engine's system
  * prompt tells the model to append to). */

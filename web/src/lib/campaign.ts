@@ -493,6 +493,21 @@ export async function generateOpening(connection: Connection, campaignId: string
   return body as OpeningResult;
 }
 
+/** ADR-0040: manual session rotation. Drops this campaign's accumulated Claude
+ * SDK conversation so the NEXT turn starts a fresh session, re-primed from the
+ * saved state files (the cure for long-campaign "lazy" narration). No game state
+ * is lost. Returns `rotated:false` when the game hasn't started yet (nothing to
+ * rotate). A 409 (no active session, or a turn in flight) throws. */
+export async function refreshSession(
+  connection: Connection,
+  campaignId: string,
+): Promise<{ rotated: boolean }> {
+  return (await apiFetch(connection, `/campaigns/${encodeURIComponent(campaignId)}/session/refresh`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  })) as { campaignId: string; rotated: boolean };
+}
+
 /** ADR-0009 on-demand illustration. `ok:false` is a domain result carrying the
  * exact Grok failure reason (returned at HTTP 200), not an exception — so the
  * UI can show *why* nothing was drawn instead of failing silently. */
