@@ -42,6 +42,7 @@ function Lightbox({
   initialUrl,
   videoUrl,
   imageModels,
+  cacheBust,
   onClose,
   onIllustrated,
 }: {
@@ -51,14 +52,17 @@ function Lightbox({
   initialUrl: string;
   videoUrl?: string;
   imageModels: string[];
+  /** #176: the entity's SHARED image cache-bust, owned by GalleryPanel. Bumped by any
+   * (re)draw of this entity — tile OR lightbox — so both surfaces re-fetch the same
+   * deterministic filename. */
+  cacheBust: number;
   onClose: () => void;
   onIllustrated: () => void;
 }) {
-  const [nonce, setNonce] = useState(0);
-  // Re-fetch on redraw (nonce), falling back to the tile's already-loaded URL for
-  // the very first paint so opening the lightbox is instant.
-  const { url: refreshed } = useAuthedImage(connection, campaignId, nonce > 0 ? item.image : undefined, nonce);
-  const shownUrl = nonce > 0 && refreshed ? refreshed : initialUrl;
+  // Re-fetch when the shared cache-bust bumps, falling back to the tile's already-loaded
+  // URL for the very first paint so opening the lightbox is instant.
+  const { url: refreshed } = useAuthedImage(connection, campaignId, cacheBust > 0 ? item.image : undefined, cacheBust);
+  const shownUrl = cacheBust > 0 && refreshed ? refreshed : initialUrl;
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,8 +81,9 @@ function Lightbox({
     try {
       const result = await illustrateEntity(connection, campaignId, item.type, item.name, description, overrides);
       if (result.ok) {
-        setNonce((n) => n + 1);
         setEditing(false);
+        // #176: onIllustrated bumps the SHARED per-entity cache-bust, so this lightbox
+        // AND the underlying grid tile both re-fetch the newly written image.
         onIllustrated();
       } else {
         setError(result.error || "The image engine couldn't draw this.");
@@ -190,6 +195,7 @@ function GalleryTile({
   campaignId,
   item,
   generateVideos,
+  cacheBust,
   onOpen,
   onLoadedChange,
   onIllustrated,
@@ -198,14 +204,15 @@ function GalleryTile({
   campaignId: string;
   item: GalleryItem;
   generateVideos?: boolean;
+  /** #176: the entity's SHARED image cache-bust from GalleryPanel. Bumped by any
+   * (re)draw of this entity — tile OR lightbox — so a regenerated image (same
+   * deterministic filename) refreshes here even when the redraw came from the lightbox. */
+  cacheBust: number;
   onOpen: (item: GalleryItem, url: string, videoUrl?: string) => void;
   onLoadedChange: (loaded: boolean) => void;
   onIllustrated: () => void;
 }) {
-  // Issue #66: a local cache-bust so a regenerated entity image (same
-  // deterministic filename) actually refreshes in the tile and lightbox.
-  const [nonce, setNonce] = useState(0);
-  const { url, status } = useAuthedImage(connection, campaignId, item.image, nonce);
+  const { url, status } = useAuthedImage(connection, campaignId, item.image, cacheBust);
   // Issue #118: load the entity's clip (if any) so the lightbox can play it.
   const [videoNonce, setVideoNonce] = useState(0);
   const { url: videoUrl } = useAuthedVideo(connection, campaignId, item.video, videoNonce);
@@ -244,7 +251,7 @@ function GalleryTile({
     try {
       const result = await illustrateEntity(connection, campaignId, item.type, item.name, description);
       if (result.ok) {
-        setNonce((n) => n + 1);
+        // #176: onIllustrated bumps the SHARED per-entity cache-bust (tile + lightbox).
         onIllustrated();
       } else {
         setDrawError(result.error || "Grok Build couldn't draw this.");
@@ -467,6 +474,17 @@ export function GalleryPanel({ connection, campaignId, characterSheet, npcRoster
   );
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
   const [loadedFlags, setLoadedFlags] = useState<Record<number, boolean>>({});
+  // #176: one SHARED image cache-bust per entity, so a redraw from the lightbox AND from
+  // a tile both invalidate that entity's image everywhere it's shown (the server
+  // overwrites the same deterministic filename, so the URL string is unchanged — a
+  // per-component nonce would strand the tile with its stale cached blob).
+  const [imageNonces, setImageNonces] = useState<Record<string, number>>({});
+  const galleryKey = (it: GalleryItem) => `${it.type}::${it.name}`;
+  function handleIllustrated(it: GalleryItem) {
+    const k = galleryKey(it);
+    setImageNonces((prev) => ({ ...prev, [k]: (prev[k] ?? 0) + 1 }));
+    onIllustrated();
+  }
   // #157: local-engine checkpoints for the editor's model picker; [] (hidden) when
   // ComfyUI is unreachable (e.g. the grok engine, or no local host).
   const [imageModels, setImageModels] = useState<string[]>([]);
@@ -496,11 +514,12 @@ export function GalleryPanel({ connection, campaignId, characterSheet, npcRoster
             campaignId={campaignId}
             item={item}
             generateVideos={generateVideos}
+            cacheBust={imageNonces[galleryKey(item)] ?? 0}
             onOpen={(openedItem, url, videoUrl) => setLightbox({ item: openedItem, url, videoUrl })}
             onLoadedChange={(loaded) =>
               setLoadedFlags((prev) => (prev[i] === loaded ? prev : { ...prev, [i]: loaded }))
             }
-            onIllustrated={onIllustrated}
+            onIllustrated={() => handleIllustrated(item)}
           />
         ))}
       </div>
@@ -513,8 +532,9 @@ export function GalleryPanel({ connection, campaignId, characterSheet, npcRoster
           initialUrl={lightbox.url}
           videoUrl={lightbox.videoUrl}
           imageModels={imageModels}
+          cacheBust={imageNonces[galleryKey(lightbox.item)] ?? 0}
           onClose={() => setLightbox(null)}
-          onIllustrated={onIllustrated}
+          onIllustrated={() => handleIllustrated(lightbox.item)}
         />
       )}
     </div>
