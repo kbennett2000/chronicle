@@ -348,6 +348,17 @@ export interface CampaignCreationSettings {
   /** Issue #118: copy-on-create like generateImages (the video *params* are
    * live-tracked from account defaults, so they are not sent here). */
   generateVideos?: boolean;
+  /** #172: image/video engine dials chosen on the New Game screen, so a new game
+   * can start on local ComfyUI (with a chosen checkpoint) instead of the account
+   * default. Validated by the server exactly as the settings-PATCH does; omitted
+   * fields keep the server/account default. */
+  imageProvider?: "grok" | "local";
+  imageQuality?: "fast" | "standard" | "high";
+  imageModel?: string;
+  imageSeed?: number | null;
+  negativePrompt?: string;
+  videoProvider?: "grok" | "local";
+  videoModel?: "wan-5b" | "ltxv";
 }
 
 /** Creates a new campaign from a character-creation form (ADR-0010); the
