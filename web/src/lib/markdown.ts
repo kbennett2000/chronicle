@@ -1,3 +1,5 @@
+import { SITUATION_SUMMARY_MAX_CHARS } from "./state-headings";
+
 /** Generic markdown-heading sectioning, shared by every panel that reads
  * state off a markdown state file (worldState here; npcRoster/questLog in
  * later slices use the same function to pull out "## <NPC name>" or
@@ -76,6 +78,21 @@ export function findMarkdownSection(markdown: string, heading: string): Markdown
     console.warn(`[markdown] expected heading "${heading}" not found`);
   }
   return found;
+}
+
+/** Collapse a "## Current Situation" body to a single short summary line for
+ * compact display on the Home card, bounded by SITUATION_SUMMARY_MAX_CHARS
+ * (ADR-0039): whitespace-collapse, then truncate at a word boundary with a
+ * trailing ellipsis. Mirrors the server-side cap in src/campaign-store.ts's
+ * currentSituation() — the two runtimes share no module, so the shape is kept
+ * deliberately identical. */
+export function summarizeSituation(body: string): string {
+  const text = (body ?? "").replace(/\s+/g, " ").trim();
+  if (text.length <= SITUATION_SUMMARY_MAX_CHARS) return text;
+  const slice = text.slice(0, SITUATION_SUMMARY_MAX_CHARS);
+  const lastSpace = slice.lastIndexOf(" ");
+  const cut = lastSpace > 0 ? slice.slice(0, lastSpace) : slice;
+  return cut.replace(/[\s.,;:!?-]+$/, "") + "…";
 }
 
 const BULLET_FIELD_RE = /^-\s*\*\*([^*]+):\*\*\s?(.*)$/;
