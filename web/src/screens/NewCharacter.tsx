@@ -5,13 +5,25 @@ import {
   startSession,
   getModels,
   getNewGameDefaults,
+  getImageModels,
+  getVideoModels,
   type CharacterCreationInput,
   type CampaignCreationSettings,
   type ModelOption,
   type ProviderOption,
   type ResponseLength,
+  type VideoModelInfo,
 } from "../lib/campaign";
-import { ToggleRow, ArtStylePicker } from "../components/LookControls";
+import {
+  ToggleRow,
+  ArtStylePicker,
+  ImageProviderPicker,
+  ImageQualityPicker,
+  NegativePromptField,
+  SeedField,
+  ModelPicker,
+} from "../components/LookControls";
+import { VideoProviderPicker, VideoModelPicker } from "../components/VideoSettingsEditor";
 import { SKILLS } from "../lib/character-derive";
 import { useIsDesktop } from "../lib/useIsDesktop";
 
@@ -142,6 +154,18 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
   const [autoRollDice, setAutoRollDice] = useState(true);
   // Issue #118: opt-in video clips (copy-on-create like generateImages).
   const [generateVideos, setGenerateVideos] = useState(false);
+  // #172: full image/video engine parity with Game Settings, chosen at creation and
+  // pre-filled from the last game (GET /new-game-defaults). imageModels/videoModels
+  // list what the local ComfyUI host can draw/animate ([] when grok or unreachable).
+  const [imageProvider, setImageProvider] = useState<"grok" | "local">("grok");
+  const [imageQuality, setImageQuality] = useState<"fast" | "standard" | "high">("standard");
+  const [imageSeed, setImageSeed] = useState<number | null>(null);
+  const [imageModel, setImageModel] = useState("");
+  const [negativePrompt, setNegativePrompt] = useState("");
+  const [imageModels, setImageModels] = useState<string[]>([]);
+  const [videoProvider, setVideoProvider] = useState<"grok" | "local">("grok");
+  const [videoModel, setVideoModel] = useState<VideoModelInfo["model"]>("ltxv");
+  const [videoModels, setVideoModels] = useState<VideoModelInfo[]>([]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Issue #57/#64: pick the model at new-game time, pre-filled from the last
@@ -155,11 +179,20 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([getModels(connection), getNewGameDefaults(connection)])
-      .then(([modelsResult, defaults]) => {
+    Promise.all([
+      getModels(connection),
+      getNewGameDefaults(connection),
+      // #172: installed ComfyUI checkpoints + local video models, so the engine's
+      // model pickers can populate. Both resolve to [] when grok/unreachable.
+      getImageModels(connection).catch(() => [] as string[]),
+      getVideoModels(connection).catch(() => [] as VideoModelInfo[]),
+    ])
+      .then(([modelsResult, defaults, imgModels, vidModels]) => {
         if (cancelled) return;
         setModels(modelsResult.models);
         setProviders(modelsResult.providers);
+        setImageModels(imgModels);
+        setVideoModels(vidModels);
         // Pre-fill every dial from the last game's settings, falling back to the
         // neutral scaffold defaults when a field — or the whole last game — is
         // absent (a fresh install with no prior campaign).
@@ -178,6 +211,14 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
         setGenerateVideos(defaults.generateVideos ?? false);
         setArtStyle(defaults.artStyle ?? "");
         setAutoRollDice(defaults.autoRollDice ?? true);
+        // #172: pre-fill the engine dials from the last game / account defaults.
+        setImageProvider(defaults.imageProvider ?? "grok");
+        setImageQuality(defaults.imageQuality ?? "standard");
+        setImageSeed(defaults.imageSeed ?? null);
+        setImageModel(defaults.imageModel ?? "");
+        setNegativePrompt(defaults.negativePrompt ?? "");
+        setVideoProvider(defaults.videoProvider ?? "grok");
+        setVideoModel(defaults.videoModel ?? "ltxv");
         if (defaults.contentIntensity) setContentIntensity(defaults.contentIntensity);
         if (defaults.responseLength) setResponseLength(defaults.responseLength);
         if (defaults.toneWhimsy !== undefined) setToneWhimsy(defaults.toneWhimsy);
@@ -333,9 +374,19 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
       contentIntensity,
       responseLength,
       toneWhimsy,
+      // #172: send the engine dials explicitly so the new game stores its own copy
+      // (same "complete copy" philosophy as the other dials). Enums always; strings
+      // omitted-when-blank; seed sent only when pinned.
+      imageProvider,
+      imageQuality,
+      videoProvider,
+      videoModel,
     };
     if (artStyle.trim()) settings.artStyle = artStyle.trim();
     if (worldSetting.trim()) settings.worldSetting = worldSetting.trim();
+    if (imageModel.trim()) settings.imageModel = imageModel.trim();
+    if (negativePrompt.trim()) settings.negativePrompt = negativePrompt.trim();
+    if (typeof imageSeed === "number") settings.imageSeed = imageSeed;
     // ADR-0018: seed the new campaign with the chosen engine + model. The server
     // validates that model belongs to provider.
     if (provider) settings.provider = provider;
@@ -669,21 +720,35 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
         <ToggleRow
           testId="newchar-images-toggle"
           title="Generate scene art"
-          description="Off by default · needs Grok Build configured"
+          description="Off by default · Grok Build or a local ComfyUI engine"
           checked={generateImages}
           onChange={setGenerateImages}
         />
         {generateImages && (
-          <ToggleRow
-            testId="newchar-auto-illustrate-toggle"
-            title="Auto-illustrate each turn"
-            description="Draws every DM reply · the image appears a moment after the text"
-            checked={autoIllustrateTurns}
-            onChange={setAutoIllustrateTurns}
-            containerStyle={{ marginTop: 8 }}
-          />
+          <>
+            <ToggleRow
+              testId="newchar-auto-illustrate-toggle"
+              title="Auto-illustrate each turn"
+              description="Draws every DM reply · the image appears a moment after the text"
+              checked={autoIllustrateTurns}
+              onChange={setAutoIllustrateTurns}
+              containerStyle={{ marginTop: 8 }}
+            />
+            {/* #172: engine + quality, same controls as Game Settings. */}
+            <ImageProviderPicker value={imageProvider} onChange={setImageProvider} />
+            <ImageQualityPicker value={imageQuality} onChange={setImageQuality} />
+          </>
         )}
         <ArtStylePicker artStyle={artStyle} onChange={setArtStyle} />
+        {generateImages && (
+          <>
+            <NegativePromptField value={negativePrompt} onChange={setNegativePrompt} />
+            <SeedField value={imageSeed} onChange={setImageSeed} />
+            {imageModels.length > 0 && (
+              <ModelPicker value={imageModel} models={imageModels} onChange={setImageModel} />
+            )}
+          </>
+        )}
         <ToggleRow
           testId="newchar-dice-toggle"
           title="Auto-roll dice"
@@ -697,11 +762,21 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
         <ToggleRow
           testId="newchar-videos-toggle"
           title="Enable video clips"
-          description="Off by default · needs Grok Build · adds an “Animate” button to stills"
+          description="Off by default · adds an “Animate” button to stills · Grok or local ComfyUI"
           checked={generateVideos}
           onChange={setGenerateVideos}
           containerStyle={{ marginTop: 8 }}
         />
+        {generateVideos && (
+          <div style={{ marginTop: 8, padding: "11px 14px", borderRadius: 4, background: "rgba(28,20,12,.4)", border: "1px solid rgba(109,90,56,.3)" }}>
+            {/* #172: video engine + model, same controls as Game Settings (duration/
+                resolution/aspect stay in Settings — here it's just who animates + which model). */}
+            <VideoProviderPicker value={videoProvider} onChange={setVideoProvider} />
+            {videoProvider === "local" && (
+              <VideoModelPicker value={videoModel} models={videoModels} onChange={setVideoModel} />
+            )}
+          </div>
+        )}
 
         {/* Issue #48: describe the world at creation, not only later in Settings. */}
         <div style={{ fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: 2, color: "var(--brass)", margin: "26px 0 2px" }}>

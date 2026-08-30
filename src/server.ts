@@ -292,6 +292,66 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
   });
 }
 
+/** #172: validate the image/video ENGINE fields — negativePrompt, imageModel,
+ * imageSeed, imageProvider, imageQuality, videoProvider, videoModel. Shared by the
+ * account-defaults PATCH (parseDefaultSettings) and the create route (POST /campaigns)
+ * so both accept the identical values with identical messages — one source of truth.
+ * Only provided fields are validated; returns the validated subset or an error. */
+function parseEngineSettings(
+  body: Record<string, unknown>
+): { value: Record<string, unknown> } | { error: string } {
+  const out: Record<string, unknown> = {};
+  // #154: user-editable image negative prompt (string; "" clears it downstream).
+  if (body.negativePrompt !== undefined) {
+    if (typeof body.negativePrompt !== "string") return { error: "negativePrompt must be a string" };
+    out.negativePrompt = body.negativePrompt;
+  }
+  // #154: default local checkpoint name (string; "" clears it).
+  if (body.imageModel !== undefined) {
+    if (typeof body.imageModel !== "string") return { error: "imageModel must be a string" };
+    out.imageModel = body.imageModel;
+  }
+  // #154: seed override — a finite non-negative number pins it; null clears it (→ deterministic).
+  if (body.imageSeed !== undefined) {
+    if (body.imageSeed === null) {
+      out.imageSeed = null;
+    } else if (typeof body.imageSeed !== "number" || !Number.isFinite(body.imageSeed) || body.imageSeed < 0) {
+      return { error: "imageSeed must be a non-negative number or null" };
+    } else {
+      out.imageSeed = Math.floor(body.imageSeed);
+    }
+  }
+  // ADR-0027: which image engine (grok | local).
+  if (body.imageProvider !== undefined) {
+    if (!isValidImageProvider(body.imageProvider)) {
+      return { error: `imageProvider must be one of ${IMAGE_PROVIDERS.join(", ")}` };
+    }
+    out.imageProvider = body.imageProvider;
+  }
+  // ADR-0029: which local quality tier (fast | standard | high).
+  if (body.imageQuality !== undefined) {
+    if (!isValidImageQuality(body.imageQuality)) {
+      return { error: `imageQuality must be one of ${IMAGE_QUALITIES.join(", ")}` };
+    }
+    out.imageQuality = body.imageQuality;
+  }
+  // ADR-0034: which video engine (grok | local).
+  if (body.videoProvider !== undefined) {
+    if (!isValidVideoProvider(body.videoProvider)) {
+      return { error: `videoProvider must be one of ${VIDEO_PROVIDERS.join(", ")}` };
+    }
+    out.videoProvider = body.videoProvider;
+  }
+  // ADR-0035: which local video model (wan-5b | ltxv).
+  if (body.videoModel !== undefined) {
+    if (!isAnimateModel(body.videoModel)) {
+      return { error: `videoModel must be one of ${ANIMATE_MODELS.join(", ")}` };
+    }
+    out.videoModel = body.videoModel;
+  }
+  return { value: out };
+}
+
 /** ADR-0019: validate a user's *default* settings patch (POST /me/settings).
  * Unlike a campaign's POST /settings, this accepts `model` and `provider` too,
  * because a user's defaults seed a new campaign's model/provider. Returns the
@@ -318,26 +378,6 @@ function parseDefaultSettings(
   if (body.artStyle !== undefined) {
     if (typeof body.artStyle !== "string") return { error: "artStyle must be a string" };
     out.artStyle = body.artStyle;
-  }
-  // #154: user-editable image negative prompt (string; "" clears it in writeUserSettings).
-  if (body.negativePrompt !== undefined) {
-    if (typeof body.negativePrompt !== "string") return { error: "negativePrompt must be a string" };
-    out.negativePrompt = body.negativePrompt;
-  }
-  // #154: default local checkpoint name (string; "" clears it).
-  if (body.imageModel !== undefined) {
-    if (typeof body.imageModel !== "string") return { error: "imageModel must be a string" };
-    out.imageModel = body.imageModel;
-  }
-  // #154: seed override — a finite non-negative number pins it; null clears it (→ deterministic).
-  if (body.imageSeed !== undefined) {
-    if (body.imageSeed === null) {
-      out.imageSeed = null;
-    } else if (typeof body.imageSeed !== "number" || !Number.isFinite(body.imageSeed) || body.imageSeed < 0) {
-      return { error: "imageSeed must be a non-negative number or null" };
-    } else {
-      out.imageSeed = Math.floor(body.imageSeed);
-    }
   }
   if (body.worldSetting !== undefined) {
     if (typeof body.worldSetting !== "string") return { error: "worldSetting must be a string" };
@@ -373,37 +413,12 @@ function parseDefaultSettings(
       out[key] = body[key];
     }
   }
-  // ADR-0027: which image engine this account defaults to (grok | local),
-  // live-resolved (never copy-on-create), same as it flows on a campaign.
-  if (body.imageProvider !== undefined) {
-    if (!isValidImageProvider(body.imageProvider)) {
-      return { error: `imageProvider must be one of ${IMAGE_PROVIDERS.join(", ")}` };
-    }
-    out.imageProvider = body.imageProvider;
-  }
-  // ADR-0029: which local quality tier this account defaults to (fast|standard|high),
-  // live-resolved (never copy-on-create), same as it flows on a campaign.
-  if (body.imageQuality !== undefined) {
-    if (!isValidImageQuality(body.imageQuality)) {
-      return { error: `imageQuality must be one of ${IMAGE_QUALITIES.join(", ")}` };
-    }
-    out.imageQuality = body.imageQuality;
-  }
-  // ADR-0034: which video engine this account defaults to (grok | local),
-  // live-resolved (never copy-on-create), same as it flows on a campaign.
-  if (body.videoProvider !== undefined) {
-    if (!isValidVideoProvider(body.videoProvider)) {
-      return { error: `videoProvider must be one of ${VIDEO_PROVIDERS.join(", ")}` };
-    }
-    out.videoProvider = body.videoProvider;
-  }
-  // ADR-0035: which local video model this account defaults to (wan-5b | ltxv).
-  if (body.videoModel !== undefined) {
-    if (!isAnimateModel(body.videoModel)) {
-      return { error: `videoModel must be one of ${ANIMATE_MODELS.join(", ")}` };
-    }
-    out.videoModel = body.videoModel;
-  }
+  // #172: image/video engine fields (negativePrompt, imageModel, imageSeed,
+  // imageProvider, imageQuality, videoProvider, videoModel) — validated by the shared
+  // parseEngineSettings so the account PATCH and the create route stay identical.
+  const engine = parseEngineSettings(body);
+  if ("error" in engine) return engine;
+  Object.assign(out, engine.value);
   // ADR-0020: music is stored under a `music` key. The Navidrome credentials are
   // deliberately NOT accepted here — they stay server-side in .env; a user may
   // only override enabled/source/URL/playlist (validated by parseMusicBlock,
@@ -1036,6 +1051,15 @@ const ROUTES: Array<{
         }
         creationSettings.generateVideos = creation.generateVideos;
       }
+      // #172: image/video engine dials chosen on the New Game screen — same fields +
+      // validation as the account-defaults PATCH (parseEngineSettings), so a new game
+      // can start on local ComfyUI with a chosen checkpoint instead of the default.
+      const engine = parseEngineSettings(creation);
+      if ("error" in engine) {
+        sendJson(res, 400, { error: engine.error });
+        return;
+      }
+      Object.assign(creationSettings, engine.value);
 
       const campaignId = deriveCampaignId(String(sheet.name), (id) =>
         fs.existsSync(path.join(userCampaignsRoot(userId), id))

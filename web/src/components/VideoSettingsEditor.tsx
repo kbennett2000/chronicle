@@ -40,6 +40,92 @@ const chipStyle = (selected: boolean) => ({
   color: selected ? "#0b1220" : "var(--ink-dim)",
 });
 
+/** ADR-0034: which engine animates a clip — cloud Grok or local ComfyUI. Standalone
+ * so both this composite editor and the New Game screen render the identical picker.
+ * `value`/`onChange` (not onPatch) to match the image `*Picker` components. */
+export function VideoProviderPicker({
+  value,
+  onChange,
+}: {
+  value: "grok" | "local";
+  onChange: (next: "grok" | "local") => void;
+}) {
+  return (
+    <>
+      <div style={{ fontSize: 12, color: "var(--ink-dim)", marginBottom: 7 }}>
+        Video engine <span style={{ color: "var(--ink-faint)" }}>— who animates the clip</span>
+      </div>
+      <div style={{ display: "flex", gap: 7, marginBottom: 4 }}>
+        {([
+          { id: "grok", label: "Grok Imagine", hint: "cloud · the grok CLI" },
+          { id: "local", label: "Local · ComfyUI", hint: "your GPU · Wan / LTX-Video" },
+        ] as const).map((o) => {
+          const active = value === o.id;
+          return (
+            <button
+              key={o.id}
+              data-testid="video-provider-option"
+              data-provider={o.id}
+              data-selected={active}
+              onClick={() => onChange(o.id)}
+              style={{
+                flex: 1,
+                cursor: "pointer",
+                padding: "9px 12px",
+                borderRadius: 4,
+                textAlign: "left",
+                color: active ? "var(--ink)" : "var(--ink-faint)",
+                background: active ? "rgba(52,74,124,.3)" : "rgba(28,20,12,.5)",
+                border: `1px solid ${active ? "rgba(120,150,211,.55)" : "rgba(109,90,56,.32)"}`,
+              }}
+            >
+              <div style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 13 }}>{o.label}</div>
+              <div style={{ fontSize: 10, color: "var(--ink-faint)", marginTop: 2 }}>{o.hint}</div>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+/** ADR-0035: pick the local video model. Renders nothing when the list is empty (the
+ * caller also gates on the engine being local). Standalone for reuse on New Game. */
+export function VideoModelPicker({
+  value,
+  models,
+  onChange,
+}: {
+  value: VideoModelInfo["model"];
+  models: VideoModelInfo[];
+  onChange: (next: VideoModelInfo["model"]) => void;
+}) {
+  if (models.length === 0) return null;
+  return (
+    <>
+      <div style={{ fontSize: 12, color: "var(--ink-dim)", margin: "14px 0 7px" }}>
+        Local model <span style={{ color: "var(--ink-faint)" }}>— LTX-Video is lighter; Wan is heavier</span>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {models.map((m) => (
+          <button
+            key={m.model}
+            data-testid="video-model"
+            data-model={m.model}
+            data-selected={value === m.model}
+            onClick={() => onChange(m.model)}
+            title={m.ready ? "Installed on the ComfyUI host" : "Model files not installed — run its fetch script"}
+            style={chipStyle(value === m.model)}
+          >
+            {m.label}
+            {!m.ready && <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.8 }}>· not installed</span>}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export function VideoSettingsEditor({ value, effective, videoModels = [], onPatch }: VideoSettingsEditorProps) {
   // The value a control shows: the stored per-game/account override if present,
   // else the effective resolved value, else the code default.
@@ -69,64 +155,10 @@ export function VideoSettingsEditor({ value, effective, videoModels = [], onPatc
           data-testid="video-params"
           style={{ marginTop: 8, padding: "11px 14px", borderRadius: 4, background: "rgba(28,20,12,.4)", border: "1px solid rgba(109,90,56,.3)" }}
         >
-          {/* ADR-0034: which engine animates — cloud Grok or local ComfyUI. */}
-          <div style={{ fontSize: 12, color: "var(--ink-dim)", marginBottom: 7 }}>
-            Video engine <span style={{ color: "var(--ink-faint)" }}>— who animates the clip</span>
-          </div>
-          <div style={{ display: "flex", gap: 7, marginBottom: 4 }}>
-            {([
-              { id: "grok", label: "Grok Imagine", hint: "cloud · the grok CLI" },
-              { id: "local", label: "Local · ComfyUI", hint: "your GPU · Wan / LTX-Video" },
-            ] as const).map((o) => {
-              const active = provider === o.id;
-              return (
-                <button
-                  key={o.id}
-                  data-testid="video-provider-option"
-                  data-provider={o.id}
-                  data-selected={active}
-                  onClick={() => onPatch({ videoProvider: o.id })}
-                  style={{
-                    flex: 1,
-                    cursor: "pointer",
-                    padding: "9px 12px",
-                    borderRadius: 4,
-                    textAlign: "left",
-                    color: active ? "var(--ink)" : "var(--ink-faint)",
-                    background: active ? "rgba(52,74,124,.3)" : "rgba(28,20,12,.5)",
-                    border: `1px solid ${active ? "rgba(120,150,211,.55)" : "rgba(109,90,56,.32)"}`,
-                  }}
-                >
-                  <div style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 13 }}>{o.label}</div>
-                  <div style={{ fontSize: 10, color: "var(--ink-faint)", marginTop: 2 }}>{o.hint}</div>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* ADR-0035: local video model — shown only for the local engine. */}
-          {provider === "local" && videoModels.length > 0 && (
-            <>
-              <div style={{ fontSize: 12, color: "var(--ink-dim)", margin: "14px 0 7px" }}>
-                Local model <span style={{ color: "var(--ink-faint)" }}>— LTX-Video is lighter; Wan is heavier</span>
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {videoModels.map((m) => (
-                  <button
-                    key={m.model}
-                    data-testid="video-model"
-                    data-model={m.model}
-                    data-selected={videoModel === m.model}
-                    onClick={() => onPatch({ videoModel: m.model })}
-                    title={m.ready ? "Installed on the ComfyUI host" : "Model files not installed — run its fetch script"}
-                    style={chipStyle(videoModel === m.model)}
-                  >
-                    {m.label}
-                    {!m.ready && <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.8 }}>· not installed</span>}
-                  </button>
-                ))}
-              </div>
-            </>
+          {/* ADR-0034/0035: engine + local model — extracted so New Game reuses them. */}
+          <VideoProviderPicker value={provider} onChange={(p) => onPatch({ videoProvider: p })} />
+          {provider === "local" && (
+            <VideoModelPicker value={videoModel} models={videoModels} onChange={(m) => onPatch({ videoModel: m })} />
           )}
 
           {/* Duration */}
