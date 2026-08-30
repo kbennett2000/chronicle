@@ -1,4 +1,5 @@
-import { test, expect } from "./harness";
+import fs from "node:fs";
+import { test, expect, campaignDir } from "./harness";
 import { seedConnection } from "./connection";
 
 test.describe("Home screen — connected state", () => {
@@ -49,6 +50,43 @@ test.describe("Home screen — connected state", () => {
     await page.goto(`${chronicleServer.baseURL}/?campaign=${chronicleServer.campaignId}`);
     await expect(page.getByTestId("auth-submit")).toBeVisible();
     await expect(page.getByTestId("auth-username")).toBeVisible();
+  });
+});
+
+// ADR-0039: the Home card must never render the full "## Current Situation"
+// section as a wall of text, even when the DM has let it grow into a stacked
+// append-only log. summarizeSituation() bounds it to SITUATION_SUMMARY_MAX_CHARS
+// (280) at the derivation site, with a defensive CSS clamp on top.
+test.describe("Home screen — Current Situation is bounded (ADR-0039)", () => {
+  test("a bloated, many-moment situation renders as a short capped summary", async ({
+    page,
+    chronicleServer,
+  }) => {
+    // Overwrite world-state.md with a ted-the-wizard-style bloated section:
+    // 57 stacked beats, oldest first, a unique sentinel on the LAST beat.
+    const beats = Array.from(
+      { length: 57 },
+      (_, i) => `CURRENT MOMENT: beat number ${i} in which a great many words pile up unbounded.`
+    );
+    beats.push("CURRENT MOMENT: ZZLASTBEAT the final appended beat that must be clipped off.");
+    fs.writeFileSync(
+      campaignDir(chronicleServer.campaignId, "world-state.md"),
+      `# World State\n\n## Current Situation\n${beats.join(" ")}\n\n## Locations Visited\n_(none yet)_\n`
+    );
+
+    await seedConnection(page, chronicleServer.baseURL, chronicleServer.token);
+    await page.goto(`${chronicleServer.baseURL}/?campaign=${chronicleServer.campaignId}`);
+
+    const card = page.getByTestId("current-situation");
+    await expect(card).toBeVisible();
+
+    const rendered = (await card.textContent()) ?? "";
+    // Bounded to the cap (280) plus the single-char ellipsis.
+    expect(rendered.length).toBeLessThanOrEqual(281);
+    expect(rendered.endsWith("…")).toBe(true);
+    // The cap keeps the front of the section, so the last appended beat's
+    // sentinel is clipped — the card is never the whole wall.
+    expect(rendered).not.toContain("ZZLASTBEAT");
   });
 });
 

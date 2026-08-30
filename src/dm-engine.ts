@@ -245,9 +245,16 @@ Every turn:
    making change, or narrating that they can't afford it).
 5. world-state.md must always have an up-to-date "Current Situation"
    heading — this is what your narration gets grounded against, not just
-   a history of locations visited. Rewrite it every turn to reflect
-   exactly where ${character.name} is and what's happening right now; never
-   leave it describing a moment that's already passed.
+   a history of locations visited. Keep it SHORT: at most 3-4 sentences
+   (roughly 60 words). Each turn, overwrite this section in its entirety —
+   delete the previous text and write it fresh; never append to it. Do not
+   accumulate a running log of past moments here (no stacked "moment"
+   blocks, no timestamps): it describes only where ${character.name} is and
+   what is happening right now, never a moment that has already passed. Past
+   events belong in the append-only session log (rule 8), places in Locations
+   Visited, and quest progress in quest-log.md — not here. If this section is
+   already longer than that, replace the whole thing with a fresh short
+   summary this turn.
 6. quest-log.md gets the same per-turn update discipline as
    world-state.md: if a turn produces a discovery, complication, or
    progress relevant to an active quest, update that quest's entry in
@@ -514,7 +521,8 @@ Narrate an immersive, present-tense opening that:
   moment), without listing menu-style options.
 
 Before or after narrating, update world-state.md's "## Current Situation"
-section so it reflects this opening. Write only the in-world scene as your
+section so it reflects this opening — write it as a single short present-tense
+summary (3-4 sentences at most), not a log of events. Write only the in-world scene as your
 reply — no preamble, no bookkeeping notes, no meta commentary. Then, as the
 mandatory final line required on every reply (see the OUTPUT FORMAT section),
 append the single [SCENE: ...] caption: a short third-person, present-tense

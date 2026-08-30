@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ApiError, type ConnectionStatus } from "../lib/api";
 import type { Connection } from "../lib/connection";
 import { getState, listCampaigns, startSession, deleteCampaign, type CampaignSummary, type StateSnapshot } from "../lib/campaign";
-import { findMarkdownSection } from "../lib/markdown";
+import { findMarkdownSection, summarizeSituation } from "../lib/markdown";
 import { CURRENT_SITUATION_HEADING } from "../lib/state-headings";
 import { useIsDesktop } from "../lib/useIsDesktop";
 
@@ -148,7 +148,9 @@ export function Home({
   }
 
   const situation =
-    load.status === "ready" ? findMarkdownSection(load.snapshot.worldState, CURRENT_SITUATION_HEADING)?.body : undefined;
+    load.status === "ready"
+      ? summarizeSituation(findMarkdownSection(load.snapshot.worldState, CURRENT_SITUATION_HEADING)?.body ?? "")
+      : undefined;
 
   // ADR-0021: on desktop, cap and center the content so it doesn't stretch
   // edge-to-edge, and trim the phone status-bar top inset.
@@ -265,7 +267,19 @@ export function Home({
                   </div>
                   <div
                     data-testid="current-situation"
-                    style={{ fontSize: 13.5, lineHeight: 1.5, color: "var(--ink-dim)", marginTop: 3, fontStyle: "italic" }}
+                    style={{
+                      fontSize: 13.5,
+                      lineHeight: 1.5,
+                      color: "var(--ink-dim)",
+                      marginTop: 3,
+                      fontStyle: "italic",
+                      // ADR-0039: defensive clamp so even a pathological single
+                      // unbroken line can't wall the card past the text cap.
+                      display: "-webkit-box",
+                      WebkitLineClamp: 4,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
+                    }}
                   >
                     {situation || "No situation recorded yet — the tale hasn't begun."}
                   </div>

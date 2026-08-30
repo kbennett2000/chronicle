@@ -172,10 +172,30 @@ export interface CampaignSummary {
   situation: string;
 }
 
+/** Hard cap (chars) on the flattened "Current Situation" summary (ADR-0039).
+ * The DM prompt asks for a short, rewritten-each-turn summary; this
+ * deterministic backstop guarantees the Home menu can never render a wall of
+ * text even if the model misbehaves and lets the section grow. Mirrored in the
+ * web bundle (web/src/lib/state-headings.ts) because src/ and web/src/ share no
+ * module — the ADR is the authoritative budget for both. */
+export const SITUATION_SUMMARY_MAX_CHARS = 280;
+
+/** Truncate to the summary budget at a word boundary, adding an ellipsis when
+ * cut. Shares its shape with web/src/lib/markdown.ts's summarizeSituation. */
+function capSituation(text: string): string {
+  if (text.length <= SITUATION_SUMMARY_MAX_CHARS) return text;
+  const slice = text.slice(0, SITUATION_SUMMARY_MAX_CHARS);
+  const lastSpace = slice.lastIndexOf(" ");
+  const cut = lastSpace > 0 ? slice.slice(0, lastSpace) : slice;
+  return cut.replace(/[\s.,;:!?-]+$/, "") + "…";
+}
+
 /** Pulls the trimmed body of the "## Current Situation" section out of a
  * world-state.md, for the Home campaign list — a tiny standalone extractor so
- * the server needn't carry the client's full markdown parser. */
-function currentSituation(worldStateMd: string): string {
+ * the server needn't carry the client's full markdown parser. Bounded to
+ * SITUATION_SUMMARY_MAX_CHARS (ADR-0039) so the list endpoint can never ship a
+ * wall of text. Exported for tests/current-situation.test.ts. */
+export function currentSituation(worldStateMd: string): string {
   const lines = worldStateMd.split(/\r?\n/);
   const start = lines.findIndex((l) => /^##\s+Current Situation\s*$/i.test(l));
   if (start === -1) return "";
@@ -186,7 +206,7 @@ function currentSituation(worldStateMd: string): string {
   }
   const text = body.join(" ").replace(/\s+/g, " ").trim();
   if (!text || /^_\(.*\)_$/.test(text)) return "";
-  return text;
+  return capSituation(text);
 }
 
 export interface CharacterIdentity {

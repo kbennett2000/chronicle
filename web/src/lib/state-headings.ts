@@ -6,6 +6,12 @@
  * If either source drifts, that test fails loudly instead of
  * findMarkdownSection silently returning undefined. */
 export const CURRENT_SITUATION_HEADING = "Current Situation";
+
+/** Hard cap (chars) on the "Current Situation" summary shown on the Home card
+ * (ADR-0039). Mirrors src/campaign-store.ts's SITUATION_SUMMARY_MAX_CHARS —
+ * src/ and web/src/ are separate bundles with no shared module, so the value is
+ * deliberately duplicated; the ADR is the authoritative budget for both. */
+export const SITUATION_SUMMARY_MAX_CHARS = 280;
 export const LOCATIONS_VISITED_HEADING = "Locations Visited";
 export const QUEST_ACTIVE_HEADING = "Active";
 export const QUEST_COMPLETED_HEADING = "Completed";
