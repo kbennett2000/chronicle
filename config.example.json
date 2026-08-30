@@ -27,6 +27,7 @@
     "artStyle": "",
     "negativePrompt": "",
     "imageModel": "",
+    "imageRefinerModel": "",
     "imageSeed": null,
     "worldSetting": "",
     "contentIntensity": "",
