@@ -13,10 +13,20 @@ import {
   listLocalCheckpoints,
   applyImg2Img,
   applyIPAdapter,
+  resolveBaseCheckpoint,
   TIER_CONFIG,
 } from "../src/image-backends/local.js";
 import { STYLE_LORAS } from "../src/image-backends/style-loras.js";
+import { config } from "../src/config.js";
 import type { CampaignSettings } from "../src/campaign-store.js";
+
+// #178: node 4/11 default to config.defaults.imageModel/imageRefinerModel when a campaign
+// pins nothing. config is a FROZEN singleton read from the host's config.json, so the
+// graph-shape tests below compute their expected checkpoint from config (rather than
+// hardcoding the template's baked name) to stay correct on any host; the pure fallback
+// logic is covered directly via resolveBaseCheckpoint.
+const EXPECTED_BASE_CKPT = config.defaults.imageModel?.trim() || "sd_xl_base_1.0.safetensors";
+const EXPECTED_REFINER_CKPT = config.defaults.imageRefinerModel?.trim() || "sd_xl_refiner_1.0.safetensors";
 
 // ADR-0027: the local ComfyUI backend talks to ComfyUI's HTTP API (POST /prompt,
 // poll /history/<id>, GET /view). It takes an injectable fetchFn so the whole
@@ -195,7 +205,7 @@ test("generateLocalImage: unset quality submits today's base graph — steps 25,
     const g = cap.submitted.prompt;
     assert.equal(g["3"].class_type, "KSampler");
     assert.equal(g["3"].inputs.steps, 25);
-    assert.equal(g["4"].inputs.ckpt_name, "sd_xl_base_1.0.safetensors");
+    assert.equal(g["4"].inputs.ckpt_name, EXPECTED_BASE_CKPT);
     // The base template has no refiner checkpoint or second sampler.
     assert.equal(g["11"], undefined);
     assert.equal(g["14"], undefined);
@@ -224,7 +234,7 @@ test("generateLocalImage: high quality submits the refiner ensemble with prompt+
     );
     const g = cap.submitted.prompt;
     // The refiner checkpoint is present (proves the refiner template was selected).
-    assert.equal(g["11"].inputs.ckpt_name, "sd_xl_refiner_1.0.safetensors");
+    assert.equal(g["11"].inputs.ckpt_name, EXPECTED_REFINER_CKPT);
     // ADR-0028 style clause is injected into BOTH the base and refiner encode nodes.
     assert.equal(g["6"].inputs.text, "(stained glass:1.3). a vast hall");
     assert.equal(g["12"].inputs.text, "(stained glass:1.3). a vast hall");
@@ -554,7 +564,7 @@ test("generateLocalImage: imageModel swaps the base checkpoint node; absent keep
       { campaignDir: dir, entityType: "npc", name: "Barrow", description: "a dwarf", settings: INK },
       capturingFetch(cap)
     );
-    assert.equal(cap.submitted.prompt["4"].inputs.ckpt_name, "sd_xl_base_1.0.safetensors");
+    assert.equal(cap.submitted.prompt["4"].inputs.ckpt_name, EXPECTED_BASE_CKPT);
   });
 });
 
@@ -834,4 +844,21 @@ test("generateLocalImage: high quality degrades to base when the refiner checkpo
     assert.equal(g["14"], undefined);
     assert.equal(g["3"].inputs.steps, 40);
   });
+});
+
+// #178: node 4 (base checkpoint) resolution — a campaign's pinned model wins, else the
+// host's configured default (config.defaults.imageModel), else undefined so the workflow
+// template's baked default stands. Pure + injectable config, so no frozen-singleton mutation.
+test("resolveBaseCheckpoint: pinned model wins, else config default, else undefined (#178)", () => {
+  const withImageModel = (imageModel: string) => ({ defaults: { imageModel } });
+  // Pinned per-campaign model wins over the host default.
+  assert.equal(
+    resolveBaseCheckpoint({ imageModel: "ns/pinned.safetensors" }, withImageModel("s/base.safetensors")),
+    "ns/pinned.safetensors"
+  );
+  // No pin → the host's configured default (e.g. a relocated base in a subfolder).
+  assert.equal(resolveBaseCheckpoint({}, withImageModel("s/sd_xl_base_1.0.safetensors")), "s/sd_xl_base_1.0.safetensors");
+  // Neither set → undefined, so the caller leaves the template's baked default in place.
+  assert.equal(resolveBaseCheckpoint({}, withImageModel("")), undefined);
+  assert.equal(resolveBaseCheckpoint({ imageModel: "   " }, withImageModel("  ")), undefined);
 });
