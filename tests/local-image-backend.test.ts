@@ -797,3 +797,41 @@ test("generateLocalImage: preview reflects a promptOverride without rendering (A
     assert.equal(r.previewPrompt, "storm over a black sea");
   });
 });
+
+// #174: High quality runs the base→refiner ensemble. If the refiner checkpoint isn't
+// installed on ComfyUI (e.g. checkpoints were reorganized into a subfolder), ComfyUI
+// used to 400 the whole prompt (prompt_outputs_failed_validation on node "11"). It now
+// degrades to base high-steps instead of hard-failing.
+test("generateLocalImage: high quality degrades to base when the refiner checkpoint isn't installed (#174)", async () => {
+  await withCampaignDir(async (dir) => {
+    const cap: { submitted?: any } = {};
+    const fetchFn = (async (url: string, init?: any) => {
+      if (url.includes("/object_info/CheckpointLoaderSimple")) {
+        // A host with NO refiner checkpoint installed (under any name).
+        return jsonRes(200, {
+          CheckpointLoaderSimple: { input: { required: { ckpt_name: [["ns/base.safetensors"], {}] } } },
+        });
+      }
+      if (url.includes("/prompt")) {
+        cap.submitted = JSON.parse(init.body);
+        return jsonRes(200, { prompt_id: PROMPT_ID });
+      }
+      if (url.includes("/history/")) {
+        return jsonRes(200, {
+          [PROMPT_ID]: { status: { status_str: "success" }, outputs: { "9": { images: [{ filename: "x.png", subfolder: "", type: "output" }] } } },
+        });
+      }
+      return bytesRes(200);
+    }) as unknown as typeof fetch;
+    const r = await generateLocalImage(
+      { campaignDir: dir, entityType: "location", name: "The Hall", description: "a vast hall", settings: UNMAPPED, imageQuality: "high" },
+      fetchFn
+    );
+    assert.equal(r.ok, true);
+    const g = cap.submitted.prompt;
+    // Degraded to the BASE workflow: no refiner checkpoint/sampler nodes, base high-steps.
+    assert.equal(g["11"], undefined);
+    assert.equal(g["14"], undefined);
+    assert.equal(g["3"].inputs.steps, 40);
+  });
+});

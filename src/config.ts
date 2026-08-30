@@ -27,6 +27,11 @@ export interface ConfigDefaults {
   negativePrompt: string;
   /** #154: a default ComfyUI checkpoint (`ckpt_name`) for the local backend; "" = template default. */
   imageModel: string;
+  /** #174: the refiner checkpoint (`ckpt_name`) for High quality's base→refiner ensemble
+   * (node "11"); "" = the template default (`sd_xl_refiner_1.0.safetensors`). Set this when
+   * the refiner lives in a ComfyUI subfolder (e.g. "s/sd_xl_refiner_1.0.safetensors").
+   * When the resolved refiner isn't installed, High degrades to base high-steps. */
+  imageRefinerModel: string;
   /** #154: a default SDXL seed override, or null for the deterministic per-entity seed. */
   imageSeed: number | null;
   worldSetting: string;
@@ -77,6 +82,7 @@ export const CONFIG_DEFAULTS: ChronicleConfig = {
     artStyle: "",
     negativePrompt: "",
     imageModel: "",
+    imageRefinerModel: "",
     imageSeed: null,
     worldSetting: "",
     contentIntensity: "",

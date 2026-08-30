@@ -58,6 +58,11 @@ const WORKFLOWS_DIR = path.resolve(__dirname, "../workflows");
 const BASE_WORKFLOW = "sdxl-txt2img.json";
 const REFINER_WORKFLOW = "sdxl-refiner.json";
 
+/** #174: the refiner checkpoint baked into sdxl-refiner.json's node "11". Used to
+ * probe availability (and as the fallback name when config.defaults.imageRefinerModel
+ * is unset). Keep in sync with the template. */
+const REFINER_CKPT_DEFAULT = "sd_xl_refiner_1.0.safetensors";
+
 /** ADR-0038: sanity cap on an editor full-prompt override. Far above the 500-char
  * assembly cap (SDXL CLIP truncates around 77 tokens anyway) — this only fences off
  * an absurd paste, it isn't a functional limit. */
@@ -411,6 +416,25 @@ export async function generateLocalImage(
     tier = { workflow: BASE_WORKFLOW, steps: 40, timeoutMs: tier.timeoutMs };
   }
 
+  // #174: High quality runs the base→refiner ensemble; its refiner (node "11") loads a
+  // fixed checkpoint. If that checkpoint isn't installed on ComfyUI — e.g. the host
+  // reorganized checkpoints into a subfolder, so the bare "sd_xl_refiner_1.0.safetensors"
+  // no longer resolves — ComfyUI 400s the WHOLE prompt (prompt_outputs_failed_validation).
+  // Degrade to base high-steps instead of hard-failing, matching the LoRA/IP-Adapter
+  // "an enhancement, never a blocker" rule. Only degrade when we can actually see the
+  // checkpoint list (empty = ComfyUI unreachable → let the normal path surface that).
+  if (tier.workflow === REFINER_WORKFLOW) {
+    const refinerCkpt = config.defaults.imageRefinerModel?.trim() || REFINER_CKPT_DEFAULT;
+    const installed = await listLocalCheckpoints(fetchFn);
+    if (installed.length > 0 && !installed.includes(refinerCkpt)) {
+      console.error(
+        `[image-generator] refiner checkpoint "${refinerCkpt}" is not installed on ComfyUI — ` +
+          `falling back to base high-steps (set defaults.imageRefinerModel to its actual path to use the refiner)`
+      );
+      tier = { workflow: BASE_WORKFLOW, steps: 40, timeoutMs: tier.timeoutMs };
+    }
+  }
+
   try {
     // Build the graph from the tier's checked-in template (fresh clone per call).
     const graph = JSON.parse(fs.readFileSync(path.join(WORKFLOWS_DIR, tier.workflow), "utf8")) as Record<
@@ -438,6 +462,12 @@ export async function generateLocalImage(
     // chooses the base SDXL model. No-op when the node or the setting is absent.
     if (settings.imageModel?.trim() && graph["4"]?.inputs) {
       graph["4"].inputs.ckpt_name = settings.imageModel.trim();
+    }
+    // #174: point the refiner checkpoint (node "11", refiner template only) at the
+    // configured file when set, so High quality works on hosts that relocated it (the
+    // degrade above already ran, so if we're still on the refiner tier it's installed).
+    if (config.defaults.imageRefinerModel?.trim() && graph["11"]?.inputs) {
+      graph["11"].inputs.ckpt_name = config.defaults.imageRefinerModel.trim();
     }
     for (const id of ["3", "14"]) setNodeSeed(graph, id, seed);
     // Base-workflow step override (fast/standard); the refiner template bakes its own.
