@@ -63,6 +63,19 @@ const REFINER_WORKFLOW = "sdxl-refiner.json";
  * is unset). Keep in sync with the template. */
 const REFINER_CKPT_DEFAULT = "sd_xl_refiner_1.0.safetensors";
 
+/** #178: the BASE checkpoint (node "4") to render with — a campaign's pinned model wins,
+ * else the host's configured default (config.defaults.imageModel), else undefined so the
+ * workflow template's baked default stands. The config fallback lets a host that relocated
+ * the default SDXL base into a subfolder render EXISTING games that never pinned a model
+ * (config defaults otherwise only seed newly-created campaigns). Config is injectable for
+ * tests (the singleton is frozen). Exported for tests. */
+export function resolveBaseCheckpoint(
+  settings: { imageModel?: string },
+  cfg: { defaults: { imageModel?: string } } = config
+): string | undefined {
+  return settings.imageModel?.trim() || cfg.defaults.imageModel?.trim() || undefined;
+}
+
 /** ADR-0038: sanity cap on an editor full-prompt override. Far above the 500-char
  * assembly cap (SDXL CLIP truncates around 77 tokens anyway) — this only fences off
  * an absurd paste, it isn't a functional limit. */
@@ -457,11 +470,15 @@ export async function generateLocalImage(
     if (settings.negativePrompt?.trim()) {
       for (const id of ["7", "13"]) appendNodeText(graph, id, settings.negativePrompt.trim());
     }
-    // #154: swap the BASE checkpoint (node "4") when the user pinned a model. The
-    // refiner checkpoint (node "11", refiner template only) is left as-is — the picker
-    // chooses the base SDXL model. No-op when the node or the setting is absent.
-    if (settings.imageModel?.trim() && graph["4"]?.inputs) {
-      graph["4"].inputs.ckpt_name = settings.imageModel.trim();
+    // #154/#178: the BASE checkpoint (node "4") — the campaign's pinned model wins, else
+    // the host's configured default (config.defaults.imageModel), else the template's
+    // baked default. The config fallback lets a host that relocated the default SDXL base
+    // into a subfolder (e.g. "s/sd_xl_base_1.0.safetensors") render EXISTING games that
+    // never pinned a model — not just newly-created ones (config defaults only seed new
+    // campaigns at create time). No-op when neither is set.
+    const baseCkpt = resolveBaseCheckpoint(settings);
+    if (baseCkpt && graph["4"]?.inputs) {
+      graph["4"].inputs.ckpt_name = baseCkpt;
     }
     // #174: point the refiner checkpoint (node "11", refiner template only) at the
     // configured file when set, so High quality works on hosts that relocated it (the
