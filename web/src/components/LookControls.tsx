@@ -306,6 +306,60 @@ export function SeedField({ value, onChange }: SeedFieldProps) {
   );
 }
 
+interface TurnsFieldProps {
+  /** The committed interval, or undefined for the default. */
+  value: number | undefined;
+  /** Called on blur with a positive integer. */
+  onChange: (next: number) => void;
+  /** Shown/committed when the field is left blank or unset. */
+  defaultValue?: number;
+  testId?: string;
+}
+
+/** #184 / ADR-0040: a small "every N turns" interval field for auto session
+ * rotation. Owns a text buffer, commits a positive integer on blur, and reverts
+ * unparseable / out-of-range input (min 1). Mirrors SeedField's buffer idiom. */
+export function TurnsField({ value, onChange, defaultValue = 5, testId = "auto-rotate-turns" }: TurnsFieldProps) {
+  const committed = typeof value === "number" ? value : defaultValue;
+  const [buffer, setBuffer] = useState(String(committed));
+  useEffect(() => setBuffer(String(committed)), [committed]);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 10 }}>
+      <span style={{ fontSize: 12, color: "var(--ink-dim)" }}>Start a fresh session every</span>
+      <input
+        value={buffer}
+        inputMode="numeric"
+        onChange={(e) => setBuffer(e.target.value)}
+        onBlur={() => {
+          const n = Number(buffer.trim());
+          if (Number.isFinite(n) && n >= 1) {
+            const floored = Math.floor(n);
+            if (floored !== committed) onChange(floored);
+            setBuffer(String(floored));
+          } else {
+            setBuffer(String(committed));
+          }
+        }}
+        data-testid={testId}
+        style={{
+          width: 58,
+          boxSizing: "border-box",
+          textAlign: "center",
+          background: "rgba(124,61,32,.2)",
+          border: "1px solid rgba(211,112,60,.7)",
+          borderRadius: 8,
+          padding: "7px 8px",
+          color: "var(--ink)",
+          fontFamily: "var(--font-body)",
+          fontSize: 13,
+          outline: "none",
+        }}
+      />
+      <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>turns</span>
+    </div>
+  );
+}
+
 interface ModelPickerProps {
   /** The committed checkpoint name, or "" for the template default. */
   value: string;

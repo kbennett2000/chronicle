@@ -22,6 +22,7 @@ import {
   NegativePromptField,
   SeedField,
   ModelPicker,
+  TurnsField,
 } from "../components/LookControls";
 import { VideoProviderPicker, VideoModelPicker } from "../components/VideoSettingsEditor";
 import { SKILLS } from "../lib/character-derive";
@@ -152,6 +153,9 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
   const [autoIllustrateTurns, setAutoIllustrateTurns] = useState(false);
   const [artStyle, setArtStyle] = useState("");
   const [autoRollDice, setAutoRollDice] = useState(true);
+  // #184 / ADR-0040: auto session rotation — default ON, every 5 turns.
+  const [autoRotateSession, setAutoRotateSession] = useState(true);
+  const [autoRotateTurns, setAutoRotateTurns] = useState(5);
   // Issue #118: opt-in video clips (copy-on-create like generateImages).
   const [generateVideos, setGenerateVideos] = useState(false);
   // #172: full image/video engine parity with Game Settings, chosen at creation and
@@ -211,6 +215,9 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
         setGenerateVideos(defaults.generateVideos ?? false);
         setArtStyle(defaults.artStyle ?? "");
         setAutoRollDice(defaults.autoRollDice ?? true);
+        // #184: auto rotation — absent === on / every 5 turns.
+        setAutoRotateSession(defaults.autoRotateSession ?? true);
+        setAutoRotateTurns(defaults.autoRotateTurns ?? 5);
         // #172: pre-fill the engine dials from the last game / account defaults.
         setImageProvider(defaults.imageProvider ?? "grok");
         setImageQuality(defaults.imageQuality ?? "standard");
@@ -370,6 +377,8 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
       generateImages,
       autoIllustrateTurns,
       autoRollDice,
+      autoRotateSession,
+      autoRotateTurns,
       generateVideos,
       contentIntensity,
       responseLength,
@@ -757,6 +766,19 @@ export function NewCharacter({ connection, onCreated, onCancel }: NewCharacterPr
           onChange={setAutoRollDice}
           containerStyle={{ marginTop: 12 }}
         />
+        {/* #184 / ADR-0040: auto session rotation keeps the DM sharp on long
+            chronicles. Default on, every 5 turns; the interval shows when on. */}
+        <ToggleRow
+          testId="newchar-autorotate-toggle"
+          title="Keep the DM fresh automatically"
+          description="On: the DM periodically starts a fresh session so it never gets tired on a long chronicle · your story is always kept"
+          checked={autoRotateSession}
+          onChange={setAutoRotateSession}
+          containerStyle={{ marginTop: 8 }}
+        />
+        {autoRotateSession && (
+          <TurnsField testId="newchar-autorotate-turns" value={autoRotateTurns} onChange={setAutoRotateTurns} />
+        )}
         {/* Issue #118: opt-in video clips. Length/resolution/shape are tuned in
             Settings; here it's just the on/off (copy-on-create like scene art). */}
         <ToggleRow

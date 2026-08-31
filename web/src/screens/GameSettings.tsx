@@ -14,6 +14,7 @@ import {
   type VideoModelInfo,
 } from "../lib/campaign";
 import { EnginePicker } from "../components/EnginePicker";
+import { ToggleRow, TurnsField } from "../components/LookControls";
 import { LookSettingsEditor } from "../components/LookSettingsEditor";
 import { WorldSettingsEditor } from "../components/WorldSettingsEditor";
 import { MusicOverrideEditor } from "../components/MusicOverrideEditor";
@@ -88,6 +89,8 @@ export function GameSettings({ connection, campaignId, onBack }: GameSettingsPro
 
   const [lookSave, setLookSave] = useState<SaveState>("idle");
   const [worldSave, setWorldSave] = useState<SaveState>("idle");
+  // #184: auto session-rotation controls save-state (shares patchSettings).
+  const [autoRotateSave, setAutoRotateSave] = useState<SaveState>("idle");
   const [videoSave, setVideoSave] = useState<SaveState>("idle");
   // ADR-0040: session rotation control. "confirm" gates the actual reset behind a
   // second click so an accidental tap can't rotate mid-story.
@@ -262,6 +265,29 @@ export function GameSettings({ connection, campaignId, onBack }: GameSettingsPro
                 back-and-forth and lets the DM pick up sharp again from your saved story — your
                 character, world, NPCs, and quests are all kept.
               </div>
+
+              {/* #184 / ADR-0040: automatic rotation — the set-and-forget version of the
+                  manual button below. Default ON (absent === on). */}
+              <ToggleRow
+                testId="auto-rotate-toggle"
+                title="Keep the DM fresh automatically"
+                description="On: the DM quietly starts a fresh session on a set cadence · Off: only when you tap the button"
+                checked={settings.autoRotateSession !== false}
+                onChange={(next) => patchSettings({ autoRotateSession: next }, setAutoRotateSave)}
+                containerStyle={{ marginBottom: 4 }}
+              />
+              {settings.autoRotateSession !== false && (
+                <TurnsField
+                  value={settings.autoRotateTurns}
+                  onChange={(turns) => patchSettings({ autoRotateTurns: turns }, setAutoRotateSave)}
+                />
+              )}
+              <div data-testid="auto-rotate-save-status" style={{ fontSize: 11, color: "var(--ink-faint)", margin: "6px 0 14px" }}>
+                {autoRotateSave === "saving" && "Saving…"}
+                {autoRotateSave === "saved" && "Saved for this game."}
+                {autoRotateSave === "error" && "Couldn't save — try again."}
+              </div>
+
               {rotateState === "done" ? (
                 <div data-testid="rotate-session-done" style={{ fontSize: 12, color: "var(--brass)", lineHeight: 1.55 }}>
                   Fresh session ready. The DM will pick up right where you left off on your next action.

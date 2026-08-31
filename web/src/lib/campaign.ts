@@ -152,6 +152,12 @@ export interface CampaignSettings {
   /** Issue #56: absent === off. When on, the app illustrates every DM response
    * automatically. Only meaningful when generateImages is on. */
   autoIllustrateTurns?: boolean;
+  /** Issue #184 / ADR-0040: absent === ON. When on, the DM automatically starts a
+   * fresh session every `autoRotateTurns` turns (default 5) to cure long-campaign
+   * drift. Explicit false disables it (the manual button still works). */
+  autoRotateSession?: boolean;
+  /** Issue #184 / ADR-0040: turns between automatic fresh sessions. Absent === 5. */
+  autoRotateTurns?: number;
   /** Issue #109: a per-game music override. Absent === this game tracks the
    * user's account default (which itself falls back to `.env`). Only the
    * client-safe fields are stored — never Navidrome credentials. */
@@ -345,6 +351,10 @@ export interface CampaignCreationSettings {
   artStyle?: string;
   autoIllustrateTurns?: boolean;
   autoRollDice?: boolean;
+  /** Issue #184 / ADR-0040: auto session-rotation dials, copy-on-create. Absent
+   * keeps the server defaults (ON, every 5 turns). */
+  autoRotateSession?: boolean;
+  autoRotateTurns?: number;
   /** Issue #118: copy-on-create like generateImages (the video *params* are
    * live-tracked from account defaults, so they are not sent here). */
   generateVideos?: boolean;
