@@ -1,0 +1,48 @@
+# Chronicle DM engine — systemd *user* service (recommended for a home host).
+#
+# Runs `npm start` (build-free `tsx src/server.ts`) as YOUR login user, so the
+# nvm-managed node, ~/.claude (Claude login) + ~/.grok (image auth), and the
+# home-directory campaign data all resolve naturally — none of the system-unit
+# node-invisibility / permission caveats. See deploy/README.md.
+#
+# Install (no sudo needed except the one-time linger enable):
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/chronicle.user.service ~/.config/systemd/user/chronicle.service
+#   # edit WorkingDirectory below to your checkout's absolute path
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now chronicle
+#   sudo loginctl enable-linger "$USER"   # start at boot without an interactive login
+#
+# Config (ADR-0033/0041): host/port come from the repo's config.json
+# (`server.host` / `server.port`) — env vars are ignored. For LAN access set
+# host "0.0.0.0" (or the host's LAN IP) and a port such as 9999. If a host
+# firewall (ufw) is active, allow that port on the LAN interface.
+
+[Unit]
+Description=Chronicle solo D&D DM engine (user service)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Absolute path to the repo checkout.
+WorkingDirectory=<ABSOLUTE_PATH_TO>/chronicle
+
+# A login shell (`bash -lc`) sources your profile so nvm's node/npm is on PATH —
+# robust against the exact nvm node version changing on upgrade (no hardcoded
+# ~/.nvm/versions/node/<ver> path). `npm start` runs `tsx src/server.ts` directly,
+# so a restart always runs the latest src/. The web UI is served from the
+# committed public/ bundle (rebuilt + committed with front-end changes, not on start).
+ExecStart=/bin/bash -lc 'npm start'
+
+# The server drains in-flight turns on SIGTERM (server.ts gracefulShutdown),
+# which can hold a socket open for a long agent run — give it room.
+TimeoutStopSec=45
+
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

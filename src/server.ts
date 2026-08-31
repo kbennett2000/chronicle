@@ -32,6 +32,7 @@ import {
   isEngineChangeLocked,
   readCampaignSettings,
   persistCampaignSettings,
+  shouldAutoRotate,
   newGameDefaultSettings,
   scaffoldCampaign,
   deleteCampaign,
@@ -408,11 +409,22 @@ function parseDefaultSettings(
     }
     out.responseLength = body.responseLength;
   }
-  for (const key of ["generateImages", "autoRollDice", "autoIllustrateTurns", "generateVideos"] as const) {
+  for (const key of ["generateImages", "autoRollDice", "autoIllustrateTurns", "autoRotateSession", "generateVideos"] as const) {
     if (body[key] !== undefined) {
       if (typeof body[key] !== "boolean") return { error: `${key} must be a boolean` };
       out[key] = body[key];
     }
+  }
+  // #184: turns-between-auto-rotations account default (ADR-0040).
+  if (body.autoRotateTurns !== undefined) {
+    if (
+      typeof body.autoRotateTurns !== "number" ||
+      !Number.isFinite(body.autoRotateTurns) ||
+      body.autoRotateTurns < 1
+    ) {
+      return { error: "autoRotateTurns must be a number >= 1" };
+    }
+    out.autoRotateTurns = Math.floor(body.autoRotateTurns);
   }
   // #172: image/video engine fields (negativePrompt, imageModel, imageSeed,
   // imageProvider, imageQuality, videoProvider, videoModel) — validated by the shared
@@ -1044,6 +1056,25 @@ const ROUTES: Array<{
         }
         creationSettings.autoRollDice = creation.autoRollDice;
       }
+      // #184: auto session rotation dials chosen on the New Game screen (ADR-0040).
+      if (creation.autoRotateSession !== undefined) {
+        if (typeof creation.autoRotateSession !== "boolean") {
+          sendJson(res, 400, { error: "autoRotateSession must be a boolean" });
+          return;
+        }
+        creationSettings.autoRotateSession = creation.autoRotateSession;
+      }
+      if (creation.autoRotateTurns !== undefined) {
+        if (
+          typeof creation.autoRotateTurns !== "number" ||
+          !Number.isFinite(creation.autoRotateTurns) ||
+          creation.autoRotateTurns < 1
+        ) {
+          sendJson(res, 400, { error: "autoRotateTurns must be a number >= 1" });
+          return;
+        }
+        creationSettings.autoRotateTurns = Math.floor(creation.autoRotateTurns);
+      }
       // #118: generateVideos is a copy-on-create boolean like generateImages.
       if (creation.generateVideos !== undefined) {
         if (typeof creation.generateVideos !== "boolean") {
@@ -1344,6 +1375,25 @@ const ROUTES: Array<{
         // player turn.
         if (!result.isError && !sceneCaption) {
           await backfillSceneCaption(active, campaignDir, settings, result.sessionId, record.turnIndex);
+        }
+
+        // #184 / ADR-0040: automatic session rotation. After a successful turn —
+        // and after any same-session caption backfill above, which needs the live
+        // session — drop the SDK session every `autoRotateTurns` turns so the NEXT
+        // turn re-primes from the state files via catchUpDirective. This is the
+        // automatic counterpart to the manual /session/refresh control and cures
+        // long-campaign drift from an unbounded resumed transcript. Keying off the
+        // running total is safe because the transcript is continuous across
+        // rotations (a manual rotation between multiples is harmless).
+        if (!result.isError) {
+          const totalTurns = priorTurns + 1;
+          if (shouldAutoRotate(totalTurns, settings)) {
+            active.sessionId = undefined;
+            clearPersistedSessionId(campaignDir);
+            console.log(
+              `[${campaignId}] auto-rotate: fresh session on next turn (after ${totalTurns} turns)`
+            );
+          }
         }
       } finally {
         // Always clear the single-flight lock — on success, on a 502 engine
@@ -1663,6 +1713,8 @@ const ROUTES: Array<{
         generateImages?: boolean;
         autoRollDice?: boolean;
         autoIllustrateTurns?: boolean;
+        autoRotateSession?: boolean;
+        autoRotateTurns?: number;
         generateVideos?: boolean;
         music?: UserMusic | null;
         video?: UserVideo | null;
@@ -1765,6 +1817,25 @@ const ROUTES: Array<{
           return;
         }
         updates.autoIllustrateTurns = body.autoIllustrateTurns;
+      }
+      // #184: auto session rotation (ADR-0040).
+      if (body.autoRotateSession !== undefined) {
+        if (typeof body.autoRotateSession !== "boolean") {
+          sendJson(res, 400, { error: "autoRotateSession must be a boolean" });
+          return;
+        }
+        updates.autoRotateSession = body.autoRotateSession;
+      }
+      if (body.autoRotateTurns !== undefined) {
+        if (
+          typeof body.autoRotateTurns !== "number" ||
+          !Number.isFinite(body.autoRotateTurns) ||
+          body.autoRotateTurns < 1
+        ) {
+          sendJson(res, 400, { error: "autoRotateTurns must be a number >= 1" });
+          return;
+        }
+        updates.autoRotateTurns = Math.floor(body.autoRotateTurns);
       }
       if (body.generateVideos !== undefined) {
         if (typeof body.generateVideos !== "boolean") {

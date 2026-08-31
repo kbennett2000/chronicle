@@ -486,6 +486,10 @@ export type ResponseLength = "concise" | "standard" | "detailed";
 export const RESPONSE_LENGTHS: ResponseLength[] = ["concise", "standard", "detailed"];
 export const DEFAULT_RESPONSE_LENGTH: ResponseLength = "detailed";
 
+/** Issue #184 / ADR-0040: turns between automatic fresh sessions when
+ * `autoRotateSession` is on but `autoRotateTurns` is unset. */
+export const DEFAULT_AUTO_ROTATE_TURNS = 5;
+
 export interface CampaignSettings {
   model: ModelId;
   /** ADR-0018: which engine runs the DM. Like `model`, this is read-only via
@@ -541,6 +545,17 @@ export interface CampaignSettings {
    * false (absent) and is only meaningful when `generateImages` is on — it
    * needs Grok Build configured just the same. */
   autoIllustrateTurns?: boolean;
+  /** Issue #184 / ADR-0040: when on (the default — treat absent as ON), the DM
+   * engine automatically starts a fresh SDK session every `autoRotateTurns`
+   * turns, re-priming from the state files via catchUpDirective. This is the
+   * automatic counterpart to the manual "Start a fresh session" control; it
+   * cures long-campaign drift from an unbounded resumed transcript. Explicit
+   * false disables auto-rotation (manual rotation still available). */
+  autoRotateSession?: boolean;
+  /** Issue #184 / ADR-0040: how many turns between automatic fresh sessions when
+   * `autoRotateSession` is on. Absent is treated as DEFAULT_AUTO_ROTATE_TURNS
+   * (5) at consumption time. A finite integer >= 1. */
+  autoRotateTurns?: number;
   /** Issue #109 / ADR-0020: an optional per-game music override. Absent means the
    * game tracks the user's account default (which itself falls back to `.env`);
    * present fields win over the user default via resolveMusicConfig. Credentials
@@ -626,6 +641,20 @@ export function readCampaignSettings(campaignDir: string): CampaignSettings {
   if (typeof raw.autoIllustrateTurns === "boolean") {
     settings.autoIllustrateTurns = raw.autoIllustrateTurns;
   }
+  // #184: absent === ON (default-on convention, like autoRollDice); only an
+  // explicit boolean is stored, consumers treat absent as ON.
+  if (typeof raw.autoRotateSession === "boolean") {
+    settings.autoRotateSession = raw.autoRotateSession;
+  }
+  // #184: only attach a finite integer >= 1; anything else falls through to
+  // DEFAULT_AUTO_ROTATE_TURNS at consumption time.
+  if (
+    typeof raw.autoRotateTurns === "number" &&
+    Number.isFinite(raw.autoRotateTurns) &&
+    raw.autoRotateTurns >= 1
+  ) {
+    settings.autoRotateTurns = Math.floor(raw.autoRotateTurns);
+  }
   if (typeof raw.generateVideos === "boolean") {
     settings.generateVideos = raw.generateVideos;
   }
@@ -654,6 +683,27 @@ export function readCampaignSettings(campaignDir: string): CampaignSettings {
     }
   }
   return settings;
+}
+
+/** Issue #184 / ADR-0040: given the campaign's TOTAL completed turn count and its
+ * settings, decide whether the DM session should rotate to a fresh one now.
+ *
+ * Auto-rotation is ON unless `autoRotateSession` is explicitly false (absent ===
+ * ON). It fires every `autoRotateTurns` turns (default DEFAULT_AUTO_ROTATE_TURNS),
+ * i.e. whenever `totalTurns` is a positive multiple of the interval. Turn 0 never
+ * rotates. Because the campaign's transcript is continuous across rotations, this
+ * keys off the running total — a manual rotation between multiples is harmless.
+ * Pure and side-effect-free so it can be unit-tested without the HTTP layer. */
+export function shouldAutoRotate(
+  totalTurns: number,
+  settings: Pick<CampaignSettings, "autoRotateSession" | "autoRotateTurns">
+): boolean {
+  if (settings.autoRotateSession === false) return false;
+  const everyN =
+    typeof settings.autoRotateTurns === "number" && settings.autoRotateTurns >= 1
+      ? Math.floor(settings.autoRotateTurns)
+      : DEFAULT_AUTO_ROTATE_TURNS;
+  return totalTurns > 0 && totalTurns % everyN === 0;
 }
 
 /** Merges the given updates onto existing settings. An empty-string

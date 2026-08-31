@@ -9,9 +9,16 @@
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now chronicle
 #
-# Config (host/port/bootstrap account, optional Navidrome creds) is read from the
-# repo's .env via EnvironmentFile — do NOT put secrets in this unit file (it may
-# be world-readable under /etc).
+# NOTE (ADR-0033/0041): configuration is read from the repo's config.json /
+# secrets.json — NOT from environment variables (the config loader ignores env
+# entirely). Set host/port in config.json (`server.host`/`server.port`), e.g.
+# host "0.0.0.0" + port 9999 for LAN access. There is no EnvironmentFile here on
+# purpose; a HOST/PORT env would have no effect.
+#
+# For a single-user home host, prefer the systemd *user* service
+# (deploy/chronicle.user.service) — it runs as your login user so the nvm node,
+# ~/.claude / ~/.grok credentials, and home-directory campaign data all resolve
+# without the system-unit's node-invisibility and permission caveats below.
 
 [Unit]
 Description=Chronicle solo D&D DM engine
@@ -28,12 +35,6 @@ User=<YOUR_UNIX_USER>
 
 # Absolute path to the repo checkout.
 WorkingDirectory=<ABSOLUTE_PATH_TO>/chronicle
-
-# All runtime config lives here (HOST, PORT, BOOTSTRAP_USERNAME/PASSWORD, and
-# any optional DEFAULT_* / NAVIDROME_* values). For LAN access set HOST=0.0.0.0
-# (or the host's LAN IP) in this file — the default 127.0.0.1 is reachable only
-# from the host itself.
-EnvironmentFile=<ABSOLUTE_PATH_TO>/chronicle/.env
 
 # Absolute path to npm. systemd does NOT use your login shell's PATH, so a
 # bare `npm` fails — and nvm-installed node is invisible to systemd entirely.
