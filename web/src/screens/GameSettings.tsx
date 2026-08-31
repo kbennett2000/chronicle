@@ -6,6 +6,7 @@ import {
   getImageModels,
   getVideoModels,
   updateCampaignSettings,
+  refreshSession,
   type CampaignSettings,
   type CampaignSettingsPatch,
   type ModelOption,
@@ -35,6 +36,34 @@ const sectionHeadingStyle = {
   margin: "22px 0 4px",
 } as const;
 
+// ADR-0040: the fresh-session controls follow the app's inline-styled button
+// idiom (see NewCharacter's "BEGIN THE TALE"), not a shared class.
+const rotatePrimaryStyle = {
+  cursor: "pointer",
+  padding: "10px 14px",
+  borderRadius: 3,
+  background: "linear-gradient(180deg,#d8743e,#a8511f)",
+  border: "none",
+  color: "#faf0e2",
+  fontFamily: "var(--font-display)",
+  fontWeight: 700,
+  fontSize: 12.5,
+  letterSpacing: 1.5,
+} as const;
+
+const rotateGhostStyle = {
+  cursor: "pointer",
+  padding: "10px 14px",
+  borderRadius: 3,
+  background: "transparent",
+  border: "1px solid var(--brass-dim)",
+  color: "var(--ink-dim)",
+  fontFamily: "var(--font-display)",
+  fontWeight: 700,
+  fontSize: 12.5,
+  letterSpacing: 1.5,
+} as const;
+
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 /** Issue #114: the in-game settings screen — reached from the gear in Active
@@ -60,6 +89,9 @@ export function GameSettings({ connection, campaignId, onBack }: GameSettingsPro
   const [lookSave, setLookSave] = useState<SaveState>("idle");
   const [worldSave, setWorldSave] = useState<SaveState>("idle");
   const [videoSave, setVideoSave] = useState<SaveState>("idle");
+  // ADR-0040: session rotation control. "confirm" gates the actual reset behind a
+  // second click so an accidental tap can't rotate mid-story.
+  const [rotateState, setRotateState] = useState<"idle" | "confirm" | "rotating" | "done" | "error">("idle");
 
   useEffect(() => {
     let cancelled = false;
@@ -154,6 +186,16 @@ export function GameSettings({ connection, campaignId, onBack }: GameSettingsPro
     }
   }
 
+  async function doRotateSession() {
+    setRotateState("rotating");
+    try {
+      await refreshSession(connection, campaignId);
+      setRotateState("done");
+    } catch {
+      setRotateState("error");
+    }
+  }
+
   const isDesktop = useIsDesktop();
   const columnStyle = isDesktop ? { width: "100%", maxWidth: 720, margin: "0 auto" } : {};
 
@@ -211,6 +253,43 @@ export function GameSettings({ connection, campaignId, onBack }: GameSettingsPro
                   </div>
                 }
               />
+
+              {/* FRESH SESSION — ADR-0040 session rotation */}
+              <div style={sectionHeadingStyle}>THE DUNGEON MASTER</div>
+              <div style={{ fontSize: 11.5, color: "var(--ink-faint)", fontStyle: "italic", marginBottom: 8, lineHeight: 1.55 }}>
+                On a long chronicle the DM can start to feel a little tired or repetitive as the
+                back-and-forth piles up. Starting a fresh session clears that accumulated
+                back-and-forth and lets the DM pick up sharp again from your saved story — your
+                character, world, NPCs, and quests are all kept.
+              </div>
+              {rotateState === "done" ? (
+                <div data-testid="rotate-session-done" style={{ fontSize: 12, color: "var(--brass)", lineHeight: 1.55 }}>
+                  Fresh session ready. The DM will pick up right where you left off on your next action.
+                </div>
+              ) : rotateState === "confirm" ? (
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <button data-testid="rotate-session-confirm" onClick={doRotateSession} style={rotatePrimaryStyle}>
+                    Yes, start a fresh session
+                  </button>
+                  <button onClick={() => setRotateState("idle")} style={rotateGhostStyle}>
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  data-testid="rotate-session"
+                  disabled={rotateState === "rotating"}
+                  onClick={() => setRotateState("confirm")}
+                  style={{ ...rotatePrimaryStyle, opacity: rotateState === "rotating" ? 0.55 : 1 }}
+                >
+                  {rotateState === "rotating" ? "Starting…" : "Start a fresh session"}
+                </button>
+              )}
+              {rotateState === "error" && (
+                <div style={{ fontSize: 11, color: "#c66", marginTop: 6 }}>
+                  Couldn't start a fresh session — finish any in-progress turn and try again.
+                </div>
+              )}
 
               {/* THE LOOK — this game */}
               <div style={sectionHeadingStyle}>THE LOOK</div>

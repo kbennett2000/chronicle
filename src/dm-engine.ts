@@ -532,6 +532,61 @@ ${character.name} is present in this opening, follow it with the optional
 sheet.`;
 }
 
+/** ADR-0040: the director cue for a SESSION ROTATION — starting a fresh SDK
+ * conversation for an already-in-progress campaign and re-priming the DM purely
+ * from the state files, so a long campaign sheds its accumulated (and drift-
+ * inducing) resumed transcript without losing any game state.
+ *
+ * It is the mid-campaign counterpart to `openingDirective`: both are passed to
+ * runTurn as the turn's `userInput` on a fresh (non-resumed) session and both
+ * read the character straight off the sheet. The crucial difference is that this
+ * one must NOT narrate a new opening — the story is already underway. It leans on
+ * `systemPrompt` (present on the fresh session) for all the standard per-turn
+ * rules and supplies only the one thing a fresh session lacks: the knowledge that
+ * there is prior story to reconstruct from files, and that the player's next
+ * action must be answered seamlessly as if play never paused.
+ *
+ * Unlike the opening (a DM-initiated turn-zero with no player action), a rotation
+ * turn both re-primes AND resolves the player's actual next input, so it takes
+ * `playerInput` and composes the two into a single cue. */
+export function catchUpDirective(
+  campaignDir: string,
+  sessionLogPath: string,
+  playerInput: string
+): string {
+  const character = readCharacterIdentity(campaignDir);
+  const stateFilePaths = STATE_FILES.map((f) => path.join(campaignDir, f));
+  const [sheetPath, worldPath, npcPath, questPath] = stateFilePaths;
+  return `This campaign is already in progress — you are picking it up mid-story, not
+starting a new one. Do NOT write an opening scene, do NOT re-introduce the world
+or ${character.name}, and do NOT recap, summarize, or say "welcome back". From
+the player's perspective there is no interruption at all.
+
+Before you narrate anything, silently reconstruct exactly where the story stands
+by reading the persistent state files (these are the source of truth, not your
+memory of this conversation — read them by their full absolute paths):
+- ${worldPath} — read the "## Current Situation" section FIRST; that is the live
+  scene you are resuming into. Note the current location and any in-progress beat.
+- ${sheetPath} — ${character.name}'s current HP, conditions, inventory, currency,
+  spell slots, and per-rest resources.
+- ${npcPath} — who is present or recently involved, and their disposition.
+- ${questPath} — the active quest threads and their current status.
+- the last few entries at the tail of the current session log (${sessionLogPath})
+  — so you continue the immediate moment already in motion, not a stale one.
+
+Then respond to the player's action below, seamlessly continuing from the Current
+Situation as though play never paused. Adjudicate and narrate it exactly as a
+normal turn: apply the world's reaction, update every state file affected by what
+happens this turn, keep world-state.md's "## Current Situation" short and fully
+rewritten (never appended), append this turn's entry to the session log, and end
+with the mandatory [SCENE: ...] caption line (plus the optional [PRESENT: ...]
+line when ${character.name} is on-screen). Write only the in-world scene — no
+preamble, no meta commentary about resuming or reloading.
+
+The player's next action:
+${playerInput}`;
+}
+
 export interface TurnResult {
   text: string;
   sessionId: string | undefined;
@@ -546,6 +601,23 @@ export interface TurnResult {
   /** The model that was requested for this turn (what we passed to query()),
    * so callers can compare requested-vs-actual without re-deriving it. */
   requestedModel: string;
+  /** ADR-0040: token/cost accounting for this turn, read off the SDK `result`
+   * message (which the loop previously discarded). Optional because an errored
+   * or empty stream may never yield a result message. Used by the session-rotation
+   * A/B experiment (scripts/ab-fresh-session.ts) to compare resumed-vs-fresh
+   * context cost, and available for general per-turn cost logging. */
+  usage?: TurnUsage;
+}
+
+/** ADR-0040: the subset of the SDK `result` message's accounting we surface.
+ * Fields mirror the Anthropic usage shape; all optional so a partial/absent
+ * result message degrades gracefully rather than throwing. */
+export interface TurnUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  totalCostUsd?: number;
 }
 
 export async function runTurn(
@@ -559,6 +631,8 @@ export async function runTurn(
 ): Promise<TurnResult> {
   let sessionId: string | undefined;
   let isError = false;
+  // ADR-0040: token/cost accounting from the SDK result message (last one wins).
+  let usage: TurnUsage | undefined;
   // Issue #57: the model the SDK actually ran, read off the raw Anthropic
   // message each assistant turn carries (message.message.model). Last one wins.
   let actualModel: string | undefined;
@@ -720,6 +794,10 @@ export async function runTurn(
       }
     } else if (message.type === "result") {
       sessionId = message.session_id;
+      // ADR-0040: capture token/cost accounting the loop otherwise drops. The
+      // SDK result message carries `usage` (Anthropic shape) and `total_cost_usd`;
+      // read defensively since the shape is provider/version dependent.
+      usage = readResultUsage(message);
       if (message.subtype !== "success") {
         isError = true;
         onText(`\n[DM engine error: ${message.subtype}]\n`);
@@ -744,7 +822,28 @@ export async function runTurn(
   } else {
     console.error(`[dm-engine] model obeyed: "${resolvedModel}"`);
   }
-  return { text, sessionId, isError, model: resolvedModel, requestedModel: model };
+  return { text, sessionId, isError, model: resolvedModel, requestedModel: model, usage };
+}
+
+/** ADR-0040: pull the token/cost accounting out of the SDK `result` message.
+ * The message shape is provider/version dependent (Anthropic nests counts under
+ * `usage`; the SDK adds `total_cost_usd`), so every field is read defensively
+ * and any absent one is simply omitted rather than defaulted to 0 — a missing
+ * count and a genuine zero must not look alike. */
+function readResultUsage(message: unknown): TurnUsage | undefined {
+  if (typeof message !== "object" || message === null) return undefined;
+  const m = message as Record<string, unknown>;
+  const u = (typeof m.usage === "object" && m.usage !== null ? m.usage : {}) as Record<string, unknown>;
+  const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
+  const result: TurnUsage = {
+    inputTokens: num(u.input_tokens),
+    outputTokens: num(u.output_tokens),
+    cacheReadInputTokens: num(u.cache_read_input_tokens),
+    cacheCreationInputTokens: num(u.cache_creation_input_tokens),
+    totalCostUsd: num(m.total_cost_usd),
+  };
+  // Drop the whole thing if the message carried no accounting at all.
+  return Object.values(result).some((v) => v !== undefined) ? result : undefined;
 }
 
 /** Issue #57: the SDK resolves an alias to its dated snapshot id — e.g.

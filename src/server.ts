@@ -3,12 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { openingDirective, modelsMatch } from "./dm-engine.js";
+import { openingDirective, catchUpDirective, modelsMatch } from "./dm-engine.js";
 import { getBackend } from "./backends/index.js";
 import {
   resolveCampaignDir,
   readPersistedSessionId,
   persistSessionId,
+  clearPersistedSessionId,
   resolveSessionLog,
   readStateSnapshot,
   appendTurnTranscript,
@@ -1271,11 +1272,24 @@ const ROUTES: Array<{
           active.sessionProvider === active.provider
             ? active.sessionId
             : undefined;
+        // ADR-0040: when this turn runs on a FRESH SDK session (no resume) but the
+        // campaign already has prior turns, the conversation carries none of the
+        // story — so re-prime the DM from the state files via catchUpDirective
+        // instead of sending the raw player message into a contextless session.
+        // This is the normal path after a manual session rotation (/session/refresh)
+        // and also strengthens the fresh session a mid-campaign model/provider
+        // switch already forces (#57/ADR-0018). On a genuine turn-one (no prior
+        // turns) there is nothing to catch up on, so the raw message is used.
+        const priorTurns = readTurnTranscript(campaignDir, active.sessionLogPath).length;
+        const userInput =
+          resumeSessionId === undefined && priorTurns > 0
+            ? catchUpDirective(campaignDir, active.sessionLogPath, message)
+            : message;
         // ADR-0018: dispatch through the campaign's chosen provider backend.
         const result = await getBackend(active.provider).runTurn({
           campaignDir,
           sessionLogPath: active.sessionLogPath,
-          userInput: message,
+          userInput,
           resumeSessionId,
           model: active.model,
           settings,
@@ -1448,6 +1462,40 @@ const ROUTES: Array<{
         active.settling = undefined;
         settle();
       }
+    },
+  },
+  {
+    // ADR-0040: manual session rotation. Drops the campaign's accumulated SDK
+    // conversation (the resumed transcript that grows unbounded and drives
+    // long-campaign "laziness") WITHOUT losing game state — the state files are
+    // the source of truth (ADR-0001). The NEXT player turn then runs on a fresh
+    // session and re-primes the DM from the files via catchUpDirective (see the
+    // /turns handler's fresh-session branch). Cheap and idempotent: each call
+    // just ensures the next turn starts fresh.
+    method: "POST",
+    pattern: /^\/campaigns\/([^/]+)\/session\/refresh$/,
+    async handler(_req, res, [campaignId], userId) {
+      const campaignDir = resolveCampaignDir(userId, campaignId);
+      const active = activeSessions.get(sessionKey(userId, campaignId));
+      if (!active) {
+        sendJson(res, 409, {
+          error: `no active session for campaign '${campaignId}' — call POST /campaigns/${campaignId}/session/start first`,
+        });
+        return;
+      }
+      if (active.busy) {
+        sendJson(res, 409, {
+          error: `a turn is already in progress for campaign '${campaignId}' — wait for it to finish before starting a fresh session`,
+        });
+        return;
+      }
+      // A campaign that hasn't taken a turn is already on a fresh session; report
+      // rotated:false so the UI can say "nothing to do" rather than imply a reset.
+      const rotated = readTurnTranscript(campaignDir, active.sessionLogPath).length > 0;
+      active.sessionId = undefined;
+      clearPersistedSessionId(campaignDir);
+      console.log(`[${campaignId}] session rotated (fresh conversation on next turn)`);
+      sendJson(res, 200, { campaignId, rotated });
     },
   },
   {
