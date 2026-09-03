@@ -2,6 +2,14 @@
   "name": "chronicle-web",
   "version": "0.1.0",
   "private": true,
+  "description": "Chronicle's mobile-first web client.",
+  "license": "MIT",
+  "author": "Kris Bennett",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kbennett2000/chronicle.git",
+    "directory": "web"
+  },
   "type": "module",
   "engines": {
     "node": ">=22"

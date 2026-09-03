@@ -3,6 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "description": "Mobile-first solo D&D 5e app with a file-backed Claude Agent SDK DM engine.",
+  "license": "MIT",
+  "author": "Kris Bennett",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kbennett2000/chronicle.git"
+  },
+  "homepage": "https://github.com/kbennett2000/chronicle#readme",
+  "bugs": {
+    "url": "https://github.com/kbennett2000/chronicle/issues"
+  },
   "type": "module",
   "engines": {
     "node": ">=22"

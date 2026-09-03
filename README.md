@@ -63,6 +63,18 @@ settings-vs-secrets split, and how to point image generation at a remote GPU hos
 - ⚙️ **[Configuration](docs/configuration.md)** — settings, secrets, and remote GPU hosts
 - 🆘 **[Help & troubleshooting](docs/user-guide/help-and-troubleshooting.md)** — calm fixes for common hiccups
 
+## License
+
+Chronicle is **[MIT licensed](LICENSE)** — free and open source. Take it, fork
+it, change it, sell it; you only have to keep the copyright notice with it.
+
+The one exception is the D&D rules text in `reference/srd/`, which is *System
+Reference Document 5.2* © Wizards of the Coast LLC, used under
+[CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/). It keeps its own
+license and just asks that the attribution stays intact. See
+**[NOTICE](NOTICE)** for the full picture. Chronicle is an independent project
+and is not affiliated with or endorsed by Wizards of the Coast.
+
 ---
 
 Your stories stay safe and private — nothing ever leaves your home network.
