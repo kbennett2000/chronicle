@@ -503,6 +503,33 @@ export function Settings({
           >
             {connectionStatus === "checking" ? "RECONNECTING…" : "SAVE & RECONNECT"}
           </button>
+
+          {/* #188: CC-BY-4.0 asks that the SRD attribution travel with the work as
+              distributed — the repo NOTICE/README a player never sees isn't enough.
+              A quiet credits line at the foot of Settings satisfies that. */}
+          <div
+            data-testid="srd-attribution"
+            style={{
+              marginTop: 32,
+              paddingTop: 14,
+              borderTop: "1px solid rgba(109,90,56,.28)",
+              fontSize: 11,
+              fontStyle: "italic",
+              lineHeight: 1.5,
+              color: "var(--ink-faint)",
+            }}
+          >
+            Rules text from <em>SRD 5.2</em> © Wizards of the Coast LLC, used under{" "}
+            <a
+              href="https://creativecommons.org/licenses/by/4.0/"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "var(--brass)", textDecoration: "none" }}
+            >
+              CC-BY-4.0
+            </a>
+            . Chronicle is not affiliated with or endorsed by Wizards of the Coast.
+          </div>
         </div>
       </div>
     </div>
