@@ -214,3 +214,21 @@ backends (`src/image-backends/`), new MCP tools (`src/mcp-servers/`), art styles
 
 Start here: read [`docs/adr/0001-core-architecture.md`](adr/0001-core-architecture.md),
 then the design doc, then skim the ADR index for the area you're touching.
+
+---
+
+## License
+
+Chronicle is [MIT licensed](../LICENSE) — permissive, no strings beyond keeping
+the copyright notice. You can fork it, modify it, ship it commercially, or close
+your fork; no CLA and no contributor agreement to sign.
+
+The one carve-out is `reference/srd/`, which holds excerpted *SRD 5.2* rules
+text © Wizards of the Coast LLC under
+[CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/) (see
+[ADR-0006](adr/0006-srd-grounded-rules-adjudication.md)). That text is not the
+project's to relicense and stays under CC-BY-4.0, which asks only that the
+attribution travel with it — already in place in `reference/srd/README.md` and
+in each file's header. [`NOTICE`](../NOTICE) at the repo root records this and
+everything else with terms of its own, including the models Chronicle expects on
+your ComfyUI host but never vendors.

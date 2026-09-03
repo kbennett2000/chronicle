@@ -11,12 +11,16 @@ access. See ADR-0006 for why this slice (Slice 10) chose SRD 5.2 over SRD
 
 SRD 5.2 is provided by Wizards of the Coast LLC under the **Creative
 Commons Attribution 4.0 International License (CC-BY-4.0)**. Full text of
-that license: https://creativecommons.org/licenses/by/4.0/legalcode.
+that license ships alongside this file as `CC-BY-4.0.txt`, and lives online
+at https://creativecommons.org/licenses/by/4.0/legalcode.
 Source: https://media.dndbeyond.com/compendium-images/srd/5.2/SRD_CC_v5.2.pdf,
 also mirrored at https://www.dndbeyond.com/srd. This project's use of and
 modifications to that text (excerpting, reformatting into per-topic
 Markdown files, occasional paraphrase for brevity) are its own; the
 underlying rules text is © Wizards of the Coast LLC, used under CC-BY-4.0.
+
+Note that this directory is the one part of Chronicle **not** covered by the
+project's MIT license — see `NOTICE` at the repo root.
 
 ## Scope (Slice 10 — core resolution)
 

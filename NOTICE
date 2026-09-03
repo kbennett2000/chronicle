@@ -1,0 +1,80 @@
+Chronicle
+Copyright (c) 2026 Kris Bennett
+
+Chronicle is released under the MIT License. See LICENSE for the full text.
+
+Take it, fork it, change it, sell it — MIT asks for essentially nothing back
+except that you keep a copy of the license and copyright notice with it.
+
+This file records the handful of things in this repository that are NOT
+Kris Bennett's to license, or that carry terms of their own. It exists so
+anyone forking Chronicle knows exactly what they are getting.
+
+
+--------------------------------------------------------------------------
+reference/srd/**  —  SRD 5.2, (c) Wizards of the Coast LLC, CC-BY-4.0
+--------------------------------------------------------------------------
+
+Everything under reference/srd/ is excerpted and paraphrased rules text from
+the Dungeons & Dragons System Reference Document 5.2 ("SRD 5.2", 2024 rules),
+provided by Wizards of the Coast LLC under the Creative Commons Attribution
+4.0 International License (CC-BY-4.0).
+
+That text is NOT covered by this project's MIT license and cannot be
+relicensed by this project. It stays under CC-BY-4.0 wherever it travels.
+In practice CC-BY-4.0 asks only that you keep the attribution intact, which
+costs you nothing that MIT does not already ask for.
+
+  Full license text:  reference/srd/CC-BY-4.0.txt
+                      https://creativecommons.org/licenses/by/4.0/legalcode
+  Source document:    https://media.dndbeyond.com/compendium-images/srd/5.2/SRD_CC_v5.2.pdf
+                      (also mirrored at https://www.dndbeyond.com/srd)
+  Scope and per-file attribution:  reference/srd/README.md
+  Why SRD 5.2 and not 5.1:         docs/adr/0006-srd-grounded-rules-adjudication.md
+
+This project's own contributions to that material — the selection of which
+rules to include, the reformatting into per-topic Markdown files, and the
+occasional paraphrase for brevity — are modifications made under CC-BY-4.0.
+The underlying rules text remains (c) Wizards of the Coast LLC.
+
+Wizards of the Coast and Dungeons & Dragons are trademarks of Wizards of the
+Coast LLC. Chronicle is an independent project and is not affiliated with,
+endorsed by, or sponsored by Wizards of the Coast.
+
+Bare game statistics that appear in source code rather than in reference/srd/
+— hit dice per class in src/character-gen.ts, the list of skills in
+web/src/lib/character-derive.ts — are facts and rules mechanics, not
+copyrightable expression, and are covered by this project's MIT license.
+
+
+--------------------------------------------------------------------------
+public/audio/**  —  original work, CC0 / public domain
+--------------------------------------------------------------------------
+
+The ambient audio (public/audio/ambient.mp3, .ogg, and the copies under
+web/public/audio/) contains no third-party samples or recordings. It is pure
+additive synthesis generated in this repository by scripts/generate-ambient.mjs
+and is released as CC0 / public domain by its author — more permissive than
+MIT, so there is nothing extra for you to do. See public/audio/README.md.
+
+
+--------------------------------------------------------------------------
+Bundled and generated assets
+--------------------------------------------------------------------------
+
+public/textures/*.png, web/public/textures/*.png, docs/assets/*, and the
+images under docs/design/handoff-2026-07/assets/ were created for this project
+(hand-authored, procedurally generated, or AI-generated placeholders for the
+design mockups). They carry no third-party terms and fall under this project's
+MIT license.
+
+No model weights, fonts, or CSS frameworks are vendored in this repository.
+Image and video generation reference checkpoints by filename only (SDXL, Wan,
+LTXV and any LoRAs) and expect them to be supplied on the operator's own
+ComfyUI host; those models carry their own licenses, which are between you and
+their publishers. Web fonts (Cormorant, Cormorant SC, Spectral — all SIL Open
+Font License) are loaded from the Google Fonts CDN at runtime rather than
+being bundled here.
+
+Third-party npm dependencies keep their own licenses; see the package.json
+files and node_modules/ after install.
