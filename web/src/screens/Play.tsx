@@ -8,11 +8,12 @@ import {
   illustrateMoment,
   animateMoment,
   getCampaignSettings,
+  getImageModels,
   type CharacterSheet,
   type StateSnapshot,
   type ImageOverrides,
 } from "../lib/campaign";
-import { FullPromptField } from "../components/FullPromptField";
+import { ImageEditor } from "../components/ImageEditor";
 import { useAuthedImage } from "../lib/useAuthedImage";
 import { useAuthedVideo } from "../lib/useAuthedVideo";
 import { parseChapterHeadings } from "../lib/session-log";
@@ -177,6 +178,7 @@ function TurnView({
   campaignId,
   onIllustrate,
   onRequestFullPrompt,
+  imageModels,
   drawing,
   drawError,
   imageNonce,
@@ -200,6 +202,9 @@ function TurnView({
   // ADR-0038: fetch the fully-assembled prompt for this moment (a no-render preview) so
   // the regenerate box's "edit the full prompt" can prefill it.
   onRequestFullPrompt?: (description: string) => Promise<string | null>;
+  // #156 (Slice C follow-up): local-engine checkpoints for the editor's model picker;
+  // [] hides it (grok engine / no local host).
+  imageModels: string[];
   drawing: boolean;
   drawError: string | null;
   imageNonce?: number;
@@ -220,16 +225,10 @@ function TurnView({
   // has been persisted server-side (i.e. it's a settled turn, not the one
   // still weaving). Already-illustrated moments show the image instead.
   const canIllustrate = turn.narration !== null && !turn.isError;
-  // Issue #66: regenerate affordance for an already-drawn moment — optionally
-  // with a refined prompt. Collapsed by default so it doesn't clutter the log.
+  // Issue #66: regenerate affordance for an already-drawn moment. Collapsed by
+  // default so it doesn't clutter the log; opening it reveals the full ImageEditor
+  // (#156), which owns its own prompt/style/negative/seed/etc. state.
   const [regenOpen, setRegenOpen] = useState(false);
-  // #132: pre-fill the regenerate box with the caption that made the current
-  // image (the turn's stored sceneCaption) so the player tweaks it (e.g.
-  // "…at night") instead of retyping. Blank on old, pre-caption turns.
-  const [regenDraft, setRegenDraft] = useState(turn.sceneCaption ?? "");
-  // ADR-0038: "edit the full prompt" state for this moment's regenerate box.
-  const [advanced, setAdvanced] = useState(false);
-  const [fullPrompt, setFullPrompt] = useState("");
   // Issue #68: inline edit of this turn's player message.
   const [editOpen, setEditOpen] = useState(false);
   const [editDraft, setEditDraft] = useState(turn.playerMessage);
@@ -375,15 +374,17 @@ function TurnView({
           )}
         </div>
       )}
-      {/* Issue #66: regenerate an existing moment image, optionally with a
-          refined prompt. Server overwrites the deterministic filename; the
-          parent bumps imageNonce so the new picture actually shows. */}
+      {/* Issue #66 / #156: regenerate an existing moment image. The full
+          ImageEditor (Slice C) opens in place, shadowing the game's look for one
+          redraw — style, negative, quality, seed, model, plus img2img "tweak" and
+          "keep face" (turn.image is the current still). Server overwrites the
+          deterministic filename; the parent bumps imageNonce so it shows. */}
       {canIllustrate && turn.image && (
         <div style={{ margin: "-6px 0 18px" }}>
           {!regenOpen ? (
             <button
               data-testid="regenerate-moment"
-              onClick={() => { setRegenDraft(turn.sceneCaption ?? ""); setRegenOpen(true); }}
+              onClick={() => setRegenOpen(true)}
               disabled={drawing}
               style={{
                 cursor: drawing ? "default" : "pointer",
@@ -399,67 +400,22 @@ function TurnView({
               {drawing ? "Redrawing…" : "↻ Regenerate image"}
             </button>
           ) : (
-            <div>
-              <textarea
-                value={regenDraft}
-                onChange={(e) => setRegenDraft(e.target.value)}
-                data-testid="regenerate-input"
-                rows={2}
-                placeholder="Optional: describe changes (e.g. at dusk, wider shot). Leave blank to just redraw."
-                style={{
-                  width: "100%",
-                  boxSizing: "border-box",
-                  background: "rgba(12,8,5,.5)",
-                  border: "1px solid rgba(109,90,56,.4)",
-                  borderRadius: 4,
-                  padding: "8px 11px",
-                  color: "var(--ink)",
-                  fontFamily: "var(--font-body)",
-                  fontSize: 13,
-                  resize: "vertical",
-                  outline: "none",
-                }}
-              />
-              <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-                <button
-                  data-testid="regenerate-submit"
-                  onClick={() => {
-                    // ADR-0038: a blank seed used to fall back to the deterministic
-                    // per-turn seed, so redraws barely changed. Send a fresh random seed
-                    // each Redraw; a filled full-prompt box replaces the whole prompt.
-                    const overrides: ImageOverrides = { imageSeed: Math.floor(Math.random() * 2 ** 31) };
-                    if (advanced && fullPrompt.trim()) overrides.promptOverride = fullPrompt.trim();
-                    onIllustrate(regenDraft, overrides);
-                    setRegenOpen(false);
-                    setRegenDraft("");
-                    setAdvanced(false);
-                    setFullPrompt("");
-                  }}
-                  disabled={drawing}
-                  style={{ cursor: drawing ? "default" : "pointer", padding: "6px 14px", borderRadius: 3, border: "none", background: "linear-gradient(180deg,#d8743e,#a8511f)", color: "#1c120a", fontFamily: "var(--font-display)", fontSize: 11.5, opacity: drawing ? 0.6 : 1 }}
-                >
-                  Redraw
-                </button>
-                <button
-                  onClick={() => { setRegenOpen(false); setRegenDraft(""); setAdvanced(false); setFullPrompt(""); }}
-                  disabled={drawing}
-                  style={{ cursor: "pointer", padding: "6px 14px", borderRadius: 3, border: "1px solid rgba(109,90,56,.4)", background: "transparent", color: "var(--ink-dim)", fontFamily: "var(--font-display)", fontSize: 11.5 }}
-                >
-                  Cancel
-                </button>
-              </div>
-              {/* ADR-0038: take over the entire assembled prompt for this scene. */}
-              {onRequestFullPrompt && (
-                <FullPromptField
-                  onRequestFullPrompt={onRequestFullPrompt}
-                  description={regenDraft.trim() || (turn.sceneCaption ?? "")}
-                  enabled={advanced}
-                  onEnabledChange={setAdvanced}
-                  value={fullPrompt}
-                  onChange={setFullPrompt}
-                />
-              )}
-            </div>
+            <ImageEditor
+              initialDescription={turn.sceneCaption ?? ""}
+              imageModels={imageModels}
+              currentImageRelPath={turn.image}
+              busy={drawing}
+              error={drawError}
+              onRegenerate={(description, overrides) => {
+                // onIllustrate → handleIllustrateMoment(i, description, false, overrides),
+                // which busts the image cache. ImageEditor already injects a fresh random
+                // seed on a blank seed field, so no seed handling is needed here.
+                onIllustrate(description, overrides);
+                setRegenOpen(false);
+              }}
+              onRequestFullPrompt={onRequestFullPrompt}
+              onClose={() => setRegenOpen(false)}
+            />
           )}
           {drawError && (
             <div data-testid="illustrate-error" style={{ fontSize: 11, color: "var(--ember)", marginTop: 4 }}>
@@ -688,6 +644,19 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
       cancelled = true;
     };
   }, [connection, campaignId]);
+
+  // #156 (Slice C follow-up): local-engine checkpoints for the moment editor's model
+  // picker; [] (hidden) when ComfyUI is unreachable (grok engine or no local host).
+  const [imageModels, setImageModels] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    getImageModels(connection)
+      .then((m) => !cancelled && setImageModels(m))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [connection]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1041,6 +1010,7 @@ export function Play({ connection, campaignId, onGoHome, onOpenSettings }: PlayP
                 const result = await illustrateMoment(connection, campaignId, i, description, false, undefined, true);
                 return result.previewPrompt ?? null;
               }}
+              imageModels={imageModels}
               drawing={illustratingTurn === i}
               drawError={illustrateErrors[i] ?? null}
               imageNonce={imageNonces[i]}
