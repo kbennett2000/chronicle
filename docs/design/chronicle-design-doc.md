@@ -1,5 +1,19 @@
 # Chronicle — Design Doc v0.1
 
+> **Status: historical planning document.** This is the original v0.1 doc,
+> written before any of Chronicle was built. Sections 1–8 still describe how the
+> thing actually works and are worth reading as the conceptual reference. But
+> §9–§13 are planning content — roadmaps, open questions, a handoff gate — and
+> most of what they anticipate has since shipped. They're kept for the record of
+> what was originally believed, not as a description of the current system.
+>
+> **`docs/adr/` is authoritative.** Where this doc and an ADR disagree, the ADR
+> wins. See [`../adr/README.md`](../adr/README.md) for the index.
+>
+> Three areas postdate this doc entirely and aren't mentioned anywhere below:
+> multi-user accounts (ADR-0019), video generation (ADR-0026/0034/0035), and
+> session rotation (ADR-0040/0041).
+
 ## 1. Vision
 
 A solo-play D&D 5e app for mobile, where a persistent agentic backend acts as
@@ -214,24 +228,50 @@ ADR-0027), plus the DM-engine **provider toggle** and **model selector**
   (ADR-0018 Slice 5).
 
 ## 9. Open Decisions To Confirm With Her Directly
+
+> **Both resolved.** The visual/prose balance settled through the mobile UI and
+> the later desktop layout (ADR-0021/0022); the rules question settled as
+> SRD-grounded adjudication (ADR-0006), with the DM citing SRD text rather than
+> improvising mechanics.
+
 - How much visual competes with prose — dashboard-heavy vs. book-with-a-dice-tray.
 - Strict SRD rules-following vs. some flexibility, once she's tried both.
 
 ## 10. Vertical Slice Roadmap
+
+> **All shipped.** This roadmap is complete — every item below either landed or
+> was deliberately dropped, and development has long since moved past it. The
+> per-item notes say where each one ended up.
+
 1. Headless Agent SDK session, one campaign, one character, text-only loop,
    state files as in §3. No UI polish, no images, no seed tables. Goal:
    prove the persistence-fixes-drift hypothesis over ~10+ turns.
-2. Mobile-first chat UI wrapping Slice 1.
-3. Seed tables + content registry (repetition fix).
-4. SRD-grounded rules adjudication.
+   — *Shipped (ADR-0001). The core bet held up.*
+2. Mobile-first chat UI wrapping Slice 1. — *Shipped.*
+3. Seed tables + content registry (repetition fix). — *Shipped.*
+4. SRD-grounded rules adjudication. — *Shipped (ADR-0006), with host-side
+   permission enforcement on top (ADR-0008).*
 5. Image generation via Grok Build headless, trigger events, caching.
+   — *Shipped (ADR-0009), and since generalised into a pluggable backend
+   (ADR-0027) that also runs local ComfyUI/SDXL.*
 6. Prompt template/profile system, cosmetic vs. structural split.
+   — *Shipped, and extended by the settings-tier split in ADR-0025.*
 7. **[Removed — see §13]** Real dice/character-sheet UI is deferred to the
    Claude Design handoff rather than built by CC first.
+   — *Stayed removed as a slice, though dice did end up host-side and
+   deterministic (ADR-0011) and the full sheet arrived with ADR-0015/0022.*
 8. Desktop dockable panel layout (optional, lower priority than mobile;
    also likely folds into the Design handoff rather than a CC slice).
+   — *Shipped after all, as its own work: ADR-0021/0022.*
 
-## 11. Adaptive Music (scoped for later, not yet a slice)
+## 11. Adaptive Music
+
+> **Shipped (ADR-0020)** — the heading used to read "scoped for later, not yet a
+> slice," which is no longer true. What landed differs from the sketch below in
+> one significant way: alongside local files, playback can stream from a
+> Navidrome server on the LAN, so the library isn't limited to bundled loops.
+> The play-screen mute/volume control called for below did get built, and it is
+> on the play screen rather than buried in settings.
 
 Direct feedback from testing the reference app: she likes music that shifts
 with scene atmosphere, but sometimes mutes it — the friction of muting
@@ -277,6 +317,12 @@ alongside the existing provider + model selection (§8) in
   other three dials.
 
 ## 13. Claude Design Handoff Gate
+
+> **Gate passed; handoff happened.** All three criteria below were met and the
+> handoff package was assembled — see
+> [`handoff-2026-07/`](handoff-2026-07/README.md) and the backend contract that
+> went with it. Everything below is the reasoning that led up to that, kept for
+> the record.
 
 The mobile UI built so far (Slice 3 onward) is functional scaffolding, not
 the intended final UX. Full UI/UX polish is deliberately deferred to
